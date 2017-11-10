@@ -1,0 +1,389 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToChkBut.SPF
+;# Task:      BBK - BALLUFF
+;# Version:   V06.00.08
+;# Date:      18.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 18.08.2017 / Simons
+; - Neuversionierung
+; - Simulation eingefuehrt
+; - mcDBB_TlCheckCMD hinzu
+; - formale Aenderungen
+;
+; V06.00.07 - 14.07.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 28.04.2017 / Simons
+; - Neuversionierung
+; - TlData(...)
+;
+; V06.00.05 - 01.04.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.02 - 16.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - Ersetzen von $AC_PARAM[0]/[1]
+;   durch SYG_BM[1]/SYG_RM[1] (Kanal 2)
+;
+; V04.00.00 - 20.01.2015 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; Mechanische Bohrerbruchkontrolle
+; im Magazinraum
+;
+; Das im Parameter iTNo uebergebene Werkzeug
+; auf Bohrerbruch pruefen
+;
+; Tastersignal:
+; 0 - aktiviert
+; 1 - nicht aktiviert
+;
+; Eingangsparameter:
+; ------------------
+;
+; iToDo=
+; 1 - Wz teachen
+; 2 - Wz pruefen ("Bohrerbruchkontrolle")
+;
+; iTNo    =  interne T-Nummer des zu pruefenden Werkzeugs
+; rLength =  Laenge des zu pruefenden Werkzeugs
+;
+; bShowError =
+; 0 - keine Alarme absetzen (z.B. bei Batchbetrieb)
+;     (Auswertung durch aufrufendes Programm)
+; 1 - bei Fehler NC-Alarm ausloesen
+;
+; Rueckgabeparameter:
+; -------------------
+;
+; bIsBroken =
+; 0 - Kein Werkzeugbruch erkannt
+; 1 - Werkzeugbruch erkannt
+;
+; iAlarmNo    = Alarmnummer
+; sAlarmParam = Zusatztext
+;
+; Aufruf in ToBreak (Kanal 2)
+;------------------------------------
+
+PROC ToChkBut (INT iToDo, INT iTNo, REAL rLength, BOOL bShowError, VAR BOOL bIsBroken, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam) SAVE DISPLOF SBLOF
+
+DEFINE mcrCheckPos AS SYG_RM[1]
+DEFINE mcbWasActivated AS SYG_BM[1]
+
+DEF STRING[32] sCycName="ToChkBut V06.00.08"
+;
+DEF BOOL bMoveSlow=FALSE, bDoTeach, bDoCheck, bSelMeasNoNewVal, bWasActivated
+;
+DEF INT  icMeas=1, icCheck=2, iPosZ, iCount, iMeasCutNo
+;
+DEF REAL rVeloX, rVeloZ, rSafeBreakPosZ, rSetPointZ, rFeedVal, rc1x0mm, rc50x0mm, rc250x0mm
+
+iAlarmNo=0 sAlarmParam="" bIsBroken=FALSE rFeedVal=2000*grInchMetr rVeloX=$MA_POS_AX_VELO[mcAxX1] rVeloZ=$MA_POS_AX_VELO[mcAxZ1] rc1x0mm=1.0*grInchMetr rc50x0mm=50.0*grInchMetr rc250x0mm=250.0*grInchMetr
+
+IF (iTNo<=0)
+  ;
+  ;Kein Werkzeug angegeben
+  ;
+  iAlarmNo=AL_InvalidMissingInput
+  GOTOF ENDE
+ENDIF
+;
+IF (giMagState<>22)
+  ;
+  ;Falscher Magazinstatus
+  ;
+  iAlarmNo=AL_TlNoInBreakChkPos
+  GOTOF ENDE
+ENDIF
+
+;Toleranzwerte bestimmen
+;-----------------------
+IF (grToCheckTol>grMaxMeasTol)
+  grToCheckTol=grMaxMeasTol
+ENDIF
+;
+IF (grToCheckTol<grMinMeasTol)
+  grToCheckTol=grMinMeasTol
+ENDIF
+;
+IF (grToMeasTol>grMaxMeasTol)
+  grToMeasTol=grMaxMeasTol
+ENDIF
+;
+IF (grToMeasTol<grMinMeasTol)
+  grToMeasTol=grMinMeasTol
+ENDIF
+
+;Absolute Z1-Position, bei der selbst
+;beim laengsten Wz und horizontalem
+;HG keine Kollision zwischen der
+;Wz-Spitze und Kontaktplatte der
+;Bohrerbrucheinrichtung auftritt
+;------------------------------------
+IF (gbMagWithFixedGuide)
+  rSafeBreakPosZ=grToBreakPosZ+grHgMaxSwingRad
+ELSE
+  rSafeBreakPosZ=grToBreakPosZ-grHgMaxSwingRad
+ENDIF
+
+;Auftrag
+;-------
+bDoTeach=(iToDo==icMeas) bDoCheck=(NOT bDoTeach)
+
+IF (bDoTeach)AND(rLength<grMinMeasToolLen)
+  ;
+  ;Beim Lernen Wz Laenge auf Minimum begrenzen
+  rLength=grMinMeasToolLen bMoveSlow=TRUE
+ENDIF
+
+;Rechnerischer Schaltpunkt
+;-------------------------
+IF (gbMagWithFixedGuide)
+  rSetPointZ=(grToBreakPosZ+rLength)
+ELSE
+  rSetPointZ=(grToBreakPosZ-rLength)
+ENDIF
+
+;-----------------------------------
+; Anfahren an die Bohrerbrucheinheit
+;-----------------------------------
+;
+;Messzylinder zurueck, Kuemi aus
+M_ProbeCycBackw0 M=QU(MQ_TlTapeCleanOff)
+;
+mcDBB_TlCheckCmd='B1' mcbWasActivated=FALSE mcrCheckPos=0
+;
+;Sonstige Bedingungen:
+;---------------------
+;
+;HG gehoben und horizontal geschwenkt
+;HG ausserhalb des Doppelgreifers
+;(z.B. nach WzW)
+;
+CANCEL(SyncID_ToBreak,SyncID_ToBreak+1,SyncID_ToBreak+2,SyncID_ToBreak+3,SyncID_ToBreak+4)
+;
+ID=SyncID_ToBreak   WHENEVER (NOT mcbDBB_HGHorizontal)OR(NOT mcbDBB_HGLifted) DO $AC_OVR=0 $AA_OVR[mcAxZ1]=0
+;Immer wenn Taster ausgeloest hat
+ID=SyncID_ToBreak+1 WHENEVER (mcbDBB_TlCheckSwitched)OR(mcbWasActivated) DO mcbWasActivated=TRUE $AC_OVR=0 $AA_OVR[mcAxZ1]=0
+;Achsposition bis 1 IPO-TAkt vor Tasterausloesung
+ID=SyncID_ToBreak+2 WHENEVER (NOT mcbDBB_TlCheckSwitched)AND(NOT mcbWasActivated) DO mcrCheckPos=$VA_IM[mcAxZ1]
+;Achsposition bei Tasterausloesung
+ID=SyncID_ToBreak+3 WHEN (mcbDBB_TlCheckSwitched)AND($AA_IM[mcAxZ1]<(grToBreakPrePosZ-rLength)) DO SETAL(AL_CheckBreakCtrlUnit)
+;
+IF (gbPLCSimActive)
+  ID=SyncID_ToBreak+4 WHEN ($AA_IM[mcAxZ1]>rSetPointZ) DO mcDBB_TlCheckCmd=(mcDBB_TlCheckCmd B_OR 128)
+ENDIF
+;
+IF (gbMagWithFixedGuide)
+  ;
+  IF (NOT bMoveSLOW)
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=(grToBreakPrePosZ+rLength)
+  ELSE
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=rSafeBreakPosZ
+  ENDIF
+  ;
+  ;Messzylinder vor
+  M_ProbeCycForw0
+  ;
+ELSE
+  ;
+  IPOBRKA(mcAxX1,100)
+  IPOBRKA(mcAxZ1,100)
+  ADISPOSA(mcAxX1,1,250*grInchMetr)
+  ADISPOSA(mcAxZ1,1,250*grInchMetr)
+  ;
+  IF (grToBreakPosX<grLaneX[1])AND($AA_IM[mcAxZ1]<grDGProtectZ+rc1x0mm)
+    ;zum Schutz des DG
+    FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grDGProtectZ+rc250x0mm
+  ENDIF
+  ;
+  ; Sichere Ausgangslage ohne(!) Beruecksichtigung Wz-Laenge
+  FINEA[mcAxX1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grToBreakPosX POS[mcAxZ1]=rSafeBreakPosZ
+  IF (NOT bMoveSLOW)
+    FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=(grToBreakPrePosZ-rLength)
+  ENDIF
+ENDIF
+;
+;--------
+;Antasten
+;--------
+;
+;Restweg loeschen, wenn Taster ausgeloest hat
+WHEN (mcbDBB_TlCheckSwitched) DO DELDTG(mcAxZ1)
+;
+;Ueberlauf, um auch etwas kuerzere Wz zu erfassen
+IF (gbMagWithFixedGuide)
+  FINEA[mcAxZ1] FA[mcAxz1]=rFeedVal POS[mcAxZ1]=rSetPointZ-grToBreakOverrunZ
+ELSE
+  FINEA[mcAxZ1] FA[mcAxz1]=rFeedVal POS[mcAxZ1]=rSetPointZ+grToBreakOverrunZ
+ENDIF
+;
+;Falls Schalter noch nicht ausgeloest hat,
+;0.5 s warten, dann zur Auswertung
+;
+iCount=0
+WHILE (NOT mcbDBB_TlCheckSwitched)AND(iCount<=5)
+  iCount=iCount+1
+  G4 F.1
+ENDWHILE
+;
+CANCEL(SyncID_ToBreak,SyncID_ToBreak+1,SyncID_ToBreak+2,SyncID_ToBreak+3,SyncID_ToBreak+4)
+
+;-----------
+; Auswertung
+;-----------
+;
+bWasActivated=mcbWasActivated
+;
+IF (bWasActivated)
+  ;
+  ;Taster hat waehrend Verfahrbewegung ausgeloest
+  ;
+  IF (gbMagWithFixedGuide)
+    grProbVal=(mcrCheckPos-grToBreakPosZ)
+  ELSE
+    grProbVal=(grToBreakPosZ-mcrCheckPos)
+  ENDIF
+ENDIF
+
+;Wz Pruefen - Schneidennummer und Kennungen Ermitteln
+OEM_TlData(iTNo,mcGetMeasCut)
+;
+iMeasCutNo=OEM_iCutNo bSelMeasNoNewVal=OEM_bSelMeasNoNewVal
+;
+IF (bDoCheck)
+  ;
+  ;Pruefen
+  ;-------
+  ;
+  IF (bWasActivated)
+    ;
+    ;Taster hat waehrend Verfahrbewegung ausgeloest
+    ;
+    IF ((rSetPointZ-mcrCheckPos)>grToCheckTol)
+      ;
+      ;Wz viel laenger als in den Wz-Daten angegeben
+      ;
+      bIsBroken=TRUE
+    ELSE
+      ;
+      ;positives Pruefergebnis
+      ;
+    ENDIF
+  ELSE
+    ;
+    ;Taster hat nicht ausgeloest
+    ;
+    bIsBroken=TRUE
+  ENDIF
+ENDIF
+;
+IF (bDoTeach)
+  ;
+  ; Werkzeug soll gelernt werden
+  ;-----------------------------
+  ;
+  IF (bWasActivated)
+    ;
+    ;Taster hat waehrend Verfahrbewegung ausgeloest
+    ;
+    IF (NOT bMoveSlow)AND(ABS(rSetPointZ-mcrCheckPos)>grToMeasTol)
+      ;
+      ;Wz Toleranz fuer erstmaliges Pruefen ist ueberschritten
+      ;
+      bIsBroken=TRUE
+      ;
+    ELSE
+      ;
+      ;Taster hat innerhalb der Messtoleranz geschaltet
+      ;
+      ;<WZ gesperrt> zuruecksetzen
+      TlData(iTNo,mcResLockTl)
+      ;
+      ;<Wz ist vermessen> und wenn nicht abgewaehlt, neuen Sollwert setzen
+      OEM_TlData(iTNo,mcSetMeasured_Val,iMeasCutNo,grProbVal)
+      ;
+    ENDIF
+  ELSE
+    ;
+    ;Taster hat nicht ausgeloest
+    ;
+    bIsBroken=TRUE
+  ENDIF
+ENDIF
+;
+IF (bIsBroken)
+  ;
+  ;<Wz gesperrt> setzen
+  TlData(iTNo,mcSetLockTl)
+  ;
+  ;WzStatusbits <Wz ist vermessen> (bei HHD TM alle Schneiden), <Wz ist getestet> Zuruecksetzen,Wz gebrochen setzen
+  OEM_TlData(iTNo,mcResMeasured,iMeasCutNo)
+  ;
+ENDIF
+
+
+; Rueckzug
+;---------
+;
+;Z auf Schaltpunkt +/- 50mm (ohne erfolgreiche Messung nur +/- 50mm zurueck)
+;
+IF (mcrCheckPos>0)
+  iPosZ=mcrCheckPos
+ELSE
+  iPosZ=$AA_IM[mcAxZ1]
+ENDIF
+;
+IF (gbMagWithFixedGuide)
+  ;
+  COARSEA[mcAxZ1] FA[mcAxz1]=rVeloZ POS[mcAxZ1]=iPosZ+rc50x0mm
+  ;
+  ; Messzylinder zurueck
+  M_ProbeCycBackw0
+  ;
+ELSE
+  ;
+  COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxz1]=rVeloZ POS[mcAxX1]=grToBreakPosX POS[mcAxZ1]=iPosZ-rc50x0mm
+ENDIF
+;
+STOPRE
+;HG mit Werkzeug geklemmt horizontal in Position fuer Bohrerbruchkontrolle
+giMagState=22
+
+;====
+ENDE:
+;====
+;
+M_TlTapeCleanOff0
+;
+IF (iAlarmNo>0)
+  ;
+  ;Statusbits BBK
+  mcDBB_TlCheckCmd=0
+  ;
+  IF(bShowError)
+    SETAL(iAlarmNo,sAlarmParam)
+  ENDIF
+ENDIF
+;
+RET

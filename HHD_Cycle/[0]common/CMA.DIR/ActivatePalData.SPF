@@ -1,0 +1,190 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ActivatePalData.SPF
+;# Task:      Programmname und Pfad
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 24.11.2016 / Simons
+; - immer Tool Planning beruecksichtigen
+;
+; V06.00.05 - 16.11.2016 / Simons
+; - EES und NC Extern hinzu
+;
+; V06.00.05 - 12.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 28.08.2016 / Simons
+; - Neuversionierung
+; - gbToCheckAtTc entfernt
+;
+; V06.00.03 - 22.06.2016 / Simons
+; - Neuversionierung
+; - MPF.DIR bei Palettenspeicher hinzu
+;
+; V04.00.00 - 05.04.2016 / Fengler
+; - Vorlage
+;
+;------------------------------------
+
+PROC ActivatePalData
+
+DEF STRING[32] sPSType="", sPathPrefix="", sWKSDIR, sMPFDIR, sWPD, sMPF, sArea
+DEF STRING[200] sProg
+
+DEF BOOL bWithProgExistCheck=TRUE, bIsWarmUp
+;
+DEF INT iClampBufNo
+
+bIsWarmUp=((IN_WarmUp)AND(gsMMC_Prog[0]<>"")AND(gsMMC_Path[0]<>"")) gbProgExist=FALSE gbStopIfNotMeasured=FALSE gbErrMsgOnToCheck=FALSE giMPSActivPal=BufNo
+
+IF (bIsWarmUp)
+  ;
+  ;Warmlauf ist angewaehlt und ein spezielles Warmlaufprogramm gewaehlt
+  ;
+  giActDeviceNo=giMMC_Device[0]
+ELSE
+  giActDeviceNo=giMMC_Device[BufNo]
+ENDIF
+
+IF (giActDeviceNo<0)OR(giActDeviceNo>mcNumExtDevices)
+  ;
+  SETAL(AL_NotAvailable,"DEV"<<giActDeviceNo)
+ENDIF
+;
+IF (giActDeviceNo==0)
+  ;
+  ;CALL "/_N_WKS_DIR/_N_TEST_WPD/_N_PROG_MPF"
+  ;
+  sArea="/_N_" sWKSDIR=(sArea<<"WKS_DIR"<<sArea) sMPFDIR=(sArea<<"MPF_DIR") sWPD="_WPD" sMPF="_MPF"
+ELSE
+  ;
+  sArea="/" sWKSDIR=("WKS.DIR"<<sArea) sMPFDIR=("MPF.DIR") sWPD=".WPD" sMPF=".MPF"
+  ;  
+  IF (gbWithEES)
+    ;
+    ;CALL "//EXT1:/WKS.DIR/TEST.WPD/PROG.MPF"
+    ;
+    sPathPrefix=gsDeviceName[giActDeviceNo]
+  ELSE
+    ;
+    ;$SC_EXT_PROG_PATH=//EXT1:/
+    ;EXTCALL "WKS.DIR/TEST.WPD/PROG.MPF"
+    ;    
+    $SC_EXT_PROG_PATH=gsDeviceName[giActDeviceNo] bWithProgExistCheck=FALSE
+  ENDIF
+ENDIF
+;
+IF (bIsWarmUp)
+  ;
+  ;Warmlauf
+  ;
+  IF (TOUPPER(gsMMC_Path[0])=="MPF.DIR")
+    Prog_Path=(sMPFDIR) Prog_Name=gsMMC_Prog[0]
+  ELSE
+    Prog_Path=(sWKSDIR<<gsMMC_Path[0]<<sWPD) Prog_Name=gsMMC_Prog[0]
+  ENDIF
+ELSE
+  ;
+  IF (BufNo>0)
+    ;
+    ;gueltige Palettenwechsler Position
+    ;
+    Prog_Name=gsMMC_Prog[BufNo] Pal_No=giMMC_Pal[0,BufNo]
+    ;
+    IF (TOUPPER(gsMMC_Path[BufNo])=="MPF.DIR")
+      Prog_Path=sMPFDIR
+    ELSE
+      ;
+      CFG_MAN("PS",sPSType)
+      IF (sPSType<>"")
+        ;
+        ;MPS, LPS oder FASTEMS aktiviert
+        ;
+        IF (gsMMC_Path[BufNo+2]<>"")
+          ;
+          ;Zentrales Programmverzeichnis vorgegeben
+          ;
+          IF (gsMMC_Path[BufNo+2]=="MPF.DIR")
+            gsMMC_Path[BufNo]=gsMMC_Path[BufNo+2] Prog_Path=(sMPFDIR) bWithCallPath=FALSE
+          ELSE
+            gsMMC_Path[BufNo]=gsMMC_Path[BufNo+2] Prog_Path=(sWKSDIR<<gsMMC_Path[BufNo]<<sWPD)
+          ENDIF
+        ELSE
+          ;
+          ;Pfad und Programmname sind gleich
+          gsMMC_Path[BufNo]=gsMMC_Prog[BufNo] Prog_Path=(sWKSDIR<<gsMMC_Path[BufNo]<<sWPD)
+        ENDIF
+      ELSE
+        ;
+        ;ohne Palettenspeicher
+        ;
+        Prog_Path=(sWKSDIR<<gsMMC_Path[BufNo]<<sWPD)
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    ;Number of pallet data buffer is not valid.
+    ;
+    WHILE (BufNo==0)
+      M0
+    ENDWHILE
+  ENDIF
+ENDIF
+;
+sProg=sPathPreFix<<Prog_Path<<sArea<<Prog_Name<<sMPF
+IF (bWithProgExistCheck)
+  ;
+  IF ISFILE(sProg)
+    ;
+    CALLPATH(sPathPreFix<<Prog_Path)
+    ;
+    PROGNAME=sProg gbProgExist=TRUE
+  ENDIF
+ELSE
+  ;
+  PROGNAME=sProg gbProgExist=TRUE
+ENDIF
+;
+;Reset CustomerHome cycle
+CustomerHome=""
+;
+IF (BufNo==0) GOTOF ENDE
+ 
+;Hmi(Tool Planning) setzt Wert nach erhalt auf Null
+giHmiMessageBox=1
+
+;Pallet Status
+Pal_Status=giMMC_Pal[1,BufNo]
+;Erstbearbeitung (neue Palette)
+Pal_New=((giMMC_Pal[3,BufNo] B_AND 'B1')<>0)
+;Automatisch Loesen
+Unclamp_Auto=((giMMC_Pal[3,BufNo] B_AND 'B10')<>0)
+;Last program step
+Working_Step=giMMC_Pal[2,BufNo]
+;
+IF (BufNo==1)OR(BufNo==2)
+  ;
+  ;Clamping Cycle
+  iClampBufNo=((BufNo-1)*2) giClampCycle=$A_DBB[420+iClampBufNo] giClampStatus=$A_DBB[421+iClampBufNo]
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET
+

@@ -1,0 +1,539 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetMagSt.SPF
+;# Task:      Magazinstatus
+;# Version:   V06.00.08
+;# Date:      31.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 31.08.2017 / Simons
+; - Neuversionierung
+; - HG nicht immer Loesen
+; - formale Aenderungen
+;
+; V06.00.06 - 28.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 09.10.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+; - HHD TM (04.02.02 / September 2016, Balles)
+; - Ueberarbeitung Laufzeit
+;
+; V04.00.00 - 07.05.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Ermittlung des aktuellen Magazinstatus
+;
+;  0 = undefiniert
+; 10 = HG leer in Werkzeugwechselposition
+; 11 = HG mit Werkzeug geloest in Werkzeugwechselposition
+; 12 = HG mit Werkzeug geklemmt in Werkzeugwechselposition
+; 20 = HG leer horizontal im Bereich Doppelgreifer
+; 21 = HG mit Werkzeug geklemmt horizontal im Bereich Doppelgreifer
+; 22 = HG mit Werkzeug geklemmt horizontal in Position fuer Bohrerbruchkontrolle
+; 30 = Leeres HG vertikal gehoben
+; 31 = HG mit Wkz vertikal gesenkt in Fahrgasse
+; 32 = HG mit Wkz horizontal gehoben in Fahrgasse
+; 33 = HG mit Wkz horizontal gehoben im Bereich Magazin
+; 34 = HG mit Wkz horizontal gehoben in Zielgasse
+; 40 = Leeres HG vertikal gesenkt
+; 50 = ----
+; 52 = ----
+; 81 = HG geloest vertikal gesenkt an Quellmagazinplatz
+; 82 = HG geklemmt vertikal gesenkt an Quellmagazinplatz
+; 83 = HG geklemmt vertikal gesenkt zwischen Quellmagazinplatz und Fahrgasse
+; 91 = HG geloest vertikal gesenkt an Zielmagazinplatz
+; 92 = HG geklemmt vertikal gesenkt an Zielmagazinplatz
+; 93 = HG geklemmt vertikal gesenkt zwischen Zielmagazinplatz und Fahrgasse
+;
+;------------------------------------
+
+PROC GetMagSt DISPLOF
+
+DEF STRING[32] sCycName="GetMagSt V06.00.08", sAlarmParam=""
+;
+DEF BOOL bXDir, bMiddleZ, bMiddleX, bDGInBasePos, bHGClamped, bHGUnClamped, bComeInTC, bHGInTCPos, bHGHorizontal, bHGLifted, bHGVertical, bHGLowered
+;
+DEF INT iAlarmNo=0, iAlarmNoShown=0, iTmpFLog, iCount
+;
+DEF REAL rActPosX, rActPosZ, iCalcPos1, iCalcPos2
+
+;Status
+rActPosX=$AA_IM[mcAxX1] rActPosZ=$AA_IM[mcAxZ1] bMiddleZ=OUT_OnMiddleZ bMiddleX=OUT_OnMiddleX bDGInBasePos=OUT_DGRotInBasePos bHGClamped=mcbDBB_HGClamped bHGUnClamped=mcbDBB_HGUnClamped bComeInTC=OUT_ComeInTC bHgInTcPos=OUT_HgInTcPos bHGHorizontal=mcbDBB_HGHorizontal bHGLifted=mcbDBB_HGLifted bHGVertical=mcbDBB_HGVertical bHGLowered=mcbDBB_HGLowered
+giTNoHg=$TC_MPP6[9998,mcLocHG] giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2] giMagState=0 giActLaneX=0 giActLaneZ=0
+
+IF ((giTNoDG1<>0)OR(giTNoDG2<>0))
+  iAlarmNo=AL_DGNotEmpty
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (NOT bDGInBasePos)
+  iAlarmNo=AL_DgNotInBasePos
+  GOTOF HandleAlarm
+ENDIF
+
+;Status: DG Leer, horizontal oder vertikal
+
+IF (bMiddleX)
+  ;
+  ;HG auf gueltiger Fahrgasse X1
+  ;
+  ;Gassenindex ermitteln
+  FOR iCount=1 TO giNumLaneX
+    IF (ABS(rActPosX-grLaneX[iCount])<=grRange)
+      giActLaneX=iCount
+    ENDIF
+  ENDFOR
+ENDIF
+;
+IF (bMiddleZ)
+  ;
+  ;auf Mittelgasse Z1
+  ;
+  ;Gassenindex ermitteln
+  FOR iCount=1 TO giNumLaneZ
+    IF (ABS(rActPosZ-grLaneZ[iCount])<=grRange)
+      giActLaneZ=iCount
+    ENDIF
+  ENDFOR
+ENDIF
+
+IF (giTNoHg>0)
+  ;
+  ;Es sollte ein Wz im HG sein
+  ;
+  IF (NOT bHGClamped)
+    M_HgClamp1
+    bHGClamped=mcbDBB_HGClamped bHGUnClamped=mcbDBB_HGUnClamped
+  ENDIF
+  ;
+  OEM_TlData(giTNoHg)
+  gbHGNoTapeCl=OEM_bSelHGNoTapeCl gbHGHeavyTl=OEM_bHeavyTlHG gbHGBigTl=OEM_bBigTlHG giMMC_TNo=giTNoHg gsMMC_TName=$TC_TP2[giTNoHg] giMMC_DuploNo=$TC_TP1[giTNoHg] giToDuplo=$TC_TP1[giTNoHg]
+ELSE
+  ;
+  ;Kein Wz im HG
+  ;
+  IF (NOT bHGUnClamped)AND(bHGVertical)AND(NOT bHGLowered)
+    M_HgUnClamp1
+    bHGUnClamped=mcbDBB_HGUnClamped bHGClamped=mcbDBB_HGClamped
+  ELSE
+    ;
+    ;Ein Leeres HG wird durch die PLC geklemmt,
+    ;nach dem WzW soll es geklemmt bleiben, da es zum folgenden Schwenken wieder geklemmt werden muss.
+    ;
+  ENDIF
+  ;
+  gbHGBigTl=FALSE gbHGHeavyTl=FALSE gbHGNoTapeCl=FALSE giMMC_TNo=0 gsMMC_TName="" giMMC_DuploNo=0 giToDuplo=0
+ENDIF
+
+IF (gbMagWithFixedGuide)
+  ;
+  ;altes Magazin
+  ;
+  IF (bHgInTcPos)OR(bComeInTC)
+    ;
+    ;HG in Werkzeugwechselposition
+    ;
+    IF (bHGHorizontal)AND(bHGLifted)AND(NOT bHGClamped)
+      M_HgClamp1
+      bHGUnClamped=mcbDBB_HGUnClamped bHGClamped=mcbDBB_HGClamped
+    ENDIF
+    ;
+    IF (giTNoHg>0)
+      ;
+      ;Wz in HG
+      ;
+      IF (bHGHorizontal)AND(bHGLifted)
+        ;
+        IF (bHgInTcPos)
+          ;
+          ;HG mit Werkzeug geklemmt in Werkzeugwechselposition
+          giMagState=12
+          ;
+        ELSE
+          ;
+          ;HG mit Werkzeug geklemmt horizontal im Bereich Doppelgreifer
+          giMagState=21
+          ;
+        ENDIF
+      ELSE
+        ;
+        ;HG mit Wkz vertikal gesenkt in Fahrgasse
+        giMagState=31
+        ;
+      ENDIF
+    ELSE
+      ;
+      ;kein Wz in HG
+      ;
+      IF (bHGHorizontal)AND(bHGLifted)
+        ;
+        IF (bHgInTcPos)
+          ;
+          ;HG leer in Werkzeugwechselposition
+          giMagState=10
+          ;
+        ELSE
+          ;
+          ;HG leer horizontal im Bereich Doppelgreifer
+          giMagState=20
+          ;
+        ENDIF
+      ELSE
+        ;
+        ;Leeres HG vertikal gesenkt
+        giMagState=40
+        ;
+      ENDIF
+    ENDIF
+    ;
+    GOTOF ENDE
+  ENDIF
+ELSE
+  ;
+  ;neues Magazin
+  ;
+  IF (bComeInTC)
+    ;
+    ;HG im Einlaufbereich fuer WzW
+    ;
+    IF (NOT bHGHorizontal)OR(NOT bHGLifted)
+      iAlarmNo=AL_HGNotLiftedHoriz
+      GOTOF HandleAlarm
+    ENDIF
+    ;
+    IF (giTNoHg>0)
+      ;
+      ;Wz im HG
+      ;
+      IF (bHgInTcPos)
+        ;
+        ;HG mit Werkzeug geklemmt in Werkzeugwechselposition
+        giMagState=12
+        ;
+      ELSE
+        ;
+        ;HG mit Werkzeug geklemmt, horizontal im Bereich Doppelgreifer
+        giMagState=21
+        ;
+      ENDIF
+    ELSE
+      ;
+      ;kein Wz in HG
+      ;
+      IF (bHgInTcPos)
+        ;
+        ;HG leer in Werkzeugwechselposition
+        giMagState=10
+        ;
+      ELSE
+        ;
+        ;HG leer horizontal im Bereich Doppelgreifer
+        giMagState=20
+        ;
+      ENDIF
+    ENDIF
+    ;
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+;Alle anderen Faelle
+
+IF (giTNoHg>0)
+  ;
+  ;Wz im HG
+  ;
+  IF NOT ((bHGVertical AND bHGLowered)OR(bHGHorizontal AND bHGLifted))
+    ;
+    IF (bMiddleX)
+      ;
+      ;auf Mittelgasse X1
+      ;
+      IF (NOT bHGVertical)OR(NOT bHGLowered)
+        M_HgLower1 M_HgVertical1
+        bHGVertical=mcbDBB_HGVertical bHGHorizontal=mcbDBB_HGHorizontal bHGLowered=mcbDBB_HGLowered bHGLifted=mcbDBB_HGLifted
+      ENDIF
+    ELSE
+      ;
+      IF (bHGHorizontal)AND(NOT bHGLifted)
+        M_HgLift1
+        bHGVertical=mcbDBB_HGVertical bHGHorizontal=mcbDBB_HGHorizontal bHGLowered=mcbDBB_HGLowered bHGLifted=mcbDBB_HGLifted
+      ELSE
+        iAlarmNo=AL_HgNotLowVertNotLiftHoriz
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  ;Status: HG horizontal gehoben oder vertikal gesenkt
+  ;
+  IF (bHGHorizontal)AND(bHGLifted)
+    ;
+    IF (rActPosZ>grHgMaxSwingPosZ)AND(ABS(grToBreakPosX-rActPosX)<grRange)
+      ;
+      ;HG gehoben/horizontal im Bereich Bohrerbruch
+      giMagState=22
+      ;
+      GOTOF ENDE
+    ENDIF
+    ;
+    IF (rActPosZ<(grLaneZ[0]-grRange))OR(rActPosZ>grHgMaxSwingPosZ)
+      iAlarmNo=AL_HgNotLoweredVert
+      GOTOF HandleAlarm
+    ENDIF
+  ENDIF
+  ;
+  IF (bMiddleX)
+    ;
+    ;HG auf gueltiger Fahrgasse X1
+    ;
+    IF (bHGVertical)AND(bHGLowered)
+      ;
+      ;HG mit Wkz vertikal gesenkt in Fahrgasse
+      giMagState=31
+      ;
+    ELSE
+      ;
+      ;HG mit Wkz horizontal gehoben in Fahrgasse
+      giMagState=32
+      ;
+    ENDIF
+    ;
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (NOT bHGVertical)OR(NOT bHGLowered)
+    ;
+    IF (gbMovTlHor)AND(rActPosX>=(grLaneX[0]-grRange))AND(rActPosX<=(grLaneX[giNumLaneX]+grRange))
+      ;
+      ;HG mit Wkz horizontal gehoben im Bereich Magazin
+      giMagState=33
+      ;
+      GOTOF ENDE
+    ELSE
+      iAlarmNo=AL_HgNotLoweredVert
+      GOTOF HandleAlarm
+    ENDIF
+  ENDIF
+  ;
+  ;In allen weiteren Faellen muss das HG vertikal gesenkt sein
+  ;
+  IF (bMiddleZ)
+    ;
+    ;HG mit Wkz vertikal gesenkt in Fahrgasse
+    giMagState=31
+    ;
+    GOTOF ENDE
+  ENDIF
+  ;
+  ;HG am Magazinplatz
+  ;
+  FOR iCount=0 TO 1
+    ;
+    IF (giPlDatFLog[iCount]>0)
+      ;
+      IF (ABS(rActPosZ-grPlDatPosZ[iCount])<=grRange)AND(ABS(rActPosX-grPlDatPosX[iCount])<=grRange)
+        ;
+        ;HG geklemmt vertikal gesenkt an Quellmagazinplatz
+        giMagState=82+(iCount*10)
+        ;
+        GOTOF ENDE
+      ENDIF
+    ENDIF
+  ENDFOR
+  ;
+  ;HG in Werkzeuggasse
+  ;
+  FOR iCount=0 TO 1
+    ;
+    IF (giPlDatFLog[iCount]>0)
+      ;
+      iTmpFLog=(giPlDatFLog[iCount] MOD 100)
+      IF (iTmpFLog<=5)
+        GOTOF "_FLOG"<<iTmpFLog
+      ELSE
+        ;ungueltige Fahrlogik
+        iAlarmNo=AL_ErrorPlDat
+        GOTOF HandleAlarm
+      ENDIF
+      ;
+      ;======
+      _FLOG5:
+      ;======
+      bXDir=TRUE iCalcPos1=grPlDatPosX[iCount] iCalcPos2=grLaneX[giPlDatLane2X[iCount]]
+      GOTOF _CHKPOS
+      ;
+      ;======
+      _FLOG4:
+      ;======
+      bXDir=FALSE iCalcPos1=grPlDatPosZ[iCount] iCalcPos2=grLaneZ[giPlDatLane2Z[iCount]]
+      GOTOF _CHKPOS
+      ;
+      ;======
+      _FLOG3:
+      ;======
+      bXDir=TRUE iCalcPos1=grPlDatPosX[iCount] iCalcPos2=grLaneX[giPlDatLane1X[iCount]]
+      GOTOF _CHKPOS
+      ;
+      ;======
+      _FLOG2:
+      ;======
+      bXDir=FALSE iCalcPos1=grPlDatPosZ[iCount] iCalcPos2=grLaneZ[giPlDatLane1Z[iCount]]
+      GOTOF _CHKPOS
+      ;
+      ;======
+      _FLOG1:
+      ;======
+      bXDir=TRUE iCalcPos1=grPlDatPosX[iCount] iCalcPos2=grLaneX[1]
+      ;
+      ;=======
+      _CHKPOS:
+      ;=======
+      ;
+      IF (bXDir)
+        ;
+        IF (ABS(rActPosZ-grPlDatPosZ[iCount])<=grRange)
+          ;
+          IF (iCalcPos1<iCalcPos2)
+            ;
+            IF (iCalcPos1<=rActPosX)AND(rActPosX<=iCalcPos2) GOTOF SET_83_93
+            ;
+          ELSE
+            ;
+            IF (iCalcPos2<=rActPosX)AND(rActPosX<=iCalcPos1) GOTOF SET_83_93
+            ;
+          ENDIF
+        ENDIF
+      ELSE
+        ;
+        IF (ABS(rActPosX-grPlDatPosX[iCount])<=grRange)
+          ;
+          IF (iCalcPos1<iCalcPos2)
+            ;
+            IF (iCalcPos1<=rActPosZ)AND(rActPosZ<=iCalcPos2) GOTOF SET_83_93
+            ;
+          ELSE
+            ;
+            IF (iCalcPos2<=rActPosZ)AND(rActPosZ<=iCalcPos1) GOTOF SET_83_93
+            ;
+          ENDIF
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+  ENDFOR
+  ;
+ELSE
+  ;
+  ;Kein Wz im HG
+  ;
+  IF (NOT bHGVertical)OR(NOT bHGLifted)
+    ;
+    IF (NOT bHGVertical)
+      ;
+      IF (bMiddleX)AND(NOT gbMagWithFixedGuide)
+        ;
+        ;auf Mittelgasse X1
+        ;
+        M_HgClamp1
+        M_HgVertical1
+        M_HgUnClamp1
+        M_HgLift1
+        ;
+        bHGLowered=mcbDBB_HGLowered bHGLifted=mcbDBB_HGLifted
+      ELSE
+        ;
+        iAlarmNo=AL_HgNotVertical
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+    ;
+    IF (NOT gbMagWithFixedGuide)
+      ;
+      IF (NOT bHGLifted)
+        M_HgLift1
+        STOPRE
+      ENDIF
+    ELSE
+      ;
+      IF ((bMiddleX)OR(bMiddleZ))AND(bHGLowered)
+        ;
+        ;Leeres HG vertikal gesenkt
+        giMagState=40
+        ;
+        GOTOF ENDE
+      ELSE
+        ;
+        IF (rActPosX>=grHGFreeGuideX)AND(NOT bHGLifted)
+          ;
+          M_HgLift1
+          STOPRE
+        ELSE
+          ;HG steht in ungueltiger Position
+          iAlarmNo=AL_HGNotInValidPos
+          GOTOF HandleAlarm
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF (rActPosX<(grLaneX[1]-grRange))
+    ;HG steht in ungueltiger Position
+    iAlarmNo=AL_HGNotInValidPos
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  ;Leeres HG vertikal gehoben
+  giMagState=30
+  ;
+ENDIF
+;
+GOTOF ENDE
+
+;=========
+SET_83_93:
+;=========
+;
+STOPRE
+;HG geklemmt vertikal gesenkt zwischen Quell(Ziel)magazinplatz und Fahrgasse
+giMagState=83+(iCount*10)
+
+;====
+ENDE:
+;====
+
+IF (giMagState==0)
+  ; HG nicht in gueltiger Position
+  iAlarmNo=AL_HGNotInValidPos
+  GOTOF HandleAlarm
+ENDIF
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;
+IF (iAlarmNo>0)AND(iAlarmNo<>iAlarmNoShown)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+RET

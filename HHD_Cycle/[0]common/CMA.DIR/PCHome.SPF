@@ -1,0 +1,634 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     PCHome.SPF
+;# Task:      APC in Gndst
+;# Version:   V06.00.08
+;# Date:      22.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 800
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 22.10.2017 / Simons
+; - Neuversionierung
+; - PalChg - APC mit NC Hubachse
+;
+; V01.01.02 - Juli 2015 / Malitsky
+; - Vorlage
+;
+;------------------------------------
+;
+; Palettenwechsler ueber HOME-Funktion
+; in Grundstellung fahren
+;
+; Wird aufgerufen im REV_CHA1
+;
+;------------------------------------
+
+PCHome DISPLOF
+
+DEF STRING[32] sCycName="PCHome V06.00.08"
+;
+DEF BOOL bPalLdClamped, bPalLdUnclamped, bPalMachClamped, bPalMachUnclamped, bValidPalPos, bPalChgPos0, bPalChgPos180, bLdStRotInPos, bWithHydFix
+;
+DEF INT iAlarmNo=0, iActPalPos, iSelPalPos, iAPCPos
+;
+DEF REAL rc0x1Deg=0.1 rc2x0Deg=2.0 rc0x05mm, rc0x5mm, rc50x0mm
+DEF REAL rActPosX, rActPosY, rActPosZ, rActPosA, rActPosB, rActPosYP, rMaxVeloPalY
+DEF REAL rProgPosX, rProgPosY, rProgPosZ, rDiffPosX, rDiffPosY, rDiffPosZ, rDiffPosA, rDiffPosB
+
+CFG_MAN("HYDFIX",sOption)
+bWithHydFix=(sOption<>"") rMaxVeloPalY=$MA_MAX_AX_VELO[mcAxPalY] rc0x05mm=0.05*grInchMetr rc0x5mm=0.5*grInchMetr rc50x0mm=50*grInchMetr
+
+;-- Status ---------------------------------------
+;
+;Achsen
+rActPosX=$AA_IM[X] rActPosY=$AA_IM[Y] rActPosZ=$AA_IM[Z] rActPosA=$AA_IM[mcAxA] rActPosB=$AA_IM[mcAxB] rActPosYP=$AA_IM[mcAxPalY]
+IF (rDiffPosA>rc2x0Deg)
+  ;A-Achse nicht in Palettenwechselposition
+  iAlarmNo=AL_AxisANotInPos
+  GOTOF HandleAlarm
+ENDIF
+rDiffPosZ=ABS(grPCPosZ-rActPosZ) rDiffPosA=ABS(grPCPosA-rActPosA) rDiffPosB=ABS(grPCPosB-rActPosB)
+;
+;Palettenwechsler
+iAPCPos=(mcDBB_APCPos) iActPalPos=(INA_APCPos) iSelPalPos=giSelChgPos bPalChgPos0=((iAPCPos B_AND 'B1')<>0) bPalChgPos180=((iAPCPos B_AND 'B10')<>0)
+;Ziel- und aktuelle Position Palettenwechsel gueltig
+bValidPalPos=((iSelPalPos>0)AND(iSelPalPos<=2)AND(iActPalPos>0)AND(iActPalPos<=2))
+;Palette auf Beladeplatz
+bPalLdClamped=((mcbDBB_APCActPos B_AND 'B100')<>0) bPalLdUnclamped=((mcbDBB_APCActPos B_AND 'B1000')<>0)
+;Palette in Maschine
+bPalMachClamped=((mcbDBB_APCActPos B_AND 'B10000')<>0) bPalMachUnclamped=((mcbDBB_APCActPos B_AND 'B100000')<>0)
+;Drehbare Rueststation
+bLdStRotInPos=((mcbDBB_APCActPos B_AND 'B1000000')<>0)
+
+;-- Abbruchsituation Auswerten -------------------
+;
+;Palettenwechsel aktiv
+mcbDBB_APCActive=TRUE
+;
+;Genauhalt fuer Hubachse
+FINEA[mcAxPal]
+;
+IF (rActPosYP<(grPCYPosLow+rc0x5mm))
+  ;
+  ;Palettenwechsler ist Unten
+  ;--------------------------
+  ;
+  IF (bWithHydFix)AND(bPalLdUnclamped)
+    ;
+    ;Palette auf Beladeplatz klemmen
+    M168
+    WHILE ((mcbDBB_APCActPos B_AND 'B100')==0)
+      M168
+      MSG(MSG_PalClamp_LoadPlace)
+    ENDWHILE
+    MSG()
+  ENDIF
+  ;
+  ;Fertig
+  GOTOF EndHome
+ENDIF
+;
+IF (rActPosYP<(grPCYPosLoadPos+rc0x5mm))
+  ;
+  ;Palettenwechsler zwischen Unten und Beladeplatz
+  ;-----------------------------------------------
+  ;
+  IF (bWithHydFix)AND(bPalLdUnclamped)
+    ;
+    ;Palette auf Beladeplatz klemmen
+    M168
+    WHILE ((mcbDBB_APCActPos B_AND 'B100')==0)
+      M168
+      MSG(MSG_PalClamp_LoadPlace)
+    ENDWHILE
+    MSG()
+  ENDIF
+  ;
+  ;Zurueck in untere Position
+  GOTOF MoveDownS10
+ENDIF
+
+IF (rActPosYP>(grPCYPosLoadPos+rc0x5mm))AND(rActPosYP<(grPCYPosRotTab-rc0x5mm))
+  ;
+  ;Hubachse zwischen Position Beladeplatz und Drehtisch
+  ;----------------------------------------------------
+  ;
+  IF (rActPosZ>(grPCPosFreeZ + rc0x5mm))
+    ;Z-Achse nicht in Freifahrposition -> Abbruch
+    iAlarmNo=AL_Z_NoFreePos
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (bWithHydFix)AND(NOT bPalLdUnclamped)
+    ;
+    ;Palette auf dem Beladeplatz loesen
+    M169
+    WHILE ((mcbDBB_APCActPos B_AND 'B1000')==0)
+      M169
+      MSG(MSG_PalUnClamp_LoadPlace)
+    ENDWHILE
+    MSG()
+  ENDIF
+  ;
+  IF (bValidPalPos)
+    ;
+    IF (iActPalPos<>iSelPalPos)
+      ;Palettenwechsel noch nicht durchgefuehrt -> Ausheben in mittlere Position
+      GOTOF MoveMidS2
+    ELSE
+      ;Palettenwechsel durchgefuehrt -> Absenken in untere Position
+      GOTOF MoveDownS8
+    ENDIF
+  ELSE
+    ;Kein aktueller Platz oder kein Zielplatz -> Absenken in untere Position
+    GOTOF MoveDownS8
+  ENDIF
+ENDIF
+
+IF (ABS(rActPosYP-grPCYPosRotTab)<=rc0x5mm)
+  ;
+  ;Palettenwechsel-Hubachse in Drehtisch Position
+  ;----------------------------------------------
+  ;
+  IF (bValidPalPos)
+    ;
+    IF (iActPalPos<>iSelPalPos)
+      ;
+      ;Palettenwechsel noch nicht durchgefuehrt
+      ;
+      IF (rDiffPosZ>rc0x05mm)
+        ;Z nicht in Palettenwechselposition -> Anfahren
+        GOTOF PalPosZS3
+      ELSE
+        ;Z in Palettenwechselposition -> Drehtisch Loesen
+        GOTOF RelPalMcS3
+      ENDIF
+    ELSE
+      ;
+      ;Palettenwechsel bereits durchgefuehrt
+      ;
+      IF (rDiffPosZ>rc0x05mm)
+        ;Z nicht in Palettenwechselposition -> Z-Achse Freifahren
+        GOTOF FreeZS8
+      ELSE
+        ;Z in Palettenwechselposition -> Palette auf Drehtisch Klemmen
+        GOTOF ClpPalMcS8
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    IF (rDiffPosZ>rc0x05mm)
+      ;Z nicht in Palettenwechselposition -> Z-Achse Freifahren
+      GOTOF FreeZS8
+    ELSE
+      ;Z in Palettenwechselposition -> Palette auf Drehtisch Klemmen
+      GOTOF ClpPalMcS8
+    ENDIF
+  ENDIF
+ENDIF
+
+IF (rActPosYP>(grPCYPosRotTab+rc0x5mm))AND(rActPosYP<(grPCYPosUpper-rc0x5mm))
+  ;
+  ;Palettenwechsel-Hubachse zwischen Drehtisch und Schwenkposition
+  ;---------------------------------------------------------------
+  ;
+  IF ((rDiffPosZ>rc0x05mm)OR(rDiffPosA>rc0x1Deg)OR(rDiffPosB>rc0x1Deg))
+    ;Z-Achse nicht in Freifahrposition -> Abbruch
+    iAlarmNo=AL_APC_NoFreePos
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (NOT bPalMachUnclamped)
+    ;
+    ;Palette auf Drehtisch loesen
+    M149
+    WHILE ((mcbDBB_APCActPos B_AND 'B100000') == 0)
+      M149
+      MSG(MSG_PalUnClamp_Table)
+    ENDWHILE
+    MSG()
+  ENDIF
+  ;
+  IF (bValidPalPos)
+    ;
+    IF (iActPalPos<>iSelPalPos)
+      ;Palettenwechsel noch nicht durchgefuehrt -> Ausheben in obere Position
+      GOTOF MoveUpS4
+    ELSE
+      ;Palettenwechsel durchgefuehrt -> Absenken in mittlere Position
+      GOTOF MoveMidS7
+    ENDIF
+  ELSE
+    ;Kein aktueller Platz oder kein Zielplatz -> Absenken in mittlere Position
+    GOTOF MoveMidS7
+  ENDIF
+ENDIF
+
+IF (rActPosYP>=(grPCYPosUpper-rc0x5mm))
+  ;
+  ;Palettenwechsler in Schwenkposition
+  ;-----------------------------------
+  ;
+  IF (bValidPalPos)
+    ;
+    IF (iActPalPos<>iSelPalPos)
+      ;
+      ;Palettenwechsel noch nicht abgeschlossen
+      ;
+      IF (bPalChgPos0 OR bPalChgPos180)
+        ;Palettenwechsler in Position -> Z Freifahren
+        GOTOF FreeZS5
+      ELSE
+        ;
+        ;Palettenwechsler nicht in Position
+        ;
+        IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+          ;Z-Achse innerhalb Schwenkbereich des Palettenwechslers -> Abbruch
+          iAlarmNo=AL_Z_NoFreePos
+          GOTOF HandleAlarm
+        ENDIF
+        ;Z-Achse außerhalb Schwenkbereich des Palettenwechslers -> Schwenken fortsetzen
+        GOTOF RotateS6
+      ENDIF
+    ELSE
+      ;
+      ;Palettenwechsel bereits durchgefuehrt
+      ;
+      IF (bPalChgPos0 OR bPalChgPos180)
+        ;Palettenwechsler in Position -> Z in Palettenwechselposition      
+        GOTOF PalPosZS7
+      ELSE
+        IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+          ;Z-Achse innerhalb Schwenkbereich des Palettenwechslers -> Abbruch
+          iAlarmNo=AL_Z_NoFreePos
+          GOTOF HandleAlarm
+        ENDIF
+        ;Z-Achse außerhalb Schwenkbereich des Palettenwechslers -> Schwenken fortsetzen
+        GOTOF RotateS6
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    ;Palettenwechsel bereits durchgefuehrt
+    ;
+    IF (bPalChgPos0 OR bPalChgPos180)
+      ;Palettenwechsler in Position -> Z in Palettenwechselposition      
+      GOTOF PalPosZS7
+    ELSE
+      IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+        ;Z-Achse innerhalb Schwenkbereich des Palettenwechslers -> Abbruch
+        iAlarmNo=AL_Z_NoFreePos
+        GOTOF HandleAlarm
+      ENDIF
+      ;Z-Achse außerhalb Schwenkbereich des Palettenwechslers -> Schwenken fortsetzen
+      GOTOF RotateS6
+    ENDIF
+  ENDIF
+ENDIF
+
+;-- Freifahren -----------------------------------
+
+;========
+FreeXYS1:
+;========
+;
+;Schritt 1.1: Freifahren der X/Y-Achse
+;-------------------------------------
+rProgPosX=MAXVAL(rActPosX,grPCPosFreeX) rProgPosY=MAXVAL(rActPosY,grPCPosFreeY)
+;
+G0 G40 G60 G602 G17 G153 G90 G94 X=rProgPosX Y=rProgPosY
+
+;=======
+FreeZS1:
+;=======
+;
+;Schritt 1.2: Freifahren der Z-Achse, A/B-Achse in Palettenwechselposition
+;-------------------------------------------------------------------------
+rProgPosZ=MINVAL(rActPosZ,grPCPosFreeZ)
+;
+G0 G40 G60 G602 G17 G153 G90 G94 Z=rProgPosZ A=grPCPosA B=grPCPosB
+
+;==========
+RelPalLdS2:
+;==========
+;
+;Schritt 2.1: Palette auf Beladeplatz loesen
+;-------------------------------------------
+IF (bWithHydFix)
+  STOPRE
+  ;Palette auf Beladeplatz loesen
+  M169
+  WHILE ((mcbDBB_APCActPos B_AND 'B1000')==0)
+    M169
+    MSG(PalUnClamp_LoadPlace)
+  ENDWHILE
+  MSG()
+ENDIF
+
+;=========
+MoveMidS2:
+;=========
+;
+;Schritt 2.2: Palettenwechsler in Position Drehtisch ausheben
+;------------------------------------------------------------
+rActPosZ=$AA_IM[Z]
+;
+IF (bWithHydFix)
+  ;Palette auf Beladeplatz loesen
+  M169
+  WHILE ((mcbDBB_APCActPos B_AND 'B1000')==0)
+    M169
+    MSG(PalUnClamp_LoadPlace)
+  ENDWHILE
+  MSG()
+ENDIF
+;
+IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+  iAlarmNo=AL_Z_NoFreePos
+  GOTOF HandleAlarm
+ENDIF
+;
+FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=grPCYPosRotTab
+
+;=========
+PalPosZS3:
+;=========
+;
+;Schritt 3.1: Z-Achse in Palettenwechselposition
+;-----------------------------------------------
+rDiffPosZ=ABS(grPalLoadPosZ-$AA_IM[Z]) rDiffPosA=ABS(grPalLoadPosA-$AA_IM[mcAxA]) rDiffPosB=ABS(grPalLoadPosB-$AA_IM[mcAxB])
+;
+IF (rDiffPosA>rc0x1Deg)
+  iAlarmNo=AL_A_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosB>rc0x1Deg)
+  iAlarmNo=AL_B_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosZ>rc0x05mm)
+  G0 G40 G60 G17 G153 G90 G94 Z=grPalLoadPosZ
+ENDIF
+
+;==========
+RelPalMcS3:
+;==========
+;
+;Schritt 3.2: Palette auf Drehtisch loesen
+;-----------------------------------------
+STOPRE
+;
+;Palette in Maschine loesen
+M149
+WHILE ((mcbDBB_APCActPos B_AND 'B100000')==0)
+  M149
+  MSG(MSG_PalUnClamp_Table)
+ENDWHILE
+MSG()
+
+;========
+MoveUpS4:
+;========
+;
+;Schritt 4: Palettenwechsler in obere Position ausheben
+;------------------------------------------------------
+rActPosYP=$AA_IM[mcAxPalY]
+;
+;Palette in Maschine loesen
+M149
+WHILE ((mcbDBB_APCActPos B_AND 'B100000')==0)
+  M149
+  MSG(MSG_PalUnClamp_Table)
+ENDWHILE
+MSG()
+;
+IF (rActPosYP < (grPCYPosRotTab+rc50x0mm))
+  FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=(grPCYPosRotTab+rc50x0mm)
+ENDIF
+FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=grPCYPosUpper
+
+;=======
+FreeZS5:
+;=======
+;
+;Schritt 5: Freifahren der Z-Achse
+;---------------------------------
+rActPosZ=$AA_IM[Z] rDiffPosA=ABS(grPalLoadPosA-$AA_IM[mcAxA]) rDiffPosB=ABS(grPalLoadPosB-$AA_IM[mcAxB])
+;
+IF (rDiffPosA>rc0x1Deg)
+  iAlarmNo=AL_A_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosB>rc0x1Deg)
+  iAlarmNo=AL_B_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+  G0 G40 G60 G17 G153 G90 G94 Z=grPCPosFreeZ
+ENDIF
+
+;========
+RotateS6:
+;========
+;
+;Schritt 6: Palettenwechsler drehen
+;----------------------------------
+STOPRE
+IF ((iSelPalPos>0)AND(iSelPalPos<=2))
+  ;
+  ;gueltige Zielposition
+  ;
+  M=iSelPalPos+105
+  ;
+  IF (iSelPalPos==1)
+    WHILE ((mcbDBB_APCActPos B_AND 'B1')==0)
+      M131
+      MSG(MSG_APC_0Deg)
+    ENDWHILE
+  ELSE
+    WHILE ((mcbDBB_APCActPos B_AND 'B10')==0)
+      M132
+      MSG(MSG_APC_180Deg)
+    ENDWHILE
+  ENDIF
+ELSE
+  iAlarmNo=AL_APCInvalidTargetPos sAlarmParam="(" << iSelPalPos << ")"
+  GOTOF HandleAlarm
+ENDIF
+
+;=========
+PalPosZS7:
+;=========
+;
+;Schritt 7.1: Z-Achse in Palettenwechselposition
+;-----------------------------------------------
+rDiffPosZ=ABS(grPalLoadPosZ-$AA_IM[Z]) rDiffPosA=ABS(grPalLoadPosA-$AA_IM[mcAxA]) rDiffPosB=ABS(grPalLoadPosB-$AA_IM[mcAxB])
+;
+IF (rDiffPosA>rc0x1Deg)
+  iAlarmNo=AL_A_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosB>rc0x1Deg)
+  iAlarmNo=AL_B_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosZ>rc0x05mm)
+  G0 G40 G60 G17 G153 G90 G94 Z=grPCPosZ
+ENDIF
+
+;=========
+MoveMidS7:
+;=========
+;
+;Schritt 7.2: Palettenwechsler in Position Drehtisch absenken
+;------------------------------------------------------------
+rActPosYP=$AA_IM[mcAxPalY]
+;
+;Palette in Maschine loesen
+M149
+WHILE ((mcbDBB_APCActPos B_AND 'B100000')==0)
+  M149
+  MSG(MSG_PalUnClamp_Table)
+ENDWHILE
+MSG()
+;
+IF (rActPosYP>(grPCYPosRotTab+rc50x0mm))
+  FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=(grPCYPosRotTab+rc50x0mm)
+ENDIF
+FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=grPCYPosRotTab
+
+;==========
+ClpPalMcS8:
+;==========
+;
+;Schritt 8.1: Palette auf Drehtisch klemmen
+;------------------------------------------
+STOPRE
+M148
+WHILE((mcbDBB_APCActPos B_AND 'B10000')==0)
+  M148
+  MSG(MSG_PalClamp_Table)
+ENDWHILE
+MSG()
+
+;=======
+FreeZS8:
+;=======
+;
+;Schritt 8.2: Freifahren der Z-Achse
+;-----------------------------------
+rActPosZ=$AA_IM[Z] rDiffPosA=ABS(grPalLoadPosA-$AA_IM[mcAxA]) rDiffPosB=ABS(grPalLoadPosB-$AA_IM[mcAxB])
+;
+IF (rDiffPosA>rc0x1Deg)
+  iAlarmNo=AL_A_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosB>rc0x1Deg)
+  iAlarmNo=AL_B_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+  G0 G40 G60 G17 G153 G90 G94 Z=grPCPosFreeZ
+ENDIF
+
+;==========
+MoveDownS8:
+;==========
+;
+;Schritt 8.3: Palettenwechsler in Position Beladeplatz absenken
+;--------------------------------------------------------------
+IF (bWithHydFix)
+  STOPRE
+  ;Palette auf Beladeplatz loesen
+  M169
+  WHILE ((mcbDBB_APCActPos B_AND 'B1000')==0)
+    M169
+    MSG(MSG_PalUnClamp_LoadPlace)
+  ENDWHILE
+  MSG()
+ENDIF
+FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=grPCYPosLoadPos
+
+;==========
+ClpPalLdS9:
+;==========
+;
+;Schritt 9: Palette auf Beladeplatz klemmen
+;------------------------------------------
+IF (bWithHydFix)
+  STOPRE
+  ;Palette auf Beladeplatz klemmen
+  M168
+  WHILE ((mcbDBB_APCActPos B_AND '100')==0)
+    M168
+    MSG(MSG_PalClamp_LoadPlace)
+  ENDWHILE
+  MSG()
+ENDIF
+
+;===========
+MoveDownS10:
+;===========
+;
+;Schritt 10: Z-Achse freifahren, Palettenwechsler in untere Position absenken
+;----------------------------------------------------------------------------
+rActPosZ=$AA_IM[Z] rDiffPosA=ABS(grPalLoadPosA-$AA_IM[mcAxA]) rDiffPosB=ABS(grPalLoadPosB-$AA_IM[mcAxB])
+;
+IF (rDiffPosA>rc0x1Deg)
+  iAlarmNo=AL_A_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rDiffPosB>rc0x1Deg)
+  iAlarmNo=AL_B_NoPCPos
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (rActPosZ>(grPCPosFreeZ+rc0x5mm))
+  G0 G40 G60 G17 G153 G90 G94 Z=grPCPosFreeZ
+ENDIF
+;
+FA[mcAxPalY]=grSlowVeloPalY POS[mcAxPalY]=grPCYPosLow
+
+;=======
+EndHome:
+;=======
+;
+;-- Freifahren beendet ---------------------------
+;
+mcbDBB_APCActive=FALSE
+gbBreakPalChg=0 giPcDebugStep=0 giPcBreakStep=0
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+
+;====
+Ende:
+;====
+;
+RET
+
+
+

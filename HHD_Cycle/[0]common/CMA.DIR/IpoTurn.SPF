@@ -1,0 +1,139 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     IpoTurn.SPF
+;# Task:      FFW ON/OFF
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - gbMCWithFFG=TRUE -> keine Funktion
+; - formale Aenderungen
+;
+; V06.00.05 - 04.12.2016 / Simons
+; - Neuversionierung
+; - Maschinenachsen Default mit
+;   Vorsteuerung Ein -> keine Anpassungen
+;
+; V06.00.03 - 07.06.2016 / Simons
+; - MSG entfernt
+; - Neu ONOFF=2
+;
+; V06.00.00 - 18.07.2015 / Simons
+; - Neu formatiert
+;
+; V04.00.00 - 05.02.2014 / Fengler
+; - Vorlage
+;-------------------------------------
+;
+; Beschreibung:
+;--------------
+;
+; Wird keine Hauptachse mit FFWON gefahren,
+; so werden in Abhaengigkeit von ONOFF bei
+;
+; 0: FFWOF, Defaultwerte fuer $MA_G00_JERK_FACTOR
+; 1: FFWON, Maschinenschutz Ein
+;    in Abhaengig vom Maschinentyp
+;    werden die G0 Ruckwerte ueber den G0 
+;    Gewichtungsfaktor angepasst -> Maschinenschutz
+; 2: wie 0 nur im WzW
+;
+;-------------------------------------
+PROC IpoTurn (INT iOnOff) SBLOF DISPLOF
+
+DEF STRING[32] sCycName="IpoTurn V06.00.06"
+;
+DEF BOOL bWith5Axis
+;
+DEF REAL rcDefaultFactor=1.0
+
+IF ($P_SEARCH)OR($P_SIM)OR($P_DRYRUN)OR(gbMCWithFFW)
+  RET
+ENDIF
+
+bWith5Axis=((gbSwivHeadExist)OR(gbBAExist)OR(gbTiltHeadExist))
+;
+IF (NOT $P_SUBPAR[1])
+  iOnOff=0
+ENDIF
+;
+IF (iOnOff<>2)
+  ;
+  ;nicht im TC
+  ;
+  STOPRE
+ENDIF
+;
+;keine Achse mit Vorsteuerung
+;
+IF (iOnOff<>1)
+  ;
+  ;Vorsteuerung aller Kanal-Achsen aus
+  FFWOF
+  ;
+  IF (bWith5Axis)
+    ;
+    ;mit 5.Achse
+    $MA_G00_JERK_FACTOR[AX4]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX1]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX2]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX3]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX5]=rcDefaultFactor gbIpoTurnActive=FALSE
+  ELSE
+    $MA_G00_JERK_FACTOR[AX1]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX2]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX3]=rcDefaultFactor $MA_G00_JERK_FACTOR[AX5]=rcDefaultFactor gbIpoTurnActive=FALSE
+  ENDIF
+  ;
+ELSE
+  ;
+  ;Vorsteuerung und Ruckbegrenzung aller Kanal-Achsen EIN
+  ;
+  IF ($MA_MAX_AX_JERK[AX1]>=grIPOTurnJerkX)
+    $MA_G00_JERK_FACTOR[AX1]=(grIPOTurnJerkX/$MA_MAX_AX_JERK[AX1])
+  ENDIF
+  ;
+  IF ($MA_MAX_AX_JERK[AX2]>=grIPOTurnJerkY)
+    $MA_G00_JERK_FACTOR[AX2]=(grIPOTurnJerkY/$MA_MAX_AX_JERK[AX2])
+  ENDIF
+  ;
+  IF ($MA_MAX_AX_JERK[AX3]>=grIPOTurnJerkZ)
+    $MA_G00_JERK_FACTOR[AX3]=(grIPOTurnJerkZ/$MA_MAX_AX_JERK[AX3])
+  ENDIF
+  ;
+  IF (bWith5Axis)
+    ;
+    ;mit 5.Achse
+    IF ($MA_MAX_AX_JERK[AX4]>=grIPOTurnJerkA_C)
+      $MA_G00_JERK_FACTOR[AX4]=(grIPOTurnJerkA_C/$MA_MAX_AX_JERK[AX4])
+    ENDIF
+  ENDIF
+  ;
+  IF ($MA_MAX_AX_JERK[AX5]>=grIPOTurnJerkB)
+    $MA_G00_JERK_FACTOR[AX5]=(grIPOTurnJerkB/$MA_MAX_AX_JERK[AX5])
+  ENDIF
+  ;
+  ;Vorsteuerung aller Kanal-Achsen ein
+  FFWON
+  ;
+  gbIpoTurnActive=TRUE
+ENDIF
+;
+;Einstellungen Aktivieren
+NEWCONF
+;
+IF (iOnOff<>2)
+  ;
+  ;nicht im TC
+  ;
+  STOPRE
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET
+

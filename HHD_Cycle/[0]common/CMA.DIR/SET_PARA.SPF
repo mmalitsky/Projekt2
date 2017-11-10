@@ -1,0 +1,93 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_PARA.SPF
+;# Task:      Konstanten Vorbesetzen
+;# Version:   V06.00.01
+;# Date:      09.09.2015  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;--------------------------
+; Beschreibung:
+;
+; Definition von Konstanten
+;
+; Aufgerufen im NC_INIT1
+;
+;--------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.01 - 09.09.2015 / Simons
+; - STOPRE hinzu
+;
+; V06.00.00 - 16.06.2015 / Simons
+; - ProtoTyp
+;
+; V04.00.00 - 04.03.2015 / Schaaf
+; - Neues POS-Programm
+;   Bestehendes POS-Programm wurde
+;   in mehrere Einzelprogramme aufgeteilt.
+
+;-----------------------------------------
+
+DEF STRING[32] sCycName="SET_PARA V06.00.01"
+
+grPARA[0]=0.1 * grInchMetr
+grPARA[1]=0.5 * grInchMetr
+grPARA[2]=1.0 * grInchMetr
+grPARA[3]=1.5 * grInchMetr
+grPARA[4]=2.0 * grInchMetr
+grPARA[5]=2.5 * grInchMetr
+grPARA[6]=3.0 * grInchMetr
+grPARA[7]=3.5 * grInchMetr
+grPARA[8]=4.0 * grInchMetr
+grPARA[9]=4.5 * grInchMetr
+grPARA[10]=5.0 * grInchMetr
+grPARA[11]=5.5 * grInchMetr
+grPARA[12]=6.0 * grInchMetr
+grPARA[13]=6.5 * grInchMetr
+grPARA[14]=7.0 * grInchMetr
+grPARA[15]=7.5 * grInchMetr
+grPARA[16]=8.0 * grInchMetr
+grPARA[17]=8.5 * grInchMetr
+grPARA[18]=9.0 * grInchMetr
+grPARA[19]=9.5 * grInchMetr
+grPARA[20]=10.0 * grInchMetr
+grPARA[21]=11 * grInchMetr
+grPARA[22]=12 * grInchMetr
+grPARA[23]=13 * grInchMetr
+grPARA[24]=14 * grInchMetr
+grPARA[25]=15 * grInchMetr
+grPARA[26]=16 * grInchMetr
+grPARA[27]=17 * grInchMetr
+grPARA[28]=18 * grInchMetr
+grPARA[29]=19 * grInchMetr
+grPARA[30]=20 * grInchMetr
+grPARA[31]=30 * grInchMetr
+grPARA[32]=40 * grInchMetr
+grPARA[33]=50 * grInchMetr
+grPARA[34]=60 * grInchMetr
+grPARA[35]=70 * grInchMetr
+grPARA[36]=80 * grInchMetr
+grPARA[37]=90 * grInchMetr
+grPARA[38]=100 * grInchMetr
+grPARA[39]=200 * grInchMetr
+grPARA[40]=300 * grInchMetr
+grPARA[41]=400 * grInchMetr
+grPARA[42]=500 * grInchMetr
+grPARA[43]=600 * grInchMetr
+grPARA[44]=700 * grInchMetr
+grPARA[45]=800 * grInchMetr
+grPARA[46]=900 * grInchMetr
+grPARA[47]=1000 * grInchMetr
+grPARA[48]=2000 * grInchMetr
+grPARA[49]=3000 * grInchMetr
+grPARA[50]=4000 * grInchMetr
+;
+STOPRE
+;
+RET

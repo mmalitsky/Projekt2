@@ -1,0 +1,976 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CheckTlData.SPF
+;# Task:      WzDaten Pruefen
+;# Version:   V06.00.07
+;# Date:      06.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 06.08.2017 / Simons
+; - Laufzeitoptimierung
+;
+; V06.00.07 - 25.06.2017 / Simons
+; - Einschraenkung bei Variablennamen
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - bei Fehler Anzeige der Toleranz
+; - Vereinheitlichung der Vergleichsabfragen R/Lx/LIVE
+; - LIVE=MAX, LIVE=BEST -> LIVEMAX, LIVEBEST
+; - REF LIVE=... -> LIVEMIN=...
+; - Einfuehrung MakeAlarmParam
+; - formale Aenderungen
+;
+; V06.00.06 - 26.04.2017 / Simons
+; - Neuversionierung
+; - sProtFile hinzu
+; - formale Aenderungen
+;
+; V06.00.05 - 24.10.2016 / Simons
+; - Neuversionierung
+; - Aufruf in TO_AVAIL -> Protokoll
+;   mit Name des aufrufenden Programms
+;
+; V06.00.04 - 31.08.2016 / Simons
+; - Neuversionierung
+; - Beruecksichtigung Magazin-/Platzeigenschaften
+; - iMode Erweitert (.5)
+; -----------------------------------
+;
+; V06.00.03 - 01.07.2016 / Simons
+; - Prototyp
+; -----------------------------------
+;
+; Beschreibung:
+; -------------
+; - Ueberpruefung des SpindelWz's
+; - Suche eines passenden Wz's innerhalb
+;   einer Wz Familie
+;
+; Eingangsparameter:
+; ------------------
+;
+; sCode (case sensitive):
+; -----------------------
+;
+; T        - Name der zu pruefenden WzFamilie
+;            keine Angabe -> SpWz pruefen
+; D        - Schneide fuer die die folgenden
+;            (links->rechts) Pruefungen erfolgen
+;
+;            Sollwerte:
+; L1,L2,L3 - Schneidenlaenge (mm/inch)
+; R        - SchneidenRadius (mm/inch)
+;
+; LIVE     - Standzeit(min) oder Standmenge(Stk)
+;            Achtung: Die Auswahl wird im Folgenden nur durch die gewaehlte Schneide bestimmt
+; LIVEMIN  - Wie LIVE nur das bei der Suche das Wz mit der geringsten, zugelassenen Laufzeit gewaehlt wird
+; LIVEMAX  - Auswahl des Wz's mit der maximalen Standzeit-/menge
+; LIVEBEST - Wie LIVEMAX, nur darf das Wz noch nicht im Einsatz gewesen sein
+;
+; COUNT    - Minimale Anzahl freigebener Wz'e einer Wz Familie (nicht bei LIVEMIN/LIVEMAX/LIVEBEST)
+;
+; W        - Toleranzwert (bei =)
+;            Ist noch keine Schneide angewaehlt, gilt der Wert als Defaultwert,
+;            sonst fuer die folgenden Werte der laufenden Schneide
+;
+;            Pruefbedingungen:
+;            -----------------
+; =        - Wert in Toleranz (Sollwert +-Toleranz)
+; >,>=     - Wert >(=) als Sollwert
+; <,<=     - Wert <(=) als Sollwert
+; ==       - Wert gleich Sollwert (ohne Toleranz)
+;
+; iMode:
+; ------
+; .0 - Dialog oder Fehlermeldungsausgabe
+;      = 0: Mit
+;      = 1: Ohne
+; .1 - Vorbesetzen der Ergebnisvariablen
+;      = 0: giResult mit -1, gsResult=""
+;           (Protokoll Start)
+;      = 1: Nein
+; .2 - bei der Wz Suche werden
+;      = 0: nur Wz'e im Magazin
+;      = 1: auch Wz'e in der WzListe
+;      beruecksichtigt.
+; .3 - bei der Wz Suche werden Magazinplatzeigenschaften beruecksichtigt
+;      = 0: Nein
+;      = 1: Ja
+; .4 - Protokollerstellung:
+;      = 1: Wenn in gsProtMissTl der Dateiname abgelegt ist, werden
+;           Fehlende Wz'e in dieser Datei aufgelistet. Angabe des komplette FileName.
+; .5 - = 1: zusaetzliche Meldungsausgabe (AL_TlNotFound67), wenn kein freigegebenes Wz gefunden wurde
+;
+; iTNo:
+; -----
+; interne T-Nummer des zu pruefenden Wz (in Systemzyklen)
+;
+; sProtFile:
+; ----------
+; Name des protokollierten, aufrufenden NC Programms (NC Notation)
+;
+; Ergebnisvariable:
+; -----------------
+; Nach erfolgreicher WzSuche (mit T=...):
+; - giResult = 0
+; - gsResult = WzName/Schwesterkzeugnummer
+; Sonst:
+; - giResult = AlarmNummer
+; - gsResult = Alarminfo
+;
+; Programmierung:
+; ---------------
+;
+; Ueberpruefung des SpWz's D1 und D2
+;-----------------------------------
+;
+; TC("WZ1")
+; CheckTlData("D1 L1>500.0 R<60.0 D2 L1>200.0")
+;
+; alternativ:
+;
+; gsReqTlData="D1 L1>500.0 R>59.9 R<60.1 D2 L1>200.0"
+; TC("WZ1")
+;
+; gsReqTlData=("D1 L1>500.0 W=0.1 R=60.0 D2 L1>200.0")
+; TC("WZ1")
+;
+; WzAufruf mit ausreichender Standzeit-/menge:
+;---------------------------------------------
+; ...
+; CheckTlData("T=WZ1 D1 LIVE>10 D2 LIVE>5.5")
+; IF (giResult==0)
+;   sNextTool=gsResult
+; ELSE
+;   SETAL(<<giResult,gsResult)
+; ENDIF
+; PREPARE(sNextTool)
+; ...
+; TC(sNextTool)
+; ...
+;
+; Sonderfaelle:
+; ...
+; Wz mit hoechster Lebensdauer von D1 der Wz Familie
+; CheckTlData("T=WZ1 D1 LIVEMAX",1)
+; ...
+; Neues Wz mit hoechster Lebensdauer von D1 der Wz Familie
+; CheckTlData("T=WZ1 D1 LIVEBEST",1)
+; ...
+; Wz mit der geringsten, ausreichenden Lebensdauer fuer D1 suchen
+; CheckTlData("T=WZ1 D1 LIVEMIN>100 D2 LIVE>200",1)
+;
+; Ueberpruefung, ob Wz'e mit den
+; aufgefuehrten Eigenschaften existieren:
+;----------------------------------------
+; ...
+; CHECK_TL:
+; ;
+; CheckTlData("T=WZ1 D1 L1=500.0 D2 L1>200.0",1)
+; CheckTlData("T=WZ2 W=0.5 D1 L1=650.0",3)
+; CheckTlData("T=WZ3 D1 L1=350.0",3)
+; ...
+; IF (giResult>0)
+;   ;
+;   ; mind. ein nicht passendes Wz gefunden
+;   MsgBox(<<giResult,"CLEAR BSTART","TRUE",gsResult)
+;   ;
+;   ; Wiederholung nach Betaetigung der Starttaste
+;   IF (gsMsgBoxResult=="BSTART) GOTOB CHECK_TL
+;   ;
+;   ; Warten auf Abbruch
+;   MsgBox(<<AL_WaitFor,"CLEAR RESET","FALSE," <NCRESET>")
+; ENDIF
+;
+; Verfuegbarkeitskontrolle:
+;--------------------------
+;
+; Standard:
+; ...
+; CheckTlData("T=WZ1",1)
+; CheckTlData("T=WZ2 COUNT=3",3)
+; CheckTlData("T=WZ3",3)
+; ...
+; IF (giResult>0)
+;   ;
+;   ; geforderte Anzahl Wz'e nicht gefunden
+;   ;
+;   MsgBox(<<giResult,"CLEAR RESET","FALSE",gsResult)
+; ENDIF
+;
+; Mit Reststandzeitbetrachtung:
+; ...
+; CheckTlData("T=WZ1 D1 LIVE>5",1)
+; CheckTlData("T=WZ2 COUNT=3 D1 LIVE>1.4",3)
+; CheckTlData("T=WZ3 D1 LIVE>0.5",3)
+; ...
+; IF (giResult>0)
+;   ;
+;   ; Die geforderte Anzahl freigegebener
+;   ; Wz'e mit ausreichender Reststandzeit
+;   ; wurde nicht gefunden
+;   ;
+;   MsgBox(<<giResult,"CLEAR RESET","FALSE",gsResult)
+; ENDIF
+;
+; -----------------------------------
+
+PROC CheckTlData(STRING[255] sCode, INT iMode, INT iTNo, STRING[128] sProtFile) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="CheckTlData V06.00.07", scPunkte="...", sAlarmParam="", sTName="", sValue
+;
+DEF STRING[64] sDate, sProg, sHeader
+DEF STRING[128] sAux
+DEF STRING[255] sArg
+;
+DEF BOOL bArgIsString=FALSE, bWithRef=FALSE, bProtOn, bSrcNotInMag, bWithPlaceProp, bSrcLocked, bWithMessage, bError, bTlGroup, bDialogOff, bMin, bMax, bBest
+;
+DEF INT icMaxDNo=9, icSetMax=19, iSetNo=-1, iAlarmNo=0, iNumTl=0, iMinTlCount=0, iRelTlCount=0, iCount=0, iCmdNo=0, iDNo=0, iError=0, iRefSTNo=0
+DEF INT iTmp, iNo, iCodeLastPos, iPara, iCondition, iMonType, iPos, iRefDNo, iSrcLN, iSrcMN, iTlCount, iSep1
+DEF INT iSetCondition[20]=REP(0), iSetDNo[20]=REP(0), iSetParaNo[20]=REP(0), iCond[10]=REP(0)
+;
+DEF REAL rDefaultTol=0, rNo=0, rRefLive=0, rTol, rActValue, rValue
+DEF REAL rSetValue[20]=REP(0.0), rSetTol[20]=REP(0.0), rLastLive[10]=REP(0.0)
+
+iCodeLastPos=(STRLEN(sCode)-1) bWithPlaceProp=((iMode B_AND 'B1000')<>0) bProtOn=((iMode B_AND 'B10000')<>0)AND(gsProtMissTl<>"") bDialogOff=(((iMode B_AND 'B1')<>0)OR(bProtOn)) bWithMessage=((iMode B_AND 'B100000')<>0)
+
+IF ((iMode B_AND 'B10')==0)
+  ;
+  ;Ergebnisvariable zuruecksetzen
+  giResult=-1 gsResult=""
+  ;
+  IF (bProtOn)
+    ;
+    ;Protokollieren fehlender Wz'e
+    ;
+    IF ISFILE(gsProtMissTl)
+      ;
+      ;Existiert schon -> Loeschen
+      ;
+      DELETE(iError,gsProtMissTl)
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF ((giResult>0)AND(NOT bProtOn)AND(NOT bWithMessage))OR(($P_SUBPAR[3])AND(iTNo<=0))
+  ;
+  ;beim vorherigen Aufruf trat ein Fehler auf -> keine Uberpruefung
+  ;
+  RET
+ENDIF
+
+IF (iCodeLastPos==-1)
+  ;
+  ;kein Codestring angegeben
+  ;
+  IF ($P_SUBPAR[3])AND(iTNo>0)
+    ;
+    ;Ueberwachung in Systemzyklen:
+    ;
+    ;Haben alle Schneiden ein L1 > grTCMinL1 ?
+    ;
+    WHILE (iCount<$P_TOOLND[iTNo])
+      iCount=iCount+1
+      IF (ABS($TC_DP3[iTNo,iCount]+$TC_DP12[iTNo,iCount]+$TC_DP21[iTNo,iCount])<grTCMinL1)
+        MakeAlarmParam(sAlarmParam,$TC_TP2[iTNo],<<$TC_TP1[iTNo]<<"/D"<<iCount<<"/L1<"<<grTCMinL1,2)
+        iAlarmNo=AL_InvalidCutData67
+        GOTOF HandleAlarm
+      ENDIF
+    ENDWHILE
+    ;
+    RET
+  ELSE
+    ;Codestring fehlt
+    iAlarmNo=AL_InvalidMissingInput
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+WHILE (iCount<=iCodeLastPos)
+
+  iPos=iCount iCmDNo=0 rNo=0 iNo=0 bArgIsString=FALSE sAux=SUBSTR(sCode,iCount,1)
+
+  IF sAux==" "
+    iCount=iCount+1
+    GOTOF NextCodeCheck
+  ENDIF
+
+  IF (sAux[0]<65)OR(sAux[0]>90) GOTOF Error
+  GOTOF "_Cx"<<sAux
+
+  ;====
+  _CxC:
+  ;====
+  IF (iCodeLastPos>=iCount+4)
+    IF TOUPPER(SUBSTR(sCode,iCount,5))=="COUNT"
+      iCmdNo=6 iCount=iCount+4
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxD:
+  ;====
+  iCmdNo=2
+  GOTOF NextCode
+
+  ;====
+  _CxL:
+  ;====
+  IF (iCodeLastPos>=iCount+1)
+    sAux=SUBSTR(sCode,iCount,2)
+    IF sAux=="L1"
+      iCmdNo=4 iPara=1 iCount=iCount+2
+      GOTOF Compare
+    ENDIF
+    IF sAux=="L2"
+      iCmdNo=4 iPara=2 iCount=iCount+2
+      GOTOF Compare
+    ENDIF
+    IF sAux=="L3"
+      iCmdNo=4 iPara=3 iCount=iCount+2
+      GOTOF Compare
+    ENDIF
+    ;
+    IF (iCodeLastPos>=iCount+3)
+      ;
+      IF TOUPPER(SUBSTR(sCode,iCount,4))=="LIVE"
+        ;
+        IF (iDNo==0)
+          MakeAlarmParam(sAlarmParam,sTName,": D0 + LIVE...",3)
+          iAlarmNo=AL_CombNotAllowed
+          GOTOF HandleAlarm
+        ENDIF
+        ;
+        iCmdNo=10 iCount=iCount+4
+        ;
+        IF (iCodeLastPos>=iCount+2)
+          ;
+          bMin=(TOUPPER(SUBSTR(sCode,iCount,3))=="MIN") bMax=(TOUPPER(SUBSTR(sCode,iCount,3))=="MAX") bBest=FALSE
+          IF (iCodeLastPos>=iCount+3)
+            bBest=(TOUPPER(SUBSTR(sCode,iCount,4))=="BEST")
+          ENDIF
+          ;
+          IF (bMin OR bMax OR bBest)AND(iRefDNo>0)
+            MakeAlarmParam(sAlarmParam,sTName,": 2 * LIVE...",3)
+            iAlarmNo=AL_CombNotAllowed
+            GOTOF HandleAlarm
+          ENDIF
+          ;
+          IF (bMin)
+            iCount=iCount+3 iRefDNo=iDNo bWithRef=TRUE
+            GOTOF Compare
+          ENDIF
+          ;
+          IF (bMax)
+            iCondition=7 iCount=iCount+3 sAux=SUBSTR(sCode,iCount,1) iRefDNo=iDNo bWithRef=TRUE
+            GOTOF FinishCMD
+          ENDIF
+          ;
+          IF (bBest)
+            iCondition=8 iCount=iCount+4 sAux=SUBSTR(sCode,iCount,1) iRefDNo=iDNo bWithRef=TRUE
+            GOTOF FinishCMD
+          ENDIF
+        ENDIF
+        GOTOF Compare
+      ENDIF
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxR:
+  ;====
+  iCmdNo=4 iPara=0 iCount=(iCount+1)
+  GOTOF Compare
+
+  ;====
+  _CxT:
+  ;====
+  iCmdNo=1 bArgIsString=TRUE
+  GOTOF NextCode
+
+  ;====
+  _CxW:
+  ;====
+  iCmdNo=5
+  GOTOF NextCode
+
+  ;=======
+  Compare:
+  ;=======
+  ;
+  IF (iCodeLastPos>iCount)
+    ;
+    WHILE (SUBSTR(sCode,iCount,1)==" ")AND(iCodeLastPos>iCount)
+      iCount=iCount+1
+    ENDWHILE
+    ;
+    IF (iCodeLastPos>=iCount+1)
+      sAux=SUBSTR(sCode,iCount,2)
+      IF sAux=="=="
+        iCondition=4 iCount=iCount+1
+        GOTOF NextCode
+      ENDIF
+      IF sAux==">="
+        iCondition=5 iCount=iCount+1
+        GOTOF NextCode
+      ENDIF
+      IF sAux=="<="
+        iCondition=6 iCount=iCount+1
+        GOTOF NextCode
+      ENDIF
+      ;
+      IF (iCodeLastPos>=iCount)
+        sAux=SUBSTR(sCode,iCount,1)
+        IF sAux=="="
+          iCondition=1
+          GOTOF NextCode
+        ENDIF
+        IF sAux==">"
+          iCondition=2
+          GOTOF NextCode
+        ENDIF
+        IF sAux=="<"
+          iCondition=3
+          GOTOF NextCode
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+
+  ;====
+  _CxA:
+  _CxB:
+  ;C
+  ;D
+  _CxE:
+  _CxF:
+  _CxG:
+  _CxH:
+  _CxI:
+  _CxJ:
+  _CxK:
+  ;L
+  _CxM:
+  _CxN:
+  _CxO:
+  _CxP:
+  _CxQ:
+  ;R
+  _CxS:
+  ;T
+  _CxU:
+  _CxV:
+  _CxX:
+  _CxY:
+  _CxZ:
+  ;====
+  ;
+  GOTOF Error
+
+  ;========
+  NextCode:
+  ;========
+  ;
+  iCount=iCount+1
+  IF (iCount>iCodeLastPos)OR(iCmdNo==0) GOTOF NextCodeCheck
+  ;
+  iPos=iCount iSep1=INDEX(SUBSTR(sCode,iCount)," ")
+  ;
+  IF (iSep1==-1)
+    sArg=SUBSTR(sCode,iCount,iCodeLastPos-iCount+1) iCount=(iCodeLastPos+1)
+  ELSE
+    ;
+    IF (iCount==iCodeLastPos)OR(iSep1==0) GOTOF Error
+    ;
+    sArg=SUBSTR(sCode,iCount,iSep1) iCount=(iCount+iSep1+1)
+  ENDIF
+  ;
+  IF (SUBSTR(sArg,0,1)=="=")
+    ;
+    IF (STRLEN(sArg)<2) GOTOF Error
+    ;
+    sArg=SUBSTR(sArg,1) iTmp=(STRLEN(sArg)-1)
+    ;
+    IF (bArgIsString)
+      ;
+      IF (SUBSTR(sArg,0,1)=="<")AND(SUBSTR(sArg,iTmp,1)==">")
+        IF (iTmp>1)
+          sArg=SUBSTR(sArg,1,iTmp-1)
+        ELSE
+          sArg=""
+        ENDIF
+      ELSE
+        ;
+        IF ISVAR(sArg)
+          IF (STRINGIS(sArg)==211) GOTOF VarError
+          EXECSTRING("sArg=<<"<<sArg)
+        ENDIF
+      ENDIF
+    ELSE
+      ;
+      IF (NOT ISNUMBER(sArg))
+        IF (NOT ISVAR(sArg)) GOTOF Error
+        IF (STRINGIS(sArg)==211) GOTOF VarError
+        EXECSTRING("sArg=<<"<<sArg)
+        IF (NOT ISNUMBER(sArg)) GOTOF Error
+      ENDIF
+      rNo=NUMBER(sArg) iNo=RTOI(rNo)
+    ENDIF
+  ELSE
+    ;
+    IF (NOT ISNUMBER(sArg))OR(bArgIsString) GOTOF Error
+    rNo=NUMBER(sArg) iNo=RTOI(rNo)
+  ENDIF
+
+  ;=========
+  FinishCMD:
+  ;=========
+
+  ;aktuellen CMDCODE abschliessen
+  GOTOF "_Cx"<<iCmdNo
+
+  ;====
+  _Cx1:
+  ;====
+  IF (sArg=="")
+    iAlarmNo=Al_Missing sAlarmParam="T=?"
+    GOTOF HandleAlarm
+  ENDIF
+  sTName=sArg
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx2:
+  ;====
+  IF (iNo>icMaxDNo)OR(iNo==0)
+    MakeAlarmParam(sAlarmParam,sTName,": D="<<iNo,3)
+    iAlarmNo=AL_NotAvailable
+    GOTOF HandleAlarm
+  ENDIF
+  iDNo=iNo rTol=rDefaultTol
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx4:
+  ;====
+  IF (iDNo==0)
+    MakeAlarmParam(sAlarmParam,sTName,": D0 + Lx/R",3)
+    iAlarmNo=AL_CombNotAllowed
+    GOTOF HandleAlarm
+  ENDIF
+  iSetNo=iSetNo+1 iSetDNo[iSetNo]=iDNo iSetParaNo[iSetNo]=iPara iSetCondition[iSetNo]=iCondition rSetValue[iSetNo]=rNo rSetTol[iSetNo]=rTol
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx5:
+  ;====
+  IF (iDNo==0)
+    rDefaultTol=rNo
+  ELSE
+    rTol=rNo
+  ENDIF
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx6:
+  ;====
+  IF (iDNo>0)
+    MakeAlarmParam(sAlarmParam,sTName,": COUNT + D",3)
+    iAlarmNo=AL_CombNotAllowed
+    GOTOF HandleAlarm
+  ENDIF
+  IF (iNo<=0)
+    MakeAlarmParam(sAlarmParam,sTName,": COUNT<=0",3)
+    iAlarmNo=AL_NotAvailable
+    GOTOF HandleAlarm
+  ENDIF
+  iMinTlCount=iNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx10:
+  ;=====
+  iSetNo=iSetNo+1 iSetDNo[iSetNo]=iDNo iSetParaNo[iSetNo]=10 iSetCondition[iSetNo]=iCondition rSetValue[iSetNo]=rNo rSetTol[iSetNo]=rTol
+  GOTOF NextCodeCheck
+
+  ;=====
+  Error:
+  ;=====
+  iAlarmNo=Al_SyntaxError sAlarmParam=SUBSTR(sCode,MAXVAL(iPos-10,0),20)
+  GOTOF HandleAlarm
+
+  ;========
+  VarError:
+  ;========
+  iAlarmNo=Al_NotAvailable sAlarmParam="LUD "<<sArg
+  GOTOF HandleAlarm
+
+  ;=============
+  NextCodeCheck:
+  ;=============
+ENDWHILE
+
+IF (bWithRef)AND(iMinTlCount>0)
+  MakeAlarmParam(sAlarmParam,sTName,": COUNT + LIVEMIN/MAX/BEST",3)
+  iAlarmNo=AL_CombNotAllowed
+  GOTOF HandleAlarm
+ELSE
+  ;Keine Meldung, wenn nur bestimmte Wz'e gesucht werden sollen
+ENDIF
+
+IF (iTNo>0)
+  ;
+  ;Pruefung mit der internen WzNummer iTNo
+  ;
+  ;WzName aus int. WzNummer
+  sTName=$TC_TP2[iTNo]
+  GOTOF _CHECK
+ENDIF
+;
+IF (sTName=="")
+  ;
+  ;WzName nicht angegeben -> Ueberpruefung SpWz
+  ;
+  IF (giTNoSp>0)AND(NOT $P_SEARCH)AND(NOT $P_SIM)
+    ;
+    ; Warten auf Satzende
+    STOPRE
+    ;
+    ; Aktualisierung der WzDaten
+    STOPRE
+    ;
+    sTName=$TC_TP2[giTNoSp] iTNo=giTNoSp
+    GOTOF _CHECK
+  ELSE
+    ;
+    ;Satzvorlauf, Test, Simulation, kein SpWz -> keine Ueberpruefung
+    RET
+  ENDIF
+ENDIF
+
+;============
+_CHECK_GROUP:
+;============
+;
+;WzName ist angegeben -> Es wird ueberprueft, ob ein gueltiges Wz in der WzFamilie existiert
+;
+;Anzahl der Wz in Familie
+iNumTl=TOOLGNT(sTName)
+IF (iNumTl<=0)
+  ;Kein Wz aus dieser Familie gefunden
+  iAlarmNo=AL_TlNotFound sAlarmParam=sTName
+  GOTOF HandleAlarm
+ENDIF
+;
+iTlCount=1 bTlGroup=TRUE
+;
+;======
+_CHECK:
+;======
+;
+iCount=-1 iAlarmNo=0 bError=FALSE bSrcLocked=FALSE
+;
+IF (bTlGroup)
+  ;
+  ;Wz Nummer aus Liste der Schwesterwerkzeuge (ST)
+  iTNo=TOOLGT(sTName,iTlCount)
+  ;
+  IF (iTNo<=0)
+    ;
+    ;ungueltiges Ergebnis
+    bError=TRUE
+    GOTOF NEXT_ST
+  ENDIF
+  ;
+  iSrcMN=$A_MYMN[iTNo] iSrcLN=$A_MYMLN[iTNo]
+  IF (bWithPlaceProp)AND(iSrcMN>=1)AND(iSrcMN<=giNumRealMag)AND(iSrcLN>=1)
+    ;
+    bSrcLocked=(($TC_MAP3[iSrcMN] B_AND 'B10')<>0)OR(($TC_MPP4[iSrcMN,iSrcLN] B_AND 'B1')<>0)
+  ENDIF
+  ;
+  bSrcNotInMag=((iMode B_AND 'B100')==0)AND(iSrcMN==0)AND((giTNoSp<>iTNo)OR(($TC_TP8[iTNo] B_AND 'H8000')<>0))
+  ;
+  IF (($TC_TP8[iTNo] B_AND 'B110')<>'B10')OR((gbTMIsHHD)AND((RTOI($TC_TPC8[iTNo]) B_AND 'HFF0000')<>0))OR(bSrcNotInMag)OR(bSrcLocked)
+    ;
+    ;Wz gesperrt oder nicht freigegeben (oder nicht aus Magazin) -> keine weitere Pruefung
+    bError=TRUE
+    GOTOF NEXT_ST
+  ENDIF
+ENDIF
+
+WHILE (iCount<iSetNo)AND(NOT bError)
+  ;
+  iCount=iCount+1 iDNo=iSetDNo[iCount] iPara=iSetParaNo[iCount] iCondition=iSetCondition[iCount] rValue=rSetValue[iCount] rTol=rSetTol[iCount]
+  ;
+  IF (iDNo>$P_TOOLND[iTNo])
+    ;D Nicht vorhanden
+    MakeAlarmParam(sAlarmParam,sTName,"D"<<iDNo,2)
+    iAlarmNo=AL_NotAvailable
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (iCondition>0)
+    ;
+    CASE iPara OF 0 GOTOF _RADIUS 1 GOTOF _L1 2 GOTOF _L2 3 GOTOF _L3 10 GOTOF _LIVE
+    ;===
+    _L1:
+    ;===
+    rActValue=$TC_DP3[iTNo,iDNo]+$TC_DP12[iTNo,iDNo]+$TC_DP21[iTNo,iDNo] sAux="L"<<iPara
+    GOTOF _RESULT
+    ;===
+    _L2:
+    ;===
+    rActValue=$TC_DP4[iTNo,iDNo]+$TC_DP13[iTNo,iDNo]+$TC_DP22[iTNo,iDNo] sAux="L"<<iPara
+    GOTOF _RESULT
+    ;===
+    _L3:
+    ;===
+    rActValue=$TC_DP5[iTNo,iDNo]+$TC_DP14[iTNo,iDNo]+$TC_DP23[iTNo,iDNo] sAux="L"<<iPara
+    GOTOF _RESULT
+    ;=======
+    _RADIUS:
+    ;=======
+    rActValue=$TC_DP6[iTNo,iDNo]+$TC_DP15[iTNo,iDNo] sAux="R"
+    GOTOF _RESULT
+    ;=====
+    _LIVE:
+    ;=====
+    IF ($TC_TP9[iTNo]==0)
+      ;keine Ueberwachung gewaehlt
+      bError=TRUE
+      GOTOF NEXT_PARA
+    ENDIF
+    IF ($TC_TP9[iTNo]==1)
+      ;Standzeit
+      rActValue=$TC_MOP2[iTNo,iDNo] sAux="LIVE" rLastLive[iDNo]=rActValue iCond[iDNo]=iCondition
+    ELSE
+      ;Standmenge
+      rActValue=$TC_MOP4[iTNo,iDNo] sAux="LIVE" rLastLive[iDNo]=rActValue iCond[iDNo]=iCondition
+    ENDIF
+    ;
+    ;=======
+    _RESULT:
+    ;=======
+    ;
+    CASE iCondition OF 1 GOTOF _INTOL 2 GOTOF _GT 3 GOTOF _LT 4 GOTOF _EQ 5 GOTOF _GE 6 GOTOF _LE 7 GOTOF _MAX 8 GOTOF _BEST
+    ;======
+    _INTOL:
+    ;======
+    bError=(rActValue<rValue-rTol)OR(rActValue>rValue+rTol) sValue="<>"<<rValue<<"+-"<<rTol
+    GOTOF NEXT_PARA
+    ;===
+    _GT:
+    ;===
+    bError=(rActValue<=rValue) sValue="<="<<rValue
+    GOTOF NEXT_PARA
+    ;===
+    _LT:
+    ;===
+    bError=(rActValue>=rValue) sValue=">="<<rValue
+    GOTOF NEXT_PARA
+    ;===
+    _GE:
+    ;===
+    bError=(rActValue<rValue)  sValue="<"<<rValue
+    GOTOF NEXT_PARA
+    ;===
+    _LE:
+    ;===
+    bError=(rActValue>rValue)  sValue=">"<<rValue
+    GOTOF NEXT_PARA
+    ;===
+    _EQ:
+    ;===
+    bError=(rActValue<>rValue) sValue="<>"<<rValue
+    GOTOF NEXT_PARA
+    ;====
+    _MAX:
+    ;====
+    bError=FALSE
+    GOTOF NEXT_PARA
+    ;=====
+    _BEST:
+    ;=====
+    ;Wz war noch nicht im Einsatz
+    bError=(($TC_TP8[iTNo] B_AND 'H80')<>0)
+    ;
+    ;=========
+    NEXT_PARA:
+    ;=========
+    ;
+  ENDIF
+  ;
+ENDWHILE
+;
+;=======
+NEXT_ST:
+;=======
+;
+IF (NOT bError)
+  ;
+  ;Anforderungen erfuellt
+  ;
+  IF (bTlGroup)AND(iMinTlCount>0)
+    ;
+    ;Es wird eine bestimmte Anzahl passender Wz'e dieser WzFamilie verlangt
+    ;
+    iRelTlCount=iRelTlCount+1
+    ;
+    IF (iRelTlCount>iMinTlCount)
+      ;
+      ;Ausreichend Wz'e gefunden -> Setzen der Ergebnisvariablen und Ende der Suche
+      ;
+      ;giResult=0 gsResult=WzName/SchwesterWzNummer
+      giResult=0 gsResult=sTName<<"/"<<$TC_TP1[iTNo]
+      RET
+    ENDIF
+  ELSE
+    ;
+    IF (bTlGroup)AND(bWithRef)
+      ;
+      ;Ermittlung des Referenzwerkzeugs
+      ;
+      IF ((iCond[iRefDNo]<7)AND(rLastLive[iRefDNo]<rRefLive))OR((iCond[iRefDNo]>=7)AND(rLastLive[iRefDNo]>rRefLive))OR(rRefLive==0)
+        rRefLive=rLastLive[iRefDNo] iRefSTNo=$TC_TP1[iTNo]
+      ENDIF
+    ELSE
+      ;
+      ;Passendes Wz gefunden -> Setzen der Ergebnisvariablen und Ende der Suche
+      ;
+      ;giResult=0 gsResult=WzName/SchwesterWzNummer
+      giResult=0 gsResult=sTName<<"/"<<$TC_TP1[iTNo]
+      RET
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (bTlGroup)
+  ;
+  iTlCount=iTlCount+1
+  ;
+  IF (iTlCount<=iNumTl) GOTOB _CHECK
+  ;
+  ;Alle Wz der Familie sind jetzt ueberprueft
+  ;
+  IF (bWithRef)AND(iRefSTNo>0)
+    ;
+    ;Passendes Wz gefunden -> Setzen der Ergebnisvariablen und Ende der Suche
+    ;
+    ;giResult=0 gsResult=WzName/SchwesterWzNummer
+    giResult=0 gsResult=sTName<<"/"<<iRefSTNo
+    RET
+  ENDIF
+  ;
+  ;kein passendes Wz gefunden
+  iAlarmNo=AL_PleasePrepTool67 sAlarmParam=sTName
+ELSE
+  ;Wz passt nicht
+  MakeAlarmParam(sAlarmParam,sTName,"D"<<iDNo<<"/"<<sAux<<sValue<<" ("<<rActValue<<")",2)
+  iAlarmNo=AL_InvalidCutData67
+ENDIF
+;
+IF (NOT bDialogOff)
+  ;
+  ;Wiederholung der Pruefung/Erneute Suche nach Betaetigung der Starttaste
+  ;
+  MsgBox(<<iAlarmNo,"CLEAR BSTART","TRUE",sAlarmParam)
+  ;
+  STOPRE
+  ;
+  IF (bTlGroup)
+    GOTOB _CHECK_GROUP
+  ELSE
+    GOTOB _CHECK
+  ENDIF
+ENDIF
+;
+;===========
+HandleAlarm:
+;===========
+;
+IF (bWithMessage)
+  ;
+  IF (iAlarmNo==AL_PleasePrepTool67)OR(iAlarmNo==AL_TlNotFound)OR(iAlarmNo==AL_InvalidCutData67)
+    ;mit Meldungsausgabe
+    SETAL(AL_TlNotFound67,sTName)
+  ENDIF
+ENDIF
+;
+giResult=iAlarmNo gsResult=sAlarmParam
+;
+IF (NOT bDialogOff)
+  MsgBox(<<iAlarmNo,"CLEAR RESET","FALSE",gsResult)
+ENDIF
+;
+IF (bProtOn)
+  ;
+  ;Protokollieren fehlender Wz'e
+  ;
+  IF (NOT ISFILE(gsProtMissTl))
+    ;
+    IF ISFILE(mcSysText)
+      ;
+      ;Erstellungsdatum:
+      ;
+      FileRead("DATE_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sCode,,,"")
+      sDate=sCode
+      FileRead("PROGRAM_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sCode,,,"")
+      sProg=sCode
+      FileRead("HEADER_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sCode,,,"")
+      sHeader=sCode iCount=STRLEN(sHeader)
+      FileRead("LINE_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sCode)
+      IF ISNUMBER(sCode)
+        iCount=NUMBER(sCode)
+      ENDIF
+    ELSE
+      sDate="Date" sProg="Program" sHeader="Header" iCount=STRLEN(sHeader)
+    ENDIF
+    ;
+    MakeDate(sAux,sDate<<": "," / ")
+    Write(iError,gsProtMissTl,sAux)
+    ;
+    ;Aktives Programm
+    ;
+    IF ($P_STACK>0)
+      iPos=$P_STACK-1
+    ELSE
+      iPos=0
+    ENDIF
+    ;
+    IF (sProtFile=="")
+      sProtFile="_N_TO_AVAIL_SPF"
+    ENDIF
+    ;
+    IF (TOUPPER($P_PROG[iPos])==sProtFile)
+      iPos=MINVAL(iPos-1,0)
+    ENDIF
+    Write(iError,gsProtMissTl,sProg<<": "<<$P_PROG[iPos])
+    Write(iError,gsProtMissTl,"")
+    ;
+    ;Ueberschrift
+    ;
+    Write(iError,gsProtMissTl,sHeader<<":")
+    sAux="-"
+    WHILE (STRLEN(sAux)<=iCount)
+      sAux=sAux<<"-"
+    ENDWHILE
+    Write(iError,gsProtMissTl,sAux)
+  ENDIF
+  ;
+  Write(iError,gsProtMissTl,sAlarmParam)
+ENDIF
+;
+RET
+

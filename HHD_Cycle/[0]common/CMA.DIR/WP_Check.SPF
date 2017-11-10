@@ -1,0 +1,102 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     WP_Check.SPF
+;# Task:      Palettenstatus
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.03 - 09.05.2016 / Simons
+; - ProtoTyp
+;
+; V04.00.01 - 10.07.2014 / Simons
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Verwendet bei LPS/MPS
+;
+; Prueft den Status aller Werkstuecke
+; auf der Palette im Leitrechnerbetrieb
+; und bildet den Palettenstatus
+;
+; Wenn der Status
+;
+; a) aller Werkstuecke
+; - nicht vorhanden (0)
+; - Fertig (2)
+; - Entnommen (6)
+; -> Palette Fertig
+;
+; b) eines Werkstuecks
+; - noch Freigegeben (1)
+; - Programm Fehlt (9)
+; -> keine Aenderung des Palettenstatus
+;    und Fortsetzung der Bearbeitung
+;
+; c) sonst -> Bearbeitung abgebrochen
+;------------------------------------
+
+PROC WP_CHECK DISPLOF SBLOF
+
+DEF BOOL bReady=TRUE, bInterrupted=FALSE
+;
+DEF INT iCount
+
+FOR iCount = 1 TO mcMaxWPonPal-1
+  ;
+  CASE giMPSWorkState[iCount] OF 0 GOTOF _READY 1 GOTOF _NOCHANGE 2 GOTOF _READY 6 GOTOF _READY 9 GOTOF _NOCHANGE DEFAULT GOTOF _INTERRUPTED
+  ;
+  ;============
+  _INTERRUPTED:
+  ;============  
+  bInterrupted=TRUE bReady=FALSE
+  GOTOF _READY
+  ;
+  ;=========
+  _NOCHANGE:
+  ;=========
+  bReady=FALSE
+  ;
+  ;======
+  _READY:
+  ;======
+  ;
+ENDFOR
+;
+;PalettenStatus
+IF (bReady)
+  ;
+  ;Alle Werkstuecke Fertig
+  giMPSActivProg=0 giMMC_Pal[1,BufNo]=2
+  ;
+  ;Increment the machining COUNTER
+  giCOUNTER[BufNo+20]= giCOUNTER[BufNo+20]+1
+  ;
+  Write_SysProg
+ENDIF
+;
+IF (bInterrupted)
+  ;
+  ;Ein Werkstueck abgebrochen
+  giMPSActivProg=0 giMMC_Pal[1,BufNo]=3
+  ;
+  Write_SysProg
+ENDIF
+;
+RET

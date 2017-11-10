@@ -1,0 +1,171 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToPrepOpt.SPF
+;# Task:      Opt. Tool Prepare
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 02.11.2016 / Simons
+; - bSave hinzu
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 26.08.2016 / Simons
+; - Neuversionierung
+; - $AC_CYCLE_TIME -> mcDBR_Time
+; - Umbenannt ToTime -> ToPrepOpt
+;
+; V06.00.03 - 07.05.2015 / Simons
+; - ProtoTyp
+;
+; V01.01.00 - 30.01.2015 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; Optimierung Prepare
+; - Speicherung der Zeit von
+;   Vorbereitung bis Aufruf TC_BS
+; - Verzoegerung der Bearbeitung
+;   des Vorbereitungsauftrags
+;
+; SYG im Kanal 2:
+; ---------------
+; SYG_RM[mcSYG_TC] = Startzeit [s]
+;
+; Aufruf im SysCha2
+;
+; $AC_CYCLE_TIME -> MD 27860.1 erforderlich
+;------------------------------------
+
+PROC ToPrepOpt(BOOL bSave) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="ToPrepOpt V06.00.06"
+;
+DEF STRING[255] sTime
+;
+DEF INT iFError=0, iSTime, iATime, iPosNo
+
+IF (gsPrepProgName=="")OR(NOT gbOptToolPrep)
+  ;
+  ;Funktion nicht gewaehlt und kein Datensatz definiert
+  RET
+ENDIF
+
+IF (gbPutToTime)
+  ;
+  ;Bearbeitungszeit aus TC_BS speichern
+  ;
+  IF (gsPrepInfo<>"")
+    iPosNo=INDEX(gsPrepInfo,"=")
+    IF (iPosNo>-1)
+      FileRead(SUBSTR(gsPrepReq,0,iPosNo),gsPrepProgName,sTime,100)
+      IF (sTime=="")
+        ;
+        ;Eintrag noch nicht vorhanden -> Speichern
+        WRITE(iFError,gsPrepProgName,gsPrepInfo)
+      ENDIF
+    ENDIF
+  ENDIF
+  gsPrepInfo="" gbPutToTime=FALSE gbTcPrepTeachRun=FALSE
+ENDIF
+
+IF (giJobNo<>mcTaskPrep2)OR(bSave)
+  ;
+  ;kein Vorbereitungsauftrag -> Ende
+  RET
+ENDIF
+
+IF (gbGetToTime)
+  ;
+  ;Warten aktivieren durch PREPARE oder TCWP
+  ;
+  gbGetToTime=FALSE gbWaitPrepare=FALSE giActPrepTime=-1
+  ;
+  ;Ungueltige Anforderung -> Ende
+  IF (gsPrepReq=="") GOTOF ENDE
+  ;
+  iPosNo=INDEX(gsPrepReq,"*")
+  IF (giJobTNo>0)AND(iPosNo>-1)
+    ;
+    IF (TOUPPER(SUBSTR(gsPrepReq,0,iPosNo))<>TOUPPER($TC_TP2[giJobTNo]))
+      ;
+      ;Das geforderte Wz ist nicht das in Vorbereitung befindliche -> Weiter mit akt. Vorbereitung
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+  iPosNo=INDEX(gsPrepReq,"=")
+  IF (iPosNo>-1)
+    ;
+    ;Direkte Vorgabe der Bearbeitungszeit
+    sTime=SUBSTR(gsPrepReq,iPosNo)
+    IF ISNUMBER(sTime)
+      giActPrepTime=NUMBER(sTime)
+    ENDIF
+  ELSE
+    ;
+    IF ISFILE(gsPrepProgName)
+      ;
+      ;Wartezeit aus Datenfile
+      FileRead(gsPrepReq,gsPrepProgName,sTime,100)
+      ;
+      IF ISNUMBER(sTime)
+        ;
+        ;Kombination bekannt -> Verzoegerung Prepare
+        giActPrepTime=NUMBER(sTime)
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  gsPrepReq=""
+  ;
+  IF (giActPrepTime==-1)
+    ;
+    ;Kombination unbekannt oder Datenfile noch nicht angelegt -> Vorbereitung und Anstoss Lernen
+    gbTcPrepTeachRun=TRUE
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (giActPrepTime>giMaxPrepTime)
+    ;
+    ;Startzeit ermitteln / verhindern die Wz-Vorbereitung
+    SYG_RM[mcSYG_TC]=mcDBR_Time gbWaitPrepare=TRUE
+  ENDIF
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (gbWaitPrepare)
+  ;
+  ;Sollzeit<Restzeit -> Freigabe der naechsten Vorbereitung
+  iSTime=(giActPrepTime-giMaxPrepTime) iATime=RTOI(mcDBR_Time-SYG_RM[mcSYG_TC]) gbWaitPrepare=(iATime<iSTime)
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (gbWaitPrepare)
+  ;
+  ;Zurueckstellen der Vorbereitung
+  giJobNo=-(mcTaskPrep2)
+ENDIF
+;
+RET

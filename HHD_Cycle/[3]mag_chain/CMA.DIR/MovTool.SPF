@@ -1,0 +1,389 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MovTool.SPF
+;# Task:      Wz Bewegen
+;# Version:   V06.00.07
+;# Date:      03.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1000
+;# Magazines: Chain
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmparam
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop-> grSyncPickupDrop
+; - WHILE (NOT ...) -> WHENEVER (NOT...) DO RDISABLE
+; - formale Aenderungen
+;
+; V06.00.05 - 10.03.2017 / Simons
+; - bFast Hinzu
+; - Balluff entfernt
+; - formale Aenderungen
+;
+; V06.00.05 - 05.10.2016 / Simons
+; - Neuversionierung
+; - Miksch: Src->Dst
+;
+; V06.00.04 - 28.08.2016 / Simons
+; - Neuversionierung
+; - Miksch hinzu
+;
+; V06.00.03 - 17.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 10.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag,giMagNoLoadList
+;
+; V04.00.00 - 23.02.2016 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Werkzeug bewegen in den Faellen:
+;
+; a) Werkzeug in Vorbereitungsposition bringen
+;    iMagNo==9998 iPotNo==1
+; b) Werkzeug ins Magazin zurueckbringen und ablegen
+;    iMagNo<9998 iMagNo<>giMagNoLoadList iPotNo>0
+; c) Werkzeug zur Handbeladung bringen
+;    iMagNo=9999 iPotNo>0
+; d) Werkzeug zur Bruchkontrolle bringen
+;    iMagNo=9998 iPotNo=4
+;
+; Eingangsparameter:
+; ------------------
+; iToDo: Kennung fuer den Auftrag in der Form xyz
+;        bei FC8 TaskId=
+;        1 - Beladen/Entladen/Umsetzen
+;        2 - Wz vorbereiten/wechseln
+;      4,5 - asynchron umspeichern
+;
+; y : TaskIdNo bei FC8 TaskId=
+;     1 - Nr. Beladestelle
+;     2 - Nr. Spindel
+;   4,5 - Kanal-Nr
+;
+; z: Modus bei FC8 TaskId=
+;    1 - BitNr fuer Beladen - Entladen - Umsetzen
+;    2 - BitNr fuer Vorbereiten
+;  4,5 -
+;
+; 110: Beladen ueber Beladestelle_Hand
+; 111: Entladen ueber Beladestelle_Hand
+; 112: Umsetzen allgemein (= immer Beladestelle_Hand)
+; 113: Positionieren (hier nicht verwendet
+;
+; 120: Beladen ueber Beladestelle Magazin
+; 121: Entladen ueber Beladestelle Magazin
+;
+; 211: Wz-Wechsel
+; 212: Bereitstellung
+;
+; 5xx: asynchrone Umspeichervorgaenge
+; 500: Wz asynchron umsetzen (im Magazin)
+; 501: Leeres HG asynchron bereitstellen (zum Ausschleusen eines SpindelWz)
+;      und SpWz ins Magazin zurueckbringen
+; 51i: Wz in die Spindel bringen (asynchron)
+;      i=0: keine zusaetzliche Aktionen
+;      i=1: Sp-Wz in Mess-/Pruefposition bringen
+;      i=2: Spindel in WzW-Position belassen
+;
+; 600: Wz zur Bruchkontrolle bringen
+;
+; iTNo: WzV-interne T-Nummer des zu bewegenden Wz
+; iMagNo: Magazin-Nummer Ziel
+; iPotNo: Platz-Nummer Ziel
+;
+; Rueckgabeparameter:
+; -------------------
+; iAlarmNo:     Alarmnummer
+; sAlarmParam:  Zusatztext
+;
+; Achtung: das HG enthaelt bereits das zu bewegende (mittels iTNo angesprochene) Wz
+;
+;------------------------------------
+
+PROC MovTool(INT iToDo, INT iTNo, INT iMagNo, INT iPotNo, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam, BOOL bFast)
+
+DEF STRING[32] sCycName="MovTool V06.00.07"
+
+DEF BOOL bToTC, bToMag, bToBrk, bToLoad, bMagIsMiksch, bDGIsWM307, bMagIsChain, bMagIsWM307, bAxInPos, bChClamped
+;
+DEF INT iDstFLog=0, iFLogMax, iSrcFLog, iActFLog, iChkRes
+;
+DEF REAL rActPosV1, rVeloV1, rSrcPosV1, rDstPosV1, rDiskInPos
+
+iAlarmNo=0 sAlarmParam=""
+;
+bDGIsWM307=((giDGType B_AND 'B100')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsWM307=((bMagIsChain)AND(bDGIsWM307)) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307))
+;
+rVeloV1=360*($MA_POS_AX_VELO[mcAxV1]) rSrcPosV1=grPlDatPosV1[0] rDstPosV1=grPlDatPosV1[1] rDiskInPos=$MA_STOP_LIMIT_FINE[mcAxV1]
+;
+;Ueberpruefungen
+;---------------
+IF (iTNo<=0)
+  iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo<=0)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998)AND(iMagNo<>9999))
+  sAlarmParam=<<iMagNo
+  IF (iMagNo>0)AND(iMagNo==giMagNoLoadList)
+    iAlarmNo=AL_LoadListNotTarget
+  ELSE
+    iAlarmNo=AL_InvalidCaNr
+  ENDIF
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+  IF (iPotNo<1)OR(iPotNo>giNumPlacesInMag[iMagNo])
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iPotNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+IF (giTNoDg1>0)AND(giTNoDg1<>iTNo)AND((NOT gbDG2MagSide)OR(NOT bMagIsMiksch))
+  ;im DG1 ist ein Wz, aber nicht das gewuenschte
+  MakeAlarmParam(sAlarmParam,$TC_TP2[giTNoDg1],<<$TC_TP1[giTNoDg1])
+  iAlarmNo=AL_WrongTlInHG
+  GOTOF ENDE
+ENDIF
+;
+IF (giTNoDg2>0)AND(giTNoDg2<>iTNo)AND((gbDG2MagSide)OR(NOT bMagIsMiksch))
+  ;im DG2 ist ein Wz, aber nicht das gewuenschte
+  MakeAlarmParam(sAlarmParam,$TC_TP2[giTNoDg2],<<$TC_TP1[giTNoDg2])
+  iAlarmNo=AL_WrongTlInHG
+  GOTOF ENDE
+ENDIF
+
+;Status Kette
+;------------
+rActPosV1=$AA_IM[mcAxV1] bChClamped=(mcbDBB_ChClamped) bAxInPos=($AA_STAT[mcAxV1]==4)
+
+;Aufgabe Erkennen
+;----------------
+bToMag=((iMagNo>=1)AND(iMagNo<=giNumRealMag))
+bToTC=((iMagNo==9998)AND(iPotNo==1)AND(iToDo<>600))
+bToBrk=(iToDo==600)
+bToLoad=((iMagNo==9999)AND(iPotNo>0))
+
+IF (bMagIsWM307)
+  ;
+  GETD(mcAxV1)
+  ;
+  IF (iToDo<>mcTaskPrep2)OR(giMagState<>11)
+    ;
+    ;keine Vorbereitung oder das Wz soll geloest bleiben
+    ;
+    IF (NOT bChClamped)
+      ;
+      M_HgClamp1
+      ;
+      bChClamped=TRUE
+    ENDIF
+  ENDIF
+ENDIF
+
+IF (bMagIsMiksch)
+  ;
+  IF (giMagState==82)OR(giMagState==83)
+    ;
+    ;DG an oder bei Quellplatz im Magazin
+    ;
+    M_DgAdv1
+    ;
+    STOPRE
+    ;DG mit Wkz ausgehoben in Fahrgasse
+    giMagState=31
+    ;
+  ENDIF
+ENDIF
+;
+IF (giMagState==52)AND(NOT bToLoad)
+  ;
+  ;Werkzeug an Beladeposition bereitgestellt, aber kein Auftrag an die Beladeposition zu fahren -> Magazinstatus aktualisieren
+  ;
+  giMagState=0
+  ;
+  GetMagSt
+  ;
+  rActPosV1=$AA_IM[mcAxV1] bChClamped=(mcbDBB_ChClamped) bAxInPos=($AA_STAT[mcAxV1]==4)
+  ;
+ENDIF
+
+;=====
+_MOVE:
+;=====
+;
+IF (bToTC)OR(bToBrk)
+  ;
+  IF (bMagIsMiksch)
+    ;
+    ;DG mit Wkz ausgehoben in Fahrgasse
+    ;
+    ;DG in Uebernahmeposition WzW bringen
+    M_DgPos1Wt
+    ;DG zurueck
+    M_DgRet1
+    ;
+  ENDIF
+  ;
+  IF (bMagIsWM307)
+    ;
+    ;Kette in WzWPosition
+    ;
+    IF (ABS(rActPosV1-rSrcPosV1)>rDiskInPos)
+      ;
+      IF (NOT bChClamped)
+        M_HgClamp1
+      ENDIF
+      ;
+      IF (NOT bAxInPos)
+        ;
+        WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+        STOPRE
+      ENDIF
+      ;
+      ;Kette in WzW/BBK Position fahren
+      COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rSrcPosV1
+    ENDIF
+  ENDIF
+ENDIF
+
+IF (bToTC)
+  ;
+  IF (bMagIsWM307)
+    ;
+    ;Kette bereits loesen (ohne ELSP)
+    M=QU(MQ_HgUnClmpTl)
+  ENDIF
+  ;
+  STOPRE
+  ;Wz ist in Bereitstellungsposition
+  giMagState=11
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToBrk)
+  ;
+  STOPRE
+  ;Wz ist in Position Bruchkontrolle
+  giMagState=22
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToLoad)
+  ;
+  IF (NOT bAxInPos)
+    ;
+    WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+    STOPRE
+  ENDIF
+  ;
+  ;Kette/Scheibe in Beladeposion fahren
+  COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rDstPosV1
+  ;
+  STOPRE
+  ;Wz ist in Beladeposition
+  giMagState=52
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (NOT bMagIsMiksch) GOTOF ENDE
+
+IF (bToMag)
+  ;
+  ;Ziel ist ein Platz im Magazin
+  ;a) DG -> Magazin
+  ;b) Magazin -> Magazin
+  ;
+  IF (giMagState<90)
+    ;
+    ;DG steht nicht am Zielmagazinplatz
+    ;
+    ;DG ausheben
+    M_DgAdv1
+    ;DG in WzWposition
+    M_DgPos1Wt
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Kette in WzWPosition fahren
+    FINEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rDstPosV1
+    ;
+    ;Beladeposition Kette
+    M_DgPos2Wt
+    ;
+  ENDIF
+  ;
+  M_DgRet1
+  ;
+  STOPRE
+  ;DG an Zielmagazinplatz
+  giMagState=92
+  ;
+  ;Werkzeug (in DG2) auf Magazinplatz ablegen
+  ;
+  grSyncPickupDrop=ITOR(iTNo*100000)+iMagNo*1000+iPotNo
+  ;
+  ;Doppelgreifer in WzW Position...
+  IF (NOT bFast)OR(IN_ReqStopAtCycleEnd)OR(giStepTeststop>=3)
+    ;
+    ;...mit Warten
+    M_DgPos1Wt
+    ;
+    STOPRE
+    ;DG Leer in Grundstellung
+    giMagState=30
+    ;
+  ELSE
+    ;
+    ;...ohne Warten
+    M_DgPos1
+  ENDIF
+ELSE
+  iAlarmNo=AL_WayNotSpecified
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (bMagIsWM307)
+  RELEASE(mcAxV1)
+ENDIF
+;
+IF (iAlarmNo>0)
+  ;
+  MSG("")
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

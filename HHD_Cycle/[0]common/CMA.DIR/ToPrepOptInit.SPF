@@ -1,0 +1,105 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToPrepOptInit.SPF
+;# Task:      Optimize Tool Prepare
+;# Version:   V06.00.05
+;# Date:      11.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 31.01.2017 / Simons
+; - STRING[128] sProgPath ...
+;
+; V06.00.05 - 15.11.2016 / Simons
+; - Aufrufparameter hinzu
+; - EES und NC Extern hinzu
+;
+; V06.00.04 - 10.08.2016 / Simons
+; - Umbenannt
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - ProtoTyp ToTeach
+;
+; V01.01.00 - 30.01.2015 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+;--------------
+;
+; GndSt Optimierung Prepare
+; - Initialisierung der Optimierung
+; - Funktionsfreigabe
+; - Zuruecksetzen der gelernten Zeiten
+;
+; Aufruf in
+; - ActivatePalData.spf
+; - HostData.spf
+; - TMReset.spf
+;
+;------------------------------------
+
+PROC ToPrepOptInit(STRING[128] sProgPath, STRING[128] sProgName) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="ToPrepOptInit V06.00.05", sProgPreFix="PO_", sPathPrefix="", sSPF, sArea
+;
+DEF INT iFError
+
+STOPRE
+;
+gbOptToolPrep=(giPrepMode>0) gsPrepReq="" gsPrepInfo="" gbTcPrepTeachRun=FALSE gbGetToTime=FALSE gbPutToTime=FALSE gbWaitPrepare=FALSE
+;
+IF (sProgPath<>"")AND(sProgName<>"")AND(NOT giTMResetBypass)
+  ;
+  IF (giActDeviceNo<0)OR(giActDeviceNo>mcNumExtDevices)
+    ;
+    SETAL(AL_NotAvailable,"DEV"<<giActDeviceNo) 
+  ENDIF
+  ;
+  IF (giActDeviceNo==0)
+    ;
+    sSPF="_SPF" sArea="/_N_" 
+  ELSE
+    ;
+    IF (gbWithEES)
+      ;
+      sSPF=".SPF" sArea="/" sPathPrefix=gsDeviceName[giActDeviceNo]
+    ELSE
+      ;
+      ;Daten liegen im Werkstueck PO in der NC
+      sSPF="_SPF" sArea="/_N_" sProgPath=sArea<<"WKS_DIR"<<sArea<<sProgPreFix<<"WPD"
+    ENDIF
+  ENDIF
+  ;
+  gsPrepProgName=sPathPrefix<<sProgPath<<sArea<<sProgPreFix<<Prog_Name<<sSPF
+ENDIF
+;
+IF (gsPrepProgName=="")OR(giTMResetBypass)OR((PAL_NEW==0)AND((giPrepMode B_AND 2)==0))
+  ;
+  ;Datensatzname unbekannt oder Aufruf im TMReset
+  ;oder keine neue Palette oder kein Zuruecksetzen angefordert -> Abbruch
+  RET
+ENDIF
+;
+;Zuruecksetzen
+giPrepMode=1
+;
+IF ISFILE(gsPrepProgName)
+  ;
+  ;Datensatz Loeschen
+  DELETE(iFError,gsPrepProgName)
+ENDIF
+;
+RET
+

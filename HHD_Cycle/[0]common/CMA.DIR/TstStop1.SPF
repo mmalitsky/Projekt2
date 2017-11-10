@@ -1,0 +1,158 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TstStop1.SPF
+;# Task:      Teststopp Kanal 1
+;# Version:   V06.00.06
+;# Date:      11.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 02.12.2015 / Simons
+; - Neuversionierung
+; - Bei TiltHead nach Bremsentest 
+;   A-Achsposition wieder Anfahren
+;
+; V06.00.02 - 07.05.2015 / Simons
+; - Neuversionierung
+;
+; V03.03.00 - 14.12.2015 / Malitsky
+;- Vorlage
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; Teststop mit Bremsentest Kanal 1
+;
+; Eingangsparameter:
+; iMode:  0=(Standard)
+;         1=Teststop ohne Leerfahren
+;           Spindel, ohne(!!)
+;           Positionieren X/B/A/C
+;------------------------------------
+
+PROC TstStop1(INT iMode)
+
+DEF STRING[32] sCycName="TstStop1 V06.00.06"
+;
+DEF REAL rInPosHead=0.001, rOffsetY
+
+rOffsetY=grInchMetr*10.0
+
+;Hauptlaufsynchronisierung
+STOPRE
+
+IF ($P_SEARCH)OR($P_SIM)
+  M17
+ENDIF
+
+IF (NOT $P_SUBPAR[1])
+  iMode=0
+ENDIF
+
+IF ($P_CHANNO==1)
+  ;
+  ;Vom Kanal 1 aus:
+  ;- Leerfahren der Spindel sowie des HG (asynchron) anstossen (loest gleichzeitig
+  ;  eine evtl. anstehende Wz-Vorbereitung auf)
+  ;- auf Vollzug warten (Kanal 1 und 2 sind betroffen !!)
+
+  MsgBox(MSG_TestStopRunning,"CLEAR ERRTIME=1","TRUE")
+  ;
+  ;wg. WzW-Tuere: FreeHgSp macht TC("0"); ging ein TC("xxx") voraus, so schliesst die Tuere
+  ;               und wird wg. TC("0") gleich wieder geoeffnet: sporadisch Tuer-Endschalterfehler
+  STOPRE
+  giStepTeststop=1
+
+  IF (iMode==0)
+    ;warten, bis SP und HG leer sind
+    FreeHgSp(TRUE)
+  ELSE
+    ;warten, bis HG leer ist
+    FreeHgSp(FALSE)
+  ENDIF
+  ;
+  STOPRE
+  ;
+  ;Erst jetzt Teststop-Anforderung an Kanal 2 (Auswertung in Sys_Cha2.spf)
+  ;Wird in Sys_Cha2.spf abgefragt und loest Aufruf von TestStop.spf aus
+  ;Ruecksetzen der globalen Variablen nur bei Ende bzw. TMReset
+  giStepTeststop=3
+
+  ;Schritt 3
+  ;
+  MsgBox(MSG_TestStopRunning,"CLEAR ERRTIME=0.1","TRUE")
+  ;
+  IF (iMode==0)
+    ;
+    ;Z-Achsposition Palettenuebergabe anfahren
+    D0 G0 G40 G60 G17 G153 G500 G90 G94 Z=grPalLoadPosZ B0
+    ;
+    IF (gbTiltHeadExist)
+      IF (ABS($AA_IM[mcAxA]-grTcPosA)>rInPosHead)
+        AX[mcAxA]=grTcPosA
+      ENDIF
+    ENDIF
+    ;
+    IF (gbSwivHeadExist)
+      IF (ABS($AA_IM[mcAxC]-grTcPosC)>rInPosHead)
+        X0
+        AX[mcAxC]=grTcPosC
+      ENDIF
+    ENDIF
+    G153 X=grTcPrePosX Y=($AA_SOFTENDN[Y]+rOffsetY)
+  ENDIF
+
+  REPEAT
+    ;warten, bis Kanal2-Achsen Teststop-Position angefahren haben
+    STOPRE
+  UNTIL (giStepTeststop==4)
+
+  STOPRE
+  ;an Kanal 2: Kanal1 fuehrt Teststop aus
+  giStepTeststop=5
+
+  ;Schritt 5
+  ;
+  STOPRE
+  ; Start Teststop (mit Bremsentest Y-Achse)
+  M199
+
+  STOPRE
+  ;Warten auf Teststop-Ende
+  M196
+  ;
+  IF (gbTiltHeadExist)
+    IF (ABS($AA_IM[mcAxA]-grTcPosA)>rInPosHead)
+      ;
+      ;die A-Achse hat beim Teststop die Position verlassen
+      ;
+      AX[mcAxA]=grTcPosA
+    ENDIF
+  ENDIF
+  ;
+  REPEAT
+    ;warten, bis Kanal2-Achsen Teststop ausgefuehrt haben
+    STOPRE
+  UNTIL (giStepTeststop==6)
+
+  ;Schritt 7
+  ;
+  STOPRE
+  ;an Kanal 2: Kanal1 hat Teststop beendet
+  giStepTeststop=0
+
+  MSG("")
+ENDIF
+
+M17
+

@@ -1,0 +1,66 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MakeDate.SPF
+;# Task:      Erzeugung des aktuellen
+;#            Datums
+;# Version:   V06.00.03
+;# Date:      07.06.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: All
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+; Verlauf:
+; --------
+;
+; V06.00.03 - 07.06.2016 / Simons
+; - Prototyp
+; -----------------------------------
+;
+; -----------------------------------
+
+PROC MakeDate(VAR STRING[128] sZeitStempel, STRING[32] sText1, STRING[32] sText2)
+
+DEF STRING[32] sAux1
+
+IF $A_DAY<10
+  sAux1="0" << $A_DAY
+ELSE
+  sAux1=""<< $A_DAY
+ENDIF
+sZeitStempel=sAux1 << "."
+
+IF $A_MONTH<10
+  sAux1="0" << $A_MONTH
+ELSE
+  sAux1=""<< $A_MONTH
+ENDIF
+sZeitStempel=sZeitStempel << sAux1 << "."
+
+IF $A_YEAR<10
+  sAux1="200" << $A_YEAR
+ELSE
+  IF $A_YEAR<100
+    sAux1="20"<< $A_YEAR
+  ELSE
+    sAux1=$A_YEAR
+  ENDIF
+ENDIF
+sZeitStempel=sText1<<sZeitStempel<<sAux1<<sText2
+
+IF $A_HOUR<10
+  sAux1="0" << $A_HOUR
+ELSE
+  sAux1=""<< $A_HOUR
+ENDIF
+sZeitStempel=sZeitStempel<<sAux1 << ":"
+
+IF $A_MINUTE<10
+  sAux1="0" << $A_MINUTE
+ELSE
+  sAux1=""<< $A_MINUTE
+ENDIF
+sZeitStempel=sZeitStempel << sAux1
+;
+RET

@@ -1,0 +1,961 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Sys_Cha2.SPF
+;# Task:      Organisationsprogramm
+;#            Kanal 2
+;# Version:   V06.00.08
+;# Date:      19.09.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 19.09.2017 / Simons
+; - Neuversionierung
+; - IB HHDTM
+; - OUT_LoadAckn -> OUT_TMJobActive, bWasActive eingefuehrt
+; - formale Aenderungen
+;
+; V06.00.07 - 19.09.2017 / Simons
+; - OUT_ReqLoopEndChan2 entfernt
+;
+; V06.00.07 - 28.07.2017 / Simons
+; - Verzoegerter Abbruch, wenn Kanal 1 im Reset
+; - formale Aenderungen
+;
+; V06.00.07 - 16.05.2017 / Simons
+; - Neuversionierung
+; - gbPrevToBrokenInt hinzu
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung ComfortPanel
+; - OUT_LoadAckn Einfuehrung
+; - bMagIsFlat entfernt
+;
+; V06.00.05 - 14.12.2016 / Simons
+; - Common2..3 entfernt
+;
+; V06.00.05 - 02.11.2016 / Simons
+; - ToPrepOpt Aufruf nach ToPrep
+;
+; V06.00.05 - 23.09.2016 / Simons
+; - Neuversionierung
+; - HHD TM (V04.02.02 / Sept. 2016, Balles)
+;
+; V06.00.04 - 01.09.2016 / Simons
+; - Neuversionierung
+; - Wartezeit Scheibe Zurueck
+;   zuruecksetzen
+; - ToTime -> ToPrepOpt
+; - mcTask(AS)_... hinzu
+; - mcDBx_xMagPanelx hinzu
+;
+; V06.00.03 - 16.05.2016 / Simons
+; - Korrektur iTNoBrk
+;
+; V06.00.03 - 16.05.2016 / Simons
+; - Neuversionierung
+; - HHD TM
+;
+; V06.00.02 - 16.04.2016 / Simons
+; - Optimierung Prepare hinzu
+; - Neuversionierung
+; - HHD TM hinzu
+; - mccDBB_MagIs...Active
+;
+; V04.00.00 - 03.06.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Systemprogramm Kanal 2:
+;
+; - Plausibilitaetsueberpruefung
+; - Vorbereitung
+;
+; Wird aufgerufen ...
+; .. mit NC-Start, gestartet durch PLC
+;------------------------------------
+
+PROC Sys_Cha2 DISPLOF
+
+DEF STRING[32] sCycName="Sys_Cha2 V06.00.08", sAlarmParam="", sOption
+;
+DEF BOOL bLoadFromMag=FALSE, bUnLoadToMag=FALSE, bDelTools=FALSE, bHGHome=FALSE, bMagIsDDisk, bMagIsCas, bMagIsChain, bMagIsPickUpDisk, bUnLoad, bWithTlChipFix, bFinished, bWithComfortPanel, bRequested, bWasActive
+;
+DEF INT iActMagNo=0, iAlarmNo=0, iActPotNo=0, iStateLoad=0, iStateUnload=0, iStateDel=0, iPrepCount=1, iTNoForceUnld=0, iTNoForceUnldOld=0
+DEF INT iBaseAddr, iCount, iMode, iTmp1, iTmp2, iTmp3, iTmp4, iMask, iToDo, iTNoLd, iTNoBrk, iTNo, iMagExist
+;
+DEF REAL rcWaitPLC=0.2, rcWait=0.1, rTimeWithoutJob=-1, rWaitShort
+
+; Initialisierungen
+;------------------
+CFG_MAN("COMFORTPANEL",sOption)
+bMagIsCas=((giMagType B_AND 'B1000000')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsPickUpDisk=((giMagType B_AND 'B1')<>0) bMagIsDDisk=((giMagType B_AND 'B10110000')<>0) rWaitShort=(3*$MN_IPO_CYCLE_TIME) bWithComfortPanel=(sOption<>"")
+;
+;Wz-Vorbereitung/Bohrerbruchkontrolle ruecksetzen
+gbPrepActiv=FALSE gbPrepDone=FALSE gbPrepEnd=FALSE gbPrepReset=FALSE gbWaitToolMoved=FALSE
+giTaskID=0 giTaskState=0 giMagState=0 giWaitRWChip=0
+;
+IF (bMagIsDDisk)OR(bMagIsChain)OR(bMagIsPickUpDisk)
+  giToBreakCtrlState=0 giToNoProb=0 giToDuplo=0 gbPrevToBroken=FALSE gbPrevToBrokenInt=FALSE
+  mcDBB_ToMagPanel=0 OUT_TMJobActive=FALSE OUT_LoadActiv=FALSE OUT_LoadDone=FALSE OUT_LoadReset=FALSE OUT_LoadEnd=FALSE
+ENDIF
+;
+IF (gbTMIsHHD)
+  ;Quittierungsregister dem Anforderungsregister nachziehen
+  giAcknFromMMC=giReqToMMC
+  ;Statusrueckmeldungen an WzV
+  giStateToMMC[0]=0
+  ;<WzV->NC: Abbruch durch Bediener> zuruecksetzen
+  giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+ENDIF
+
+;Ueberpruefungen
+;---------------
+;kein Mag. vorhanden/nicht konfiguriert
+IF (giNumRealMag==0)
+  ;Magazin (noch) nicht konfiguriert
+  iAlarmNo=AL_Missing sAlarmParam="giNumRealMag=0"
+  GOTOF ENDE
+ENDIF
+;
+IF (giNumPlacesInMag[0]<=0)
+  ;Magazin (noch) nicht konfiguriert
+  iAlarmNo=AL_Missing sAlarmParam="giNumPlacesInMag[0]=0"
+  GOTOF ENDE
+ENDIF
+;
+IF (grInchMetr<=0)
+  iAlarmNo=AL_ScalingSystemUnknown
+  GOTOF ENDE
+ENDIF
+;
+IF ((bMagIsDDisk)AND(giNumLaneX<=0))OR((bMagIsCas)AND(giNumLaneZ<=0))
+  iAlarmNo=AL_NoLaneDataFound
+  GOTOF ENDE
+ENDIF
+
+OUT_SysCha2Active=TRUE iMagExist=mcDBW_MagExist bWithTlChipFix=mcbDBB_WithTlChipFix
+;
+IF (bMagIsCas)
+  ;
+  IF ((iMagExist B_AND 'B1')<>0)
+    ;
+    ;Schublade vorhanden/eingefahren
+    $TC_MDP2[1,1]=0
+  ELSE
+    ;Verb. Schublade<->Spindel trennen
+    $TC_MDP2[1,1]=9999
+  ENDIF
+ELSE
+  $TC_MDP2[1,1]=0
+ENDIF
+
+;Aufloesung HNT
+M_NoCycleEnd
+
+LOOP
+  ;
+  IF (NOT gbTMIsHHD)AND(bMagIsCas)
+    ;
+    ;Endschalter fuer Magazin vorhanden auswerten und entsprechende Magazine sperren (ab Magazin 2)
+    ;
+    iMask=1 iMagExist=mcDBW_MagExist
+    FOR iCount=2 TO giNumRealMag
+      ;
+      iMask=iMask*2
+      IF ((iMagExist B_AND iMask)<>0)
+        ;Freigeben
+        $TC_MAP3[iCount] = $TC_MAP3[iCount] B_AND (B_NOT 'B10')
+      ELSE
+        ;Sperren
+        $TC_MAP3[iCount] = $TC_MAP3[iCount] B_OR 'B10'
+      ENDIF
+    ENDFOR
+  ENDIF
+
+  iTNoForceUnld=0
+  IF (bMagIsDDisk)
+    ;
+    ;Sonderfall abfangen:
+    ;Dummy-Wz ist im HG (stammt noch vom BELADEN ueber Beladestelle_Magazin + Balluff)
+    ;oder anderes Wz im HG, das nicht freigegeben ist (stammt z.B. vom BELADEN ueber Beladestelle_Magazin + Balluff)
+    ;
+    STOPRE
+    iTNo=$TC_MPP6[9998,mcLocHG]
+    IF (iTNo>0)
+      ;
+      ;Wz im HG
+      ;
+      TlData(iTNo)
+      ;
+      IF (TOUPPER($TC_TP2[iTNo])==TOUPPER(DummyTName))OR(NOT Tl_Released)
+        ;
+        TlData(iTNo,mcSetLockTl)
+        ;
+        iTNoForceUnld=iTNo
+        IF (iTNoForceUnldOld<=0)
+          SETAL(AL_UnloadTlFromHg67,"")
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  iTNoForceUnldOld=iTNoForceUnld  bWasActive=FALSE
+
+  ;Auftragspuffer abfragen:
+  ;------------------------
+  ;
+  ;iCount==1: Wz vorbereiten, WzW
+  ;iCount==2: Wz beladen/entladen/umsetzen
+  ;iCount==3: Wz asynchron umsetzen/asynchron bereitstellen etc.
+  ;
+  FOR iCount=1 TO 3
+
+    IF (gbTMIsHHD)
+      giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1TCActive))
+    ENDIF
+
+    WHILE ($P_SEARCH)
+      STOPRE
+      G4 F=rcWait
+    ENDWHILE
+
+    iBaseAddr=iJobPtrPrep+(iCount-1)*30
+    IF ($A_DBW[iBaseAddr+2]==1)AND(NOT IN_HgHome)
+
+      ;=======
+      InitJob:
+      ;=======
+      ;
+      giJobNo=$A_DBW[iBaseAddr] giJobTNo=$A_DBW[iBaseAddr+6] giJobSourceMag=$A_DBW[iBaseAddr+8] giJobSourceLoc=$A_DBW[iBaseAddr+10] giJobDestMag=$A_DBW[iBaseAddr+12] giJobDestLoc=$A_DBW[iBaseAddr+14] giJobErrReact=$A_DBW[iBaseAddr+24] mcDBW_WaitDiskRetract=0 bLoadFromMag=(IN_LoadFromMag) bUnLoadToMag=(IN_UnLoadToMag)
+      
+      ;Optimierung Prepare
+      ToPrepOpt
+      IF (giJobNo==(-1)*mcTaskPrep2) GOTOF NextJob
+
+      IF (giJobTNo>0)
+        ;
+        IF (giJobDestMag>=1)AND(giJobDestMag<=giNumRealMag)
+          iTmp1=giJobDestMag*1000+giJobDestLoc
+        ELSE
+          iTmp1=0
+        ENDIF
+        ;
+        ;Quellplatz aktualisieren (er koennte sich in der Zwischenzeit geaendert haben !!)
+        giJobSourceMag=$A_TOOLMN[giJobTNo] giJobSourceLoc=$A_TOOLMLN[giJobTNo]
+        ;
+        IF (giJobSourceMag>=1)AND(giJobSourceMag<=giNumRealMag)
+          ;Quelle liegt in realem Magazin
+          $TC_TPC10[giJobTNo]=(giJobSourceMag*1000+giJobSourceLoc)*100000+iTmp1
+        ELSE
+          ;Quellangaben unveraendert lassen, neue Zielangaben
+          $TC_TPC10[giJobTNo]=(($TC_TPC10[giJobTNo] DIV 100000)*100000)+iTmp1
+        ENDIF
+      ENDIF
+
+      IF (giJobNo==mcTaskPrep2)
+        ;
+        ;Wz-Vorbereitung
+        ;---------------
+        ;
+        giJobTaskId=2 giJobTaskIdNo=1
+        ;
+        ;Auftragsstatus zuruecksetzen
+        $A_DBW[iBaseAddr+2]=0 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+        ;
+        IF (iTNoForceUnld<=0)
+          ;
+          IF (gbTMIsHHD)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive)
+            ;
+            ToPrep
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_AND (B_NOT (mcState1MagActive)))
+          ELSE
+            ;
+            ToPrep
+          ENDIF
+          ;
+          ;Gelernten Wert abspeichern
+          ToPrepOpt(TRUE)
+          ;
+        ELSE
+          ;
+          ;Auftrag ablehnen
+          ToAckn(FALSE,giJobTaskId,giJobTaskIdNo,0,0,0,0,0,0,3)
+          GOTOF NextJob
+        ENDIF
+        ;
+        IF ($A_DBW[iBaseAddr+2]==1)AND(NOT IN_HgHome)AND(NOT $P_SEARCH)
+          ;
+          ;es steht bereits ein weiterer PREPARE-Auftrag an
+          IF (iPrepCount<giMaxPrepCount)
+            ;
+            WaitCycEnd
+            ;
+            ;gleich nach oben und diesen Auftrag vorrangig bearbeiten
+            iPrepCount=iPrepCount+1
+            GOTOB InitJob
+          ELSE
+            ;
+            ;andere Jobs zum Zuge kommen lassen
+            iPrepCount=1
+            GOTOF NextJob
+          ENDIF
+        ELSE
+          ;
+          ;andere Jobs zum Zuge kommen lassen
+          iPrepCount=1
+          GOTOF NextJob
+        ENDIF
+      ENDIF
+
+      IF (giJobNo==mcTaskLoad)OR(giJobNo==mcTaskUnLoad)
+        ;
+        ;Beladen von/Entladen auf Beladestelle Spindel - Anstoss ueber WzV-Bedienoberflaeche
+        ;-----------------------------------------------------------------------------------
+        ;
+        giJobTaskId=1 giJobTaskIdNo=1
+        ;
+        ;Auftragsstatus zuruecksetzen
+        $A_DBW[iBaseAddr+2]=0 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+
+        IF (iTNoForceUnld<=0)
+          ;
+          IF (gbTMIsHHD)
+            ;
+            IF (giJobNo==mcTaskLoad)
+              giStateToMMC[0] = (giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1LoadBySpindle) B_AND (B_NOT (mcState1UnloadBySpindle))
+            ELSE
+              giStateToMMC[0] = (giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1UnloadBySpindle) B_AND (B_NOT (mcState1LoadBySpindle))
+            ENDIF
+            ;
+            ToPrep
+            ;
+            giStateToMMC[0] = (giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1LoadBySpindle B_OR mcState1UnloadBySpindle)))
+          ELSE
+            ;
+            ToPrep
+          ENDIF
+        ELSE
+          ;
+          ;Auftrag ablehnen
+          ;
+          ToAckn(FALSE,giJobTaskId,giJobTaskIdNo,0,0,0,0,0,0,3)
+        ENDIF
+        ;
+        GOTOF NextJob
+      ENDIF
+
+      IF (giJobNo==mcTask_Displace)
+        ;
+        ;Umsetzen - Anstoss ueber WzV-Bedienoberflaeche
+        ;----------------------------------------------
+        ;
+        giJobTaskId=1 giJobTaskIdNo=1
+        ;
+        ;Hinweis: Der Fall, Wz ist z.Zt. in Spindel/DG1/DG2 wird in ToTrans abgefangen
+        ;
+        ;Auftragsstatus zuruecksetzen
+        $A_DBW[iBaseAddr+2]=0 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+        ;
+        IF (iTNoForceUnld<=0)
+          ;
+          ;Umsetzen
+          ;
+          IF (gbTMIsHHD)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1MoveTool)
+            ;
+            ToTrans(0,giJobNo,giJobTNo,giJobDestMag,giJobDestLoc,giJobErrReact,iAlarmNo,sAlarmParam)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1MoveTool)))
+          ELSE
+            ;
+            ToTrans(0,giJobNo,giJobTNo,giJobDestMag,giJobDestLoc,giJobErrReact,iAlarmNo,sAlarmParam)
+          ENDIF
+          IF (iAlarmNo>0)
+            ;
+            IF (iAlarmNo<67000)
+              ;RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+              SETAL(iAlarmNo,sAlarmParam)
+            ENDIF
+          ENDIF
+        ELSE
+          ;
+          ;Auftrag ablehnen
+          ;
+          ToAckn(FALSE,giJobTaskId,giJobTaskIdNo,0,0,0,0,0,0,3)
+        ENDIF
+        ;
+        iAlarmNo=0
+        ;
+        GOTOF NextJob
+      ENDIF
+      
+      IF (bWithComfortPanel)AND(((bLoadFromMag)AND(giJobNo==mcTaskLoadMag))OR((bUnLoadToMag)AND(giJobNo==mcTaskUnLoadMag)))
+        ;
+        ;Beladen von/Entladen auf Beladestelle Magazin - Anstoss ueber WzV-Bedienoberflaeche
+        ;-----------------------------------------------------------------------------------
+        ;
+        giJobTaskId=1 giJobTaskIdNo=3
+        ;
+        ;Auftragsstatus zuruecksetzen
+        $A_DBW[iBaseAddr+2]=0 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+
+        IF (iTNoForceUnld<=0)
+          ;
+          MagLoad(giJobNo,giJobTNo,giJobDestMag,giJobDestLoc)
+          ;
+        ELSE
+          ;
+          ;Auftrag ablehnen
+          ;
+          ToAckn(FALSE,giJobTaskId,giJobTaskIdNo,0,0,0,0,0,0,3)
+        ENDIF
+        ;
+        GOTOF NextJob
+      ENDIF
+      ;
+      ;Alle anderen Auftraege
+      ;----------------------
+      ;
+      ;- asynchrones Bereitstellen eines Wz/leeres HG/DG/Magazin
+      ;- asynchrones Umsetzen
+      ;
+      ;Zunaechst Wz in HG Entladen
+      IF (iTNoForceUnld>0) GOTOF NextJob
+      ;
+      IF ((giJobNo DIV 100)==5)
+        ;
+        ;Asynchroner Auftrag
+        giJobTaskId=5 giJobTaskIdNo=2
+        ;
+        IF (giJobNo==mcTaskAS_Displace)
+          ;
+          ;Umsetzen
+          ;--------
+          ;
+          ;Anstoss aus NC-Programm oder durch kundenspezif. Taster
+          ;
+          ;Hinweis: Der Fall, dass das Wz z.Zt. in Spindel/DG1/DG2 ist wird
+          ;         in ToTrans abgefangen
+          ;
+          ;Auftragsstatus zuruecksetzen
+          $A_DBW[iBaseAddr+2]=0 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+          ;
+          IF (gbTMIsHHD)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1MoveTool)
+            ;
+            ToTrans(0,giJobNo,giJobTNo,giJobDestMag,giJobDestLoc,giJobErrReact,iAlarmNo,sAlarmParam)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1MoveTool)))
+          ELSE
+            ;
+            ToTrans(0,giJobNo,giJobTNo,giJobDestMag,giJobDestLoc,giJobErrReact,iAlarmNo,sAlarmParam)
+          ENDIF
+          IF (iAlarmNo>0)
+            IF (iAlarmNo<67000)
+              ;RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+              SETAL(iAlarmNo,sAlarmParam)
+            ENDIF
+            iAlarmNo=0
+          ENDIF
+          ;
+          GOTOF NextJob
+        ENDIF
+        ;
+        IF (giJobNo==mcTaskAS_T0)OR(giJobNo==mcTaskAS_Meas)OR(giJobNo==mcTaskAS_TC)
+          ;
+          ; - Leeres HG/DG/Magazin bereitstellen
+          ; - Wz im HG/DG/Magazin bereitstellen,
+          ;   um es in SP einzuwechseln
+          ;--------------------------------------
+          ;
+          ;Auftragsstatus zuruecksetzen
+          $A_DBW[iBaseAddr+2]=0 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+          ;
+          IF (gbTMIsHHD)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive)
+            ;
+            ToPrep
+            ;
+            giStateToMMC[0] = (giStateToMMC[0] B_AND (B_NOT (mcState1MagActive)))
+          ELSE
+            ;
+            ToPrep
+          ENDIF
+          ;
+          GOTOF NextJob
+        ENDIF
+      ENDIF
+      ;
+      GOTOF NextJob
+    ENDIF
+
+    ;=======
+    NextJob:
+    ;=======
+    ;
+    ;da fertig oder kein Auftrag oder Auftrag zurueckgestellt
+    giJobNo=0
+    ;
+    WaitCycEnd
+    ;
+  ENDFOR  ;FOR iCount=1 TO ..  ENDFOR
+
+  WHILE ($P_SEARCH)
+    STOPRE
+    G4 F=rcWait
+  ENDWHILE
+
+  ;Abfrage der HHD-spezifische Sonderfunktionen
+  ;--------------------------------------------
+  ;
+  bLoadFromMag=(IN_LoadFromMag) bUnLoadToMag=(IN_UnLoadToMag) bDelTools=(IN_DelTools) bHGHome=(IN_HgHome) iTNoLd=mcDBW_FromMagPanelReq
+  ;
+  IF (NOT bHGHome)
+    ;
+    IF (bMagIsCas)
+      ;
+      ;Magazinbedienung
+      ;----------------
+      ;
+      ;<Beladen/Entladen von/auf Schublade>
+      ;<Wz aus Schublade loeschen>
+      ;
+      IF NOT ((bLoadFromMag)OR(bUnLoadToMag)OR(bDelTools)) GOTOF queryTasks
+      ;
+      IF ((bLoadFromMag)AND(bUnLoadToMag))OR((bLoadFromMag)AND(bDelTools))OR((bUnLoadToMag)AND(bDelTools))
+        ;
+        ;Mehrere Anforderungen zeitgleich 1->0-Uebergang erzeugen, damit PLC $A_IN[..] wegnimmt
+        ;
+        OUT_TMJobActive=TRUE bWasActive=TRUE
+        ;
+        IF (gbTMIsHHD)
+          giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1LoadFromMag B_OR mcState1UnloadToMag B_OR mcState1RemoveFromMag))
+        ENDIF
+        ;
+        ;PLC Zeit lassen die Anforderungen zu quittieren
+        G4 F=rcWaitPLC
+        ;
+        OUT_TMJobActive=FALSE iStateLoad=0 iStateUnload=0 iStateDel=0
+        ;
+        GOTOF Common1
+      ELSE
+        ;
+        IF (bLoadFromMag)
+          ;
+          ;Von Cass. 1 ins restliche Magazin beladen
+          ;
+          OUT_TMJobActive=TRUE mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+          ;
+          ;Beladen von Magazin 1 (Standard)
+          iMode=1 iTmp1=1 iTmp2=0 iTmp3=0 iTmp4=0
+          ;
+          IF (gbTMIsHHD)
+            ;
+            IF (giParaMovBlock[0]>0)AND(giParaMovBlock[1]>=1)AND(giParaMovBlock[1]<=giNumRealMag)
+              ;
+              ;Belademagazin (Vorgabe von HHDTM)
+              ;
+              iMode=giParaMovBlock[0] iTmp1=giParaMovBlock[1] iTmp2=giParaMovBlock[2] iTmp3=giParaMovBlock[3] iTmp4=giParaMovBlock[4]
+            ENDIF
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1LoadFromMag) B_AND (B_NOT (mcState1UnloadToMag B_OR mcState1RemoveFromMag))
+          ENDIF
+          ;
+          ;in restliches Magazin (ausser Belademagazin) beladen
+          ;
+          MovBlock(iMode, iTmp1, iTmp2, iTmp3, iTmp4, iActMagNo, iActPotNo, iStateLoad)
+          ;
+          IF (gbTMIsHHD)
+            bFinished=(iStateLoad==2)OR((giStateFromMMC[0] B_AND mcState1ToNCAbortReqByUser)<>0)
+          ELSE
+            bFinished=(iStateLoad==2)          
+          ENDIF
+          ;
+          IF (bFinished)
+            ;
+            ;um zu gewaehrleisten, dass OUT_TMJobActive fuer eine Mindestzeit auf 1 gewesen ist
+            G4 F=rcWaitPLC
+            ;
+            ;Ende Quittierung
+            iStateLoad=0 OUT_TMJobActive=FALSE
+            ;
+            IF (gbTMIsHHD)
+              giParaMovBlock[0]=0 giParaMovBlock[1]=0 giParaMovBlock[2]=0 giParaMovBlock[3]=0 giParaMovBlock[4]=0
+              giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1LoadFromMag))
+              giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+            ENDIF
+            ;
+            WHILE (IN_LoadFromMag)
+              ;Warten bis PLC die Anwahl weggenommen hat
+              G4 F=rWaitShort
+            ENDWHILE
+          ENDIF
+          ;
+          GOTOF Common1
+        ENDIF
+
+        IF (bUnLoadToMag)
+          ;
+          ;vom restlichen Magazin auf Magazin 1 entladen
+          ;---------------------------------------------
+          ;
+          OUT_TMJobActive=TRUE mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+          ;
+          ;Entladen auf Magazin 1 (Standard)
+          iMode=2 iTmp1=0 iTmp2=0 iTmp3=0 iTmp4=1
+          ;
+          IF (gbTMIsHHD)
+            ;
+            IF (giParaMovBlock[0]>0)AND(giParaMovBlock[1]>=1)AND(giParaMovBlock[1]<=giNumRealMag)AND(giParaMovBlock[2]>0)AND(giParaMovBlock[4]>=1)AND(giParaMovBlock[4]<=giNumRealMag)
+              ;nur Wz auf Platz giParaMovBlock[1]/giParaMovBlock[2]
+              iMode=giParaMovBlock[0] iTmp1=giParaMovBlock[1] iTmp2=giParaMovBlock[2] iTmp3=giParaMovBlock[3] iTmp4=giParaMovBlock[4]
+            ENDIF
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1UnloadToMag) B_AND (B_NOT (mcState1LoadFromMag B_OR mcState1RemoveFromMag))
+          ENDIF
+          ;
+          MovBlock(iMode,iTmp1,iTmp2,iTmp3,iTmp4,iActMagNo,iActPotNo,iStateUnload)
+          ;
+          IF (gbTMIsHHD)
+            bFinished=(iStateUnLoad==2)OR((giStateFromMMC[0] B_AND mcState1ToNCAbortReqByUser)<>0)
+          ELSE
+            bFinished=(iStateUnLoad==2)
+          ENDIF
+          ;
+          IF (bFinished)
+            ;
+            G4 F=rcWaitPLC
+            ;
+            iStateUnload=0 OUT_TMJobActive=FALSE
+            ;
+            IF (gbTMIsHHD)
+              giParaMovBlock[0]=0 giParaMovBlock[1]=0 giParaMovBlock[2]=0 giParaMovBlock[3]=0 giParaMovBlock[4]=0
+              giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+              giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1UnloadToMag))
+            ENDIF
+            ;
+            WHILE (IN_UnLoadToMag)
+              G4 F=rWaitShort
+            ENDWHILE
+          ENDIF
+          ;
+          GOTOF Common1
+        ENDIF
+
+        IF (bDelTools)
+          ;
+          ;alle Wz aus Cass. 1 loeschen
+          ;----------------------------
+          ;
+          OUT_TMJobActive=TRUE mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+          ;
+          IF (gbTMIsHHD)
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1RemoveFromMag) B_AND (B_NOT (mcState1LoadFromMag B_OR mcState1UnloadToMag))
+          ENDIF
+          ;
+          DelBlock(0,1,0,0,iStateDel)
+          ;
+          IF (iStateDel==2)
+            ;
+            G4 F=rcWaitPLC
+            ;
+            iStateDel=0 OUT_TMJobActive=FALSE
+            ;
+            IF (gbTMIsHHD)
+              giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1RemoveFromMag))
+            ENDIF
+            ;
+            WHILE (IN_DelTools)
+              G4 F=rWaitShort
+            ENDWHILE
+          ENDIF
+          ;
+          GOTOF Common1
+        ENDIF
+      ENDIF
+    ENDIF
+    
+    IF (NOT bWithComfortPanel)AND((bMagIsDDisk)OR(bMagIsChain)OR(bMagIsPickUpDisk))
+      ;
+      ;Magazin Bedienfeld (Profibus)
+      ;-----------------------------
+      ;
+      ;interne T-Nr des Belade-/Entlade-Wz von Magazin Bedienfeld ermitteln
+      ;Im Folgenden: iTNoLd<0 bewirkt, dass HgLoad Auftrag in Richtung PLC negativ quittiert
+      ;
+      iToDo=0
+      ;
+      IF (bLoadFromMag)XOR(bUnLoadToMag)
+        ;
+        IF (bLoadFromMag)
+          ;
+          iToDo=mcTaskAS_Load
+          ;
+          IF (iTNoForceUnld>0)
+            ;
+            iTNoLd=(-1)*AL_FunctionLocked67
+          ELSE
+            IF ((NOT mcbDBB_WithTlChipHG)OR(NOT bMagIsDDisk))AND(iTNoLd<=0)
+              SETAL(AL_TNoNotAllowed67,<<iTNoLd)
+              iTNoLd=(-1)*AL_TNoNotAllowed67
+            ENDIF
+          ENDIF
+        ENDIF
+        ;
+        IF (bUnLoadToMag)
+          ;
+          iToDo=mcTaskAS_UnLoad
+          ;
+          IF (iTNoLd>0)
+            ;
+            IF (iTNoForceUnld>0)AND(iTNoLd<>iTNoForceUnld)
+              ;
+              ;anderes als das aus dem HG zu entladende Wz selektiert
+              iTNoLd=(-1)*AL_FunctionLocked67
+            ENDIF
+          ELSE
+            SETAL(AL_TNoNotAllowed67,""<<iTNoLd)
+            iTNoLd=(-1)*AL_TNoNotAllowed67
+          ENDIF
+        ENDIF
+        ;
+        mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+        ;
+        ;quittiert im Fehlerfalle in Richtung PLC negativ
+        MagLoad(iToDo,iTNoLd)
+        ;
+        IF (bMagIsDDisk)
+          iTNoForceUnldOld=giTNoHg
+        ENDIF
+        ;
+        GOTOF Common1
+      ENDIF
+    ENDIF
+
+    ;==========
+    queryTasks:
+    ;==========
+    ;
+    IF (iTNoForceUnld>0) GOTOF Common1
+    ;
+    IF (giTaskID==1)AND(giTaskState==1)
+      ;
+      ;Auftrag von Kanal 1: Wz vermessen/pruefen/Bohrerbruchkontrolle
+      ;--------------------------------------------------------------
+      ;
+      ;interne T-Nr
+      iTNoBrk=giTaskData[0]
+      IF (iTNoBrk>0)
+        ;
+        IF ($P_TOOLEXIST[iTNoBrk])
+          ;
+          giTaskState=2 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+          ;
+          IF (gbTMIsHHD)
+            ;
+            giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive)
+            ;
+            ToBreak(giTaskData[2], $TC_TP2[iTNoBrk], $TC_TP1[iTNoBrk],giTaskData[1],0)
+            ;
+            giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1MagActive))
+          ELSE
+            ;
+            ToBreak(giTaskData[2], $TC_TP2[iTNoBrk], $TC_TP1[iTNoBrk],giTaskData[1],0)
+          ENDIF
+        ENDIF
+      ENDIF
+      ;
+      ;fertig/Abbrechen
+      giTaskState=0 giTaskID=0
+      GOTOF Common1
+    ENDIF
+    ;
+    IF (giTaskID==10)AND(giTaskState==1)
+      ;
+      ;Auftrag von Kan. 1: Werkzeuge Reinigen
+      ;--------------------------------------
+      ;
+      giTaskState=2 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+      ;
+      IF (gbTMIsHHD)
+        ;
+        giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive)
+        ;
+        CleanTl2(giTaskData[0])
+        ;
+        giStateToMMC[0]=(giStateToMMC[0] B_AND (B_NOT (mcState1MagActive)))
+      ELSE
+        ;
+        CleanTl2(giTaskData[0])
+      ENDIF
+      ;
+      ;fertig
+      giTaskState=0 giTaskID=0
+      GOTOF Common1
+    ENDIF
+  ELSE
+    ;
+    ;Hg/DG freifahren angefordert
+    ;----------------------------
+    ;
+    IF (bMagIsCas)
+      ;
+      ;"Beladen von Magazin" etc. abbrechen
+      ;------------------------------------
+      ;
+      IF (bLoadFromMag)OR(bUnLoadToMag)OR(bDelTools)
+        ;
+        OUT_TMJobActive=TRUE bWasActive=TRUE
+        ;
+        IF (gbTMIsHHD)
+          giStateToMMC[0]=giStateToMMC[0] B_AND (B_NOT (mcState1LoadFromMag B_OR mcState1UnloadToMag B_OR mcState1RemoveFromMag))
+          giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+        ENDIF
+        ;
+        ;PLC Zeit lassen die Anforderungen zu erkennen
+        G4 F=rcWaitPLC
+        ;
+        OUT_TMJobActive=FALSE iStateLoad=0 iStateUnload=0 iStateDel=0
+        ;
+        WHILE (IN_LoadFromMag)OR(IN_UnLoadToMag)OR(IN_DelTools)
+          G4 F=rWaitShort
+        ENDWHILE
+      ENDIF
+    ENDIF
+    ;
+    ;WzW-Tuere nicht geschlossen oder <HG/DG Wz entladen> gefordert
+    ;
+    IF NOT ((mcbDBB_TCDoorClosed)OR(iTNoForceUnld>0)) GOTOF Common1
+    ;
+    IF (gbWithHG)
+      bUnLoad=($TC_MPP6[9998,mcLocHG]>0)
+    ELSE
+      ;
+      IF (gbWithDG)
+        bUnLoad=(($TC_MPP6[9998,mcLocDG1]>0)OR($TC_MPP6[9998,mcLocDG2]>0))
+      ELSE
+        bUnLoad=FALSE
+      ENDIF
+    ENDIF
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[0]=(giStateToMMC[0] B_OR mcState1MagActive B_OR mcState1MoveTool)
+    ENDIF
+    ;
+    IF (bUnLoad)
+      ;
+      ;Wz von HG/DG -> Transportauftrag generieren
+      ;
+      giJobNo=mcTaskAS_Displace giJobTNo=0 giJobSourceMag=0 giJobSourceLoc=0 giJobDestMag=9998 giJobDestLoc=mcLocSp giJobErrReact=1
+      giJobTaskId=5 giJobTaskIdNo=2 mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+      ;
+      ;HG/DG Leerfahren
+      ToTrans(0,giJobNo,giJobTNo,giJobDestMag,giJobDestLoc,giJobErrReact,iAlarmNo,sAlarmParam)
+      ;
+      ;Fertig oder kein Auftrag
+      giJobNo=0
+      ;
+      IF (iAlarmNo>0)
+        ;
+        IF (iAlarmNo<67000)
+          ;RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+          SETAL(iAlarmNo,sAlarmParam)
+        ELSE
+          ;kein SETAL, da bereits ausgegeben
+        ENDIF
+        iAlarmNo=0
+      ENDIF
+    ELSE
+      ;
+      ;Leeres HG/DG in WzW-Position fahren, dann Wz aus Sp ins HG uebernehmen
+      ;
+      mcbDBB_MagResetAllowed=FALSE bWasActive=TRUE
+      ;
+      GetTool(FALSE,0,9998,1)
+      ;
+    ENDIF
+    ;
+    STOPRE
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[0]=(giStateToMMC[0] B_AND (B_NOT (mcState1MagActive B_OR mcState1MoveTool)))
+    ENDIF
+    ;
+    ;PLC auffordern, $A_IN[..] zurueckzunehmen
+    M_HgHomeFinished0
+    ;
+    GOTOF Common1
+  ENDIF
+
+  ;=======
+  Common1:
+  ;=======
+  ;
+  ;Es lag ein Auftrag zur Magazinbedienung vor, Kanal 1 laeuft noch
+  bRequested=(bWasActive OR (mcDBB_StatCha1<>0))
+  ;
+  ;RevCha2 oder PLC Anforderung zum Beenden
+  IF (gbQuitSysCha2) GOTOF ENDE
+  ;
+  IF (bRequested)
+    rTimeWithoutJob=-1
+  ELSE
+    ;
+    IF (rTimeWithoutJob==-1)
+      ;negative Flanke erkannt -> Wartezeit von ca. 5s starten
+      rTimeWithoutJob=5
+    ENDIF
+    rTimeWithoutJob=MAXVAL((rTimeWithoutJob-(rcWait+3*rWaitShort)),0)
+    ;Wartezeit abgelaufen -> Abbruch
+    IF (rTimeWithoutJob==0) GOTOF ENDE
+  ENDIF
+  ;
+  WaitCycEnd(<<rcWait)
+  ;
+  IF (giStepTeststop>=3)AND(iTNoForceUnld<=0)
+    ;
+    ;Teststop fuer Kanal 2
+    ;
+    mcbDBB_MagResetAllowed=FALSE
+    ;
+    TstStop2
+  ENDIF
+  ;
+  mcbDBB_MagResetAllowed=TRUE
+  ;
+ENDLOOP
+
+;====
+ENDE:
+;====
+;
+gbQuitSysCha2=FALSE OUT_SysCha2Active=FALSE
+;
+IF (gbTMIsHHD)
+  giParaMovBlock[0]=0 giParaMovBlock[1]=0 giParaMovBlock[2]=0 giParaMovBlock[3]=0 giParaMovBlock[4]=0
+  giStateToMMC[0]=0 giStateToMMC[1]=0
+  giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+ENDIF
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+M30
+
+
+

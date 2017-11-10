@@ -1,0 +1,39 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     PCReset.SPF
+;# Task:      APC Abbruch
+;# Version:   V06.00.08
+;# Date:      01.07.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;---------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 01.07.2017 / Simons
+; - ProtoTyp
+;
+; V01.00.00 - März. 2010 / Schaaf
+; - Vorlage
+;
+;---------------------------------------
+;
+; Abbruch des Palettenwechselzyklus
+;
+; Aufruf in CYPE_MA
+;
+;---------------------------------------
+
+IF (giPcDebugStep>0)AND(giPcDebugStep<9)
+  giPcBreakStep=giPcDebugStep giPcDebugStep=0 gbBreakPalChg=TRUE
+ELSE
+  giPcBreakStep=0 gbBreakPalChg=FALSE
+ENDIF
+mcbDBB_APCActive=FALSE
+
+RET
+

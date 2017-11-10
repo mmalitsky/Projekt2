@@ -1,0 +1,81 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     WaitResp.SPF
+;# Task:      Auf Antwort von MMC warten
+;# Version:   V06.00.06
+;# Date:      03.05.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 03.05.2017 / Simons
+; - Neuversionierung
+;
+; V01.00.00, Juni 2007/Balles
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+;auf Ergebnis eines bereits abgesetzten Telegrammes warten
+;
+;Eingangsparameter:
+;iMaxTime:   max. Wartezeit (in Sek., max. 59 Sek.)
+;iMode:      0= Standard
+;            1= im Fehlerfalle 67xxx-Alarm statt RESET-pflichtigen 66xxx-Alarms
+;
+;------------------------------------
+
+PROC WaitResp(INT iMaxTime, INT iMode)
+
+DEF STRING[32] sCycName="WaitResp V06.00.06", sAlarmParam=""
+;
+DEF INT iAlarmNo=0, iWaitCount=0, iMaxWaitCount, iTmpAckn
+DEF REAL rWaitShort
+
+rWaitShort=(2*$MN_IPO_CYCLE_TIME) iMaxWaitCount=RTOI(iMaxTime/rWaitShort)
+;
+IF (NOT $P_SUBPAR[2])
+  iMode=0
+ENDIF
+;
+IF (giAcknFromMMC==giReqToMMC)
+  RET
+ENDIF
+;
+WHILE (giAcknFromMMC<>giReqToMMC)AND(iWaitCount<=iMaxWaitCount)
+  G04 F=rWaitShort
+  iWaitCount=iWaitCount+1
+  STOPRE
+ENDWHILE
+;
+;Status: Quittierung eingetroffen oder max. Wartezeit erreicht
+;
+IF (giAcknFromMMC<>giReqToMMC)
+  ;
+  ;trotz Wartens/mehrfacher Wiederholungen keine Quittierung durch MMC
+  ;
+  iTmpAckn=giAcknFromMMC
+  ;
+  IF ($P_PROG_EVENT==3)OR(iMode==1)
+    ;RESET-Ereignis eingetreten
+    iAlarmNo=AL_CommunicationErr67 giAcknFromMMC=giReqToMMC
+  ELSE
+    iAlarmNo=AL_CommunicationErr
+  ENDIF
+  ;
+  LogTrace(sCycName, "No response from tool management: giReqToMMC="<<giReqToMMC<<" <-> giAcknFromMMC="<<iTmpAckn,iAlarmNo)
+  ;
+  SETAL(iAlarmNo, sAlarmParam)
+  ;
+ENDIF
+;
+RET

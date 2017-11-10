@@ -1,0 +1,50 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkDim.SPF
+;# Task:      Plausibilitaetpruefung
+;#            Wz/Platzdaten
+;# Version:   V06.00.06
+;# Date:      06.05.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 06.05.2017 / Simons
+; - Neuversionierung
+; - Nur fuer HHDTM (Kompatibilitaet)
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Wz Freigabe pruefen - Nur fuer HHDTM
+;
+;------------------------------------
+
+PROC ChkDim(INT iMode, INT iTNo, VAR INT iChkRes)
+
+DEF STRING[32] sCycName="ChkDim V06.00.06"
+
+IF (NOT gbTMIsHHD) GOTOF ENDE
+
+iChkRes=0
+IF (iTNo<=0)
+  iChkRes=-4
+ELSE
+  IF (NOT $P_TOOLEXIST[iTNo])
+    iChkRes=-4
+  ENDIF
+ENDIF
+;
+;====
+ENDE:
+;====
+;
+RET

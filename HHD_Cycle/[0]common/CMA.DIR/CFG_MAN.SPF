@@ -1,0 +1,633 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CFG_MAN.SPF
+;# Task:      Auswerten der Optionen
+;# Version:   V06.00.08
+;# Date:      28.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;---------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 28.07.2017 / Simons
+; - mcbDBB_MagKonfActive hinzu
+;
+; V06.00.08 - 28.07.2017 / Simons
+; - NG hinzu
+;
+; V06.00.07 - 01.07.2017 / Simons
+; - Neuversionierung
+; - APCNC,HYDFIX hinzu
+;
+; V06.00.07 - 17.05.2017 / Simons
+; - Neuversionierung
+; - giTNoUpdateMode hinzu
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+; - gbHGWithBero,gbMCWithFFW hinzu
+;
+; V06.00.05 - 23.02.2017 / Simons
+; - COMFORTPANEL,RESISTOR_DG, gbHGWithBero hinzu
+; - Konfiguration an PLC
+;
+; V06.00.05 - 17.01.2017 / Simons
+; -  FFW hinzu
+;
+; V06.00.05 - 03.01.2017 / Simons
+; -  giNumPlacesInMag[iCount]=$P_MAGN entfernt
+;
+; V06.00.05 - 06.12.2016 / Simons
+; - BERO_HG hinzu
+;
+; V06.00.05 - 22.11.2016 / Simons
+; - Abfrage "CH" mit CH60/CH90
+; - SYSTEM, BALLUFF, MC4X
+; - gbWithEES / EES
+;
+; V06.00.05 - 23.09.2016 / Simons
+; - Neuversionierung
+; - Korrektur D120
+;
+; V06.00.04 - 02.09.2016 / Simons
+; - Neuversionierung
+; - gbWithMagPanel
+; - gbPLCSimActive
+; - PAL_TRANS hinzu
+; - D60 / D60NC
+; - HTC042 hinzu
+; - PS korrigiert
+;
+; V06.00.03 - 22.06.2016 / Simons
+; - gbHmiOperate,giMachType
+; - SAVEPOS, PS, FASTEMS, MPS...
+; - Alarm, wenn unbekannter Typ
+;
+; V06.00.02 - 13.04.2016 / Simons
+; Hinzu
+; - gbTMIsHHD
+; - gbWithMillHead
+; - gbWithRecHead
+; - gbWithFacingHead
+; - gbMagWithFixedGuide
+; - gbTlIsSK
+; - Magazinkonfiguration
+;
+; V06.00.00 - 16.06.2015 / Simons
+; - ProtoTyp / Neu
+;---------------------------------------
+; Beschreibung:
+;
+; Typabfrage:
+; sCMD = SET - Setzen der globalen
+;              Optionsbits
+; sCMD = MC  - Maschine
+; sCMD = MN  - Magazin
+; sCMD = SP  - Spindel
+; sCMD = TC  - Werkzeugwechsler
+; sCMD = PS  - Palettenspeicher
+; sCMD = BALLUFF - Ort des Schreib-/Lesekopfes
+;
+; sResult = "" -> Fehler
+;
+; Einzeloptionen:
+; - Gesetzt -> sResult = sCMD
+; - Sonst   -> sResult = ""
+;
+; sCMD = ST_FROM_NC - SchwesterWzVerwaltung durch NC
+; sCMD = TL_BK9     - Wzbruch mit BK9
+; sCMD = TILTHEAD   - MC mit TiltHead
+; sCMD = SWIVELHEAD - MC mit Schwenkkopf
+; sCMD = BA         - Bruecke B auf A
+; sCMD = CH_PL      - Anzahl Magazinplaetze
+; sCMD = SAVEPOS    - Istwerte sichern
+; sCMD = DRAWER     - Mit Magazinschublade
+; sCMD = MAGPANEL   - Mit Magazinbedienung (Profibus)
+; sCMD = COMFORTPANEL - Mit Magazinbedienung (TCU)
+; sCMD = LOADCASE   - Loadcase initialisieren
+; sCMD = PRECLMP    - Voreilend Loesen und
+;                     Spannen
+; sCMD = HSK        - Wz mit HSK Adapter
+; sCMD = HHDTM      - Hueller Hille TM
+; sCMD = SP_CLMP_ANA - Analogsensor Sp
+; sCMD = FASTEMS    - Mit PS FASTEMS
+; sCMD = PAL_TRANS  - Mit Sonderpalettenwechseleinheit
+; sCMD = MPS        - Mit PS KIGA
+; sCMD = MPS_HOST   - Mit PS KIGA und Leitrechner
+; sCMD = SYSTEM     - Systemmaschine
+; sCMD = DRIVEDATA  - Interne Antriebsgroessen
+; sCMD = MC4X       - 4 achsige Maschine
+; sCMD = BERO_HG    - HG mit Wz vorhanden Kontrolle 
+; sCMD = FFW        - Maschine mit aktiviereter Vorsteuerung (NC oder Drives)
+; sCMD = APCNC      - NC Palettenwechsler 
+; sCMD = HYDFIX     - Vorrichtung mit Spannhydraulik
+; sCMD = NG         - New Generation
+;
+;---------------------------------------
+
+PROC CFG_MAN(STRING[32] sCMD, VAR STRING[32] sResult) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="CFG_MAN V06.00.08"
+;
+DEF INT iCount, iNumMag
+
+sCMD=TOUPPER(sCMD)
+;
+IF sCMD=="SET"
+  ;
+  gbHmiOperate=TRUE
+  gbDGIsNCAxis=(($MN_USER_DATA_HEX[42] B_AND 'H3')<>0)    ; Option NC-Werkzeugwechsler
+  gbDGIsNc2Axis=(($MN_USER_DATA_HEX[42] B_AND 'H2')<>0)   ; NC-Werkzeugwechsler mit 2 Achsen
+  gbIsGearSpindle=(($MN_USER_DATA_HEX[0] B_AND 'H80')<>0) ; Getriebespindel
+  giMagType=$MN_USER_DATA_HEX[6]                          ; Magazintyp
+  giMachType=$MN_USER_DATA_HEX[12]                        ; Maschinentyp
+  giDGType=0                                              ; DoppelgreiferTyp fuer TC
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B1')<>0)
+    IF (($MN_USER_DATA_HEX[41] B_AND 'B10')<>0)
+      giDGType='B100'
+    ELSE
+      giDGType='B10'
+    ENDIF
+  ELSE
+    IF (($MN_USER_DATA_HEX[42] B_AND 'B111000')<>0)
+      giDGType='B1'
+    ENDIF
+  ENDIF
+  ;
+  gbWithHG=((giMagType B_AND 'B11110010')<>0)             ;Flat, DDisk
+  gbWithDG=(giDGType<>0)AND((giMagType B_AND 'B1')==0)    ;keine PickUpScheibe
+  giTNoUpdateMode=($MN_USER_DATA_HEX[18] B_AND 'B11')     ;Leitrecher mit OrtswechselUpdate
+  gbHGWithBero=(($MN_USER_DATA_HEX[8] B_AND 'H20')<>0)    ;HG mit Wz Vorhandenkontrolle
+  ;Maschine mit Vorsteuerung
+  gbMCWithFFW=((giMachType B_AND 'H2')<>0)AND(($MN_USER_DATA_HEX[14] B_AND 'H4')<>0);NBH5S
+  gbMCWithFFW=(gbMCWithFFW)OR(((giMachType B_AND 'H20')<>0)AND(gbTiltHeadExist))    ;NBH1000 mit Tilthead
+  ;
+  gbSwivHeadExist=(($MN_USER_DATA_HEX[30] B_AND 'H1')<>0) ;Schwenkspindel
+  gbTiltHeadExist=(($MN_USER_DATA_HEX[30] B_AND 'H4')<>0) ;HV Kopf
+  gbBAExist=(($MN_USER_DATA_HEX[35] B_AND 'B10')<>0)      ;Schwenkbruecke
+  gbDGWithEncoder=(($MN_USER_DATA_HEX[8] B_AND 'H40')<>0) ;Wzw-Miksch mit Drehzahlvorgabe(H80)
+  gbWithMillHead=(($MN_USER_DATA_HEX[30] B_AND 'H20')<>0) ;Fraeskopf
+  gbWithRecHead=(($MN_USER_DATA_HEX[30] B_AND 'H40')<>0)  ;(Wohlhaupter)Einstechkopf
+  gbWithFacingHead=(($MN_USER_DATA_HEX[30] B_AND 'H80')<>0) ;Plandrehkopf
+  ;
+  ; Magazinkonfiguration
+  ;---------------------
+  gbTMIsHHD = (($MN_USER_DATA_HEX[17] B_AND 'H80')<>0)         ; Neue HHD Werkzeugverwaltung
+  gbMagWithFixedGuide=(($MN_USER_DATA_HEX[19] B_AND 'B10')<>0) ; Magazin mit feststehender Kulisse
+  gbPLCSimActive=(($MN_USER_DATA_HEX[26] B_AND 'H80')<>0)      ; PLC Simulation aktiv
+  gbWithMagPanel=(($MN_USER_DATA_HEX[8] B_AND 'H11')=='H11')AND(($MN_USER_DATA_HEX[24] B_AND 'H14')=='H10') ; Mit Magazinbedienfeld ohne TCU
+  gbWithEES=(($ON_SYSTEM_FUNCTION_MASK B_AND 'H200')<>0)       ; Option EES aktiviert (ab V4.7)
+  ;
+  gbMag9998Exist=FALSE gbMag9999Exist=FALSE
+  ;
+  FOR iCount=0 TO 16
+    giNumPlacesInMag[iCount]=0
+  ENDFOR
+  ;
+  giNumRealMag=$P_MAGN 
+  ;
+  FOR iCount=1 TO $P_MAGN
+    ;
+    IF ($P_MAG[iCount]==9998)
+      gbMag9998Exist=TRUE giNumRealMag=(giNumRealMag-1)
+    ELSE
+      ;
+      IF ($P_MAG[iCount]==9999)
+        gbMag9999Exist=TRUE giNumRealMag=(giNumRealMag-1)
+      ELSE
+        ;Anzahl Magazinplaetze
+        giNumPlacesInMag[iCount]=$TC_MAP6[iCount]*$TC_MAP7[iCount]
+      ENDIF
+    ENDIF
+  ENDFOR
+  ;
+  iNumMag=giNumRealMag
+  ;
+  IF (gbWithMagPanel)
+    ;
+    ;Magazinbeladung mit Beladeliste
+    giMagNoLoadList=giNumRealMag giNumRealMag=(giNumRealMag-1)
+  ELSE
+    giMagNoLoadList=0
+  ENDIF
+  ;
+  FOR iCount=1 TO giNumRealMag
+    giNumPlacesInMag[0]=giNumPlacesInMag[0]+giNumPlacesInMag[iCount]
+  ENDFOR
+  ;
+  FOR iCount=0 TO (2+iNumMag*2)
+    $A_DBB[mcMagConfPLC+iCount]=0
+  ENDFOR
+  ;
+  IF (gbMag9999Exist)
+    $A_DBB[mcMagConfPLC]=$TC_MAP6[9999]*$TC_MAP7[9999]
+  ENDIF
+  ;
+  IF (gbMag9998Exist)
+    $A_DBB[mcMagConfPLC+1]=$TC_MAP6[9998]*$TC_MAP7[9998]
+  ENDIF
+  ;
+  $A_DBB[mcMagConfPLC+2]=iNumMag
+  FOR iCount=1 TO iNumMag
+    $A_DBB[mcMagConfPLC+iCount*2+1]=$TC_MAP1[iCount] $A_DBB[mcMagConfPLC+iCount*2+2]=$TC_MAP6[iCount]*$TC_MAP7[iCount]
+  ENDFOR
+  ;
+  RET
+ENDIF
+
+sResult=""
+
+IF (sCMD=="LOADCASE")
+  IF (($MN_USER_DATA_HEX[1] B_AND 'B1000000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+
+IF (sCMD=="DRIVEDATA")
+  IF (($ON_TECHNO_FUNCTION_MASK B_AND 'B10')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+
+IF (sCMD=="MC")
+  ;
+  ; Maschinen
+  ;----------
+  ;
+  IF ((giMachType B_AND 'H2')<>0)
+    sResult = "NBH5"
+    IF (($MN_USER_DATA_HEX[14] B_AND 'H4')<>0)
+      ; Typ SPEED
+      sResult =sResult << "S"
+    ENDIF
+    RET
+  ENDIF
+  IF ((giMachType B_AND 'H4')<>0)
+    sResult = "NBH6"
+    IF (($MN_USER_DATA_HEX[14] B_AND 'H2')<>0)
+      ; Typ PLUS
+      sResult = sResult << "P"
+    ENDIF
+    RET
+  ENDIF
+  IF ((giMachType B_AND 'H1')<>0)
+    sResult = "NBH500"
+    RET
+  ENDIF
+  IF ((giMachType B_AND 'H8')<>0)
+    ; -- NBH630
+    sResult = "NBH630"
+    RET
+  ENDIF
+  IF ((giMachType B_AND 'H10')<>0)
+    ;-- NBH800
+    sResult = "NBH800"
+    RET
+  ENDIF
+  IF ((giMachType B_AND 'H20')<>0)
+    ;-- NBH1000
+    sResult = "NBH1000"
+    RET
+  ENDIF
+  IF ((giMachType B_AND 'H40')<>0)
+    ;-- NBH1200
+    sResult = "NBH1200"
+  ENDIF
+  ;
+  GOTOF HandleAlarm
+ENDIF
+
+IF (sCMD=="MN")
+  ;
+  ; Magazin
+  ;--------
+  ;
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B1')<>0)
+    ;-- Scheibe
+    sResult = "D"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B10000000')<>0)
+    sResult = "D60NC"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B100000')<>0)
+    sResult = "D120"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B10')<>0)
+    ; -- Flaeche (z.B.134)
+    sResult = "FL"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B1000000')<>0)
+    ; -- Kassette
+    sResult = "CAS"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B100')<>0)
+    ;-- Kette
+    sResult = "CH"
+    IF (($MN_USER_DATA_HEX[41] B_AND 'B10')<>0)
+      sResult = sResult << "_WM307"
+    ENDIF
+    RET
+  ENDIF
+  ;
+  GOTOF HandleAlarm
+ENDIF
+
+IF (sCMD=="TC")
+  ;
+  ; Wechsler
+  ;---------
+  ;
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B1')<>0)
+    IF (($MN_USER_DATA_HEX[41] B_AND 'B10')<>0)
+      sResult = "WM307"
+    ELSE
+      sResult = "WM286"
+    ENDIF
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B110')<>0)
+    sResult = "HHD"
+    IF (($MN_USER_DATA_HEX[42] B_AND 'B10')<>0)
+      sResult = sResult << "NC"
+    ENDIF
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B1000')<>0)
+    sResult = "MTC050"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B10000')<>0)
+    sResult = "MTC350"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B100000')<>0)
+    sResult = "HTC042"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B1')<>0)
+    sResult = "D"
+    RET
+  ENDIF
+  ;
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (sCMD=="SP")
+  ;
+  ;Spindel
+  sResult=gsSpindleType
+  RET
+ENDIF
+;
+IF (sCMD=="NG")
+  IF (($MN_USER_DATA_HEX[14] B_AND 'B1000000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="ST_FROM_NC")
+  IF (($MN_USER_DATA_HEX[22] B_AND 'H4')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="CH_PL")
+  IF (($MN_USER_DATA_HEX[6] B_AND 'B100')<>0)
+    IF (($MN_USER_DATA_HEX[41] B_AND 'B10')<>0)
+      sResult = "32"
+    ELSE
+      IF (($MN_USER_DATA_HEX[41] B_AND 'B100')<>0)
+        sResult = "60"
+      ELSE
+        IF (($MN_USER_DATA_HEX[41] B_AND 'B1000')<>0)
+          sResult = "90"
+        ELSE
+          sResult = "0"        
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="BA")
+  IF (gbBAExist)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="TILTHEAD")
+  IF (gbTiltHeadExist)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="SWIVELHEAD")
+  IF (gbSwivHeadExist)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="MC4X")
+  IF (NOT gbSwivHeadExist)AND(NOT gbTiltHeadExist)AND(NOT gbBAExist)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="TL_BK9")
+  ;Bohrerbruchkontrolle BK9
+  IF (($MN_USER_DATA_HEX[7] B_AND 'B10000000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="BALLUFF")
+  IF (($MN_USER_DATA_HEX[20] B_AND 'H1')<>0)
+    sResult="MN"
+  ELSE
+    IF (($MN_USER_DATA_HEX[20] B_AND 'H10')<>0)
+      sResult="EXTERN"
+    ELSE    
+      IF (($MN_USER_DATA_HEX[21] B_AND 'B1')<>0)
+        sResult="HG"
+      ENDIF
+    ENDIF
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="DRAWER")
+  IF (($MN_USER_DATA_HEX[8] B_AND 'B1000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="MAGPANEL")
+  IF (gbWithMagPanel)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="COMFORTPANEL")
+  IF (NOT gbTMIsHHD)AND(($MN_USER_DATA_HEX[24] B_AND 'B100')<>0)AND(NOT gbWithMagPanel)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="HHDTM")
+  IF (gbTMIsHHD)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="SP_CLMP_ANA")
+  IF (($MN_USER_DATA_HEX[30] B_AND 'B10000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="HSK")
+  IF (($MN_USER_DATA_HEX[0] B_AND 'H20')==0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="SAVEPOS")
+  IF (($MN_USER_DATA_HEX[0] B_AND 'B1000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="PRECLMP")
+  IF (($MN_USER_DATA_HEX[41] B_AND 'B10')<>0)OR(($MN_USER_DATA_HEX[42] B_AND 'B1000000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="FASTEMS")
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B10')<>0)
+    sResult="FASTEMS"
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="MPS")
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B1')<>0)
+    sResult="MPS"
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="MPS_HOST")
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B10000001')<>0)
+    sResult="MPS_HOST"
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="PS")
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B10')<>0)
+    sResult="FASTEMS"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B1')<>0)
+    sResult="MPS"
+    RET
+  ENDIF
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B10000001')<>0)
+    sResult="MPS_HOST"
+    RET
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="PAL_TRANS")
+  IF (($MN_USER_DATA_HEX[5] B_AND 'B10000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="APCNC")
+  IF (($MN_USER_DATA_HEX[3] B_AND 'B1000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="HYDFIX")
+  IF (($MN_USER_DATA_HEX[4] B_AND 'B10')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="SYSTEM")
+  IF (($MN_USER_DATA_HEX[14] B_AND 'B1')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="EES")
+  IF (gbWithEES)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="RESISTOR_DG")
+  IF (($MN_USER_DATA_HEX[42] B_AND 'B10000000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="BERO_HG")
+  IF (($MN_USER_DATA_HEX[8] B_AND 'B100000')<>0)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+;
+IF (sCMD=="FFW")
+  IF (gbMCWithFFW)
+    sResult=sCMD
+  ENDIF
+  RET
+ENDIF
+
+;===========
+HandleAlarm:
+;===========
+;
+SETAL(AL_NoSupport,"CFG_MAN: "<<sCMD)
+;
+RET

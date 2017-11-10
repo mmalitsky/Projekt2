@@ -1,0 +1,1362 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Rev_Cha1.SPF
+;# Task:      Home Programm Kanal 1
+;# Version:   V06.00.08
+;# Date:      10.11.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: D/D60/D120/CHAIN
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 10.11.2017 / Simons
+; - Neuversionierung
+; - Palettenwechsler mit NC Hubachse
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam, SYG_RM[iSYGArea]
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop -> grSyncPickupDrop
+; - formale Aenderungen
+;
+; V06.00.05 - 25.01.2017 / Simons
+; - NCDG: HG Spannen nur nach Umspeichern
+; - WM286: X unabhaengig von Y aus Magazinraum fahren
+; - WM286: Ablauf bei "ueberlangem Wz" geaendert
+; - Prog_Reset verlagert
+;
+; V06.00.05 - 30.11.2016 / Simons
+; - ExtCall fuer CustomerHome
+; - Wenn Sp nicht im Magazin ist
+;   Abfrage ob DG in Grundstellung oder Horizontal
+;
+; V06.00.05 - 19.10.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+; - SpWz Klemmen entfaellt {300.0}
+; - Abbruch bei OUT_ForceTMSync
+;
+; V06.00.04 - 31.08.2016 / Simons
+; - Neuversionierung
+; - D60NC / D120 / Miksch hinzu
+; - MTC ohne Geber entfernt
+;
+; V06.00.03 - 26.06.2016 / Simons
+; - Scheibe: X aus Magazinraum fahren
+;
+; V06.00.03 - 10.06.2016 / Simons
+; - Neue Version
+; - Entfernen Zwischenschritte MTC
+;
+; V06.00.02 - 15.04.2016 / Simons
+; - Korrektur DG
+; - HG Hinzu
+; - Einfuehrung grTCSPosTol
+; - SonderWz hinzu
+;
+; V06.00.01, 31.08.2015 / Simons
+; - WM307 Hinzu
+;
+; V06.00.00 - 16.07.2015 / Simons
+; - ProtoTyp
+;
+; V01.06.08 -  Mai 2014 / Trappmann
+; - Vorlage
+;-------------------------------------
+;
+; WzW-Abfolge:
+; ------------
+; MTC:
+;  NeuWz: HG->DG1->SP
+;  AltWz: SP->DG2->HG
+;
+; WM286:
+;  NeuWz: HG->DG1->SP
+;  AltWz: SP->DG2->HG
+;
+; WM307:
+;  NeuWz: MAG->DG1->SP
+;  AltWz: SP->DG2->MAG
+;
+; PickUpscheibe:
+;  NeuWz: MAG->SP
+;  AltWz: SP->MAG
+;
+;-------------------------------------
+
+PROC REV_CHA1 SBLOF DISPLOF
+
+DEF STRING[32] sCycName="REV_CHA1 V06.00.08", sAlarmParam="", sOption
+DEF STRING[128] sFName="/_N_MPF_DIR/_N_LogRevCha1_MPF", sAPCHomeFile="/_N_CMA_DIR/_N_PCHOME_SPF", sCusHome
+
+DEF AXIS aHeadAxis
+;
+DEF BOOL bHeadInTCPos=TRUE, bWithHead=FALSE, bTurnedNeg=FALSE, bTurnNeg=FALSE, bDGTurned, bXInMag, bSpInTcPos, bTcWasActive, bCSInTCPos, bXInTCPos, bYInTCPos
+DEF BOOL bMagIsChain, bMagIsPickUpDisk, bDGIsNcAxis, bDGIsMTC, bDGIsWM286, bDGIsWM307, bMagIsMiksch, bMagIsDDisk, bMagIsCas, bRelMoveUnClmp
+DEF BOOL bEnableLog, bSecLoop, bEnabled, bWithExtCall, bDG1TlOverSize, bDG2TlOverSize, bHGTlOverSize, bSpTlOverSize, bIsAPCNC
+;
+DEF INT icMagNo=1, icWait=0.5, iAlarmNo=0, iTCStatus=0, iSYGArea, iTmp, iFError, iFSize, iFMaxSize, iState, iNextStep, iTNoMag, iMagPos
+;
+DEF REAL rcTCHeadPosWindow=0.001, rc0x1mm, rc0x2mm, rc0x5mm, rc1x0mm, rc2x0mm
+DEF REAL rNextPosDGRot, rEndPosDGRot, rFeedDGRot, rTCSPosMin, rTCSPosMax
+DEF REAL rFeedV1, rMagPlCount, rMagPlLastPos, rMagPlDist, rTargetPos, rTCPosHead, rVelo, rTmp1, rTmp2
+
+;-0.0--GndSt-
+;------------
+iSYGArea=(mcSYG_TC+18) giStepHome=0 gbPrepReset=FALSE gbPrepEnd=FALSE gbTcActive=FALSE bEnableLog=gbLogTMReset
+;
+rc0x1mm=0.1*grInchMetr rc0x2mm=0.2*grInchMetr rc0x5mm=0.5*grInchMetr rc1x0mm=1.0*grInchMetr rc2x0mm=2.0*grInchMetr
+
+;-1.0--Konfiguration-
+;--------------------
+bDGIsMTC=(((giDGType B_AND 'B1')<>0)AND(gbDGWithEncoder)) bDGIsWM286=((giDGType B_AND 'B10')<>0) bDGIsWM307=((giDGType B_AND 'B100')<>0) bDGIsNcAxis=((bDGIsWM286)OR(bDGIsWM307))
+bMagIsPickUpDisk=((giMagType B_AND 'B1')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307)) bMagIsDDisk=((giMagType B_AND 'B10110000')<>0) bMagIsCas=((giMagType B_AND 'B1000000')<>0)
+bRelMoveUnClmp=((giTCMask B_AND 'H10')<>0)
+CFG_MAN("APCNC",sOption)
+bIsAPCNC=(sOption<>"")
+;
+IF (gbSwivHeadExist)
+  aHeadAxis=mcAxC rTCPosHead=grTCPosC bWithHead=TRUE
+ENDIF
+IF (gbTiltHeadExist)
+  aHeadAxis=mcAxA rTCPosHead=grTCPosA bWithHead=TRUE
+ENDIF
+;
+;-1.1--Vorbelegungen-----------------------
+; Geschwindigkeit beim Freifahren = 3 m/min
+; Drehgeschwindigkeit NCDG = 20 U/min
+;-------------------------------------------
+rVelo=3000*grInchMetr rFeedV1=3 rFeedDGRot=20*360.0 SYG_RM[iSYGArea]=0.0
+;
+;WzW Position Spindel
+rTmp1=grTCSPos-grTCSPosTol rTmp2=grTCSPos+grTCSPosTol
+IF (rTmp1<0.0)
+  rTmp1=rTmp1+360.0
+ENDIF
+IF (rTmp2>=360.0)
+  rTmp2=rTmp2-360.0
+ENDIF
+IF (rTmp1>rTmp2)
+  rTCSPosMin=rTmp2 rTCSPosMax=rTmp1
+ELSE
+  rTCSPosMin=rTmp1 rTCSPosMax=rTmp2
+ENDIF
+;
+IF (bMagIsPickUpDisk)
+  ; VT1
+  rFeedV1=3*360.0 rMagPlCount=$MA_INDEX_AX_DENOMINATOR[mcAxV1] rMagPlLastPos=$MA_MODULO_RANGE[mcAxV1]
+  IF (rMagPlCount>0)
+    rMagPlDist=rMagPlLastPos/rMagPlCount
+  ELSE
+    iAlarmNo=AL_NoSupport sAlarmParam="$MA_INDEX_AX_DENOMINATOR[mcAxV1]=0" SYG_RM[iSYGArea]=1.1
+    GOTOF PROG_END
+  ENDIF
+  IF (rMagPlLastPos<=0)
+    iAlarmNo=AL_NoSupport sAlarmParam="$MA_MODULO_RANGE[mcAxV1]=0" SYG_RM[iSYGArea]=1.1
+    GOTOF PROG_END
+  ENDIF
+ENDIF
+
+;-10.0-Status-
+;-------------
+;
+IF (grInchMetr<=0)
+  iAlarmNo=AL_ScalingSystemUnknown SYG_RM[iSYGArea]=10.0
+  GOTOF PROG_END
+ENDIF
+;
+;kein Rueckzug bei Satzsuchlauf/PrgTest/PrgSimulation
+IF ($P_SEARCH)OR($P_ISTEST)OR($P_SIM)
+  iAlarmNo=AL_PrgTestActive SYG_RM[iSYGArea]=10.0
+  GOTOF PROG_END
+ENDIF
+;
+IF (giForceTMSync<>0)OR(OUT_ForceTMSync)
+  ;Synchronisieren erzwingen, wenn Datenhaushalt hier nicht abgeglichen werden konnte
+  iAlarmNo=AL_PleaseSyncFirst SYG_RM[iSYGArea]=10.0
+  GOTOF PROG_END
+ENDIF
+;
+;-10.1-Status------
+; Aktuelle Belegung
+;------------------
+STOPRE
+giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0 iMagPos=0
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG]
+ENDIF
+IF (bMagIsChain)OR(bMagIsPickUpDisk)
+  iMagPos=OUTA_ActPosV1
+  IF (iMagPos>0)
+    iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+  ENDIF
+ENDIF
+;
+OUT_ToolInSp=(giTNoSp>0) bTcWasActive=(OUT_TcActive) bDG1TlOverSize=FALSE bDG2TlOverSize=FALSE bHGTlOverSize=FALSE bSpTlOverSize=FALSE
+;
+bXInMag=($AA_IM[X]>grTcPrePosX+rc0x1mm)
+bCSInTCPos=(($AA_IM[mcAxSP1]<rTCSPosMin)OR($AA_IM[mcAxSP1]>rTCSPosMax))
+bXInTcPos=(ABS($AA_IM[X]-grTcPosX)<=rc0x1mm) bYInTcPos=(ABS($AA_IM[Y]-grTcPosY)<=rc0x1mm)
+bSpInTcPos=(bXInTcPos)AND(bYInTcPos)AND(bHeadInTCPos)AND((bDGIsNcAxis)OR(bCSInTCPos))
+;
+IF (bWithHead)
+  bHeadInTCPos=(ABS($AA_IM[aHeadAxis]-rTcPosHead)<=rcTCHeadPosWindow)
+ENDIF
+;
+IF (bMagIsPickUpDisk)
+  bTcWasActive=(OUT_TcActive)OR((mcDBB_StepTC B_AND 'B1101')<>0)
+ENDIF
+;
+IF (bDGIsNcAxis)
+  ;
+  FINEA[mcAxDGRot]
+  ;
+  rEndPosDGRot=grHomePosDGRot
+  ;
+  IF (bDGIsWM286)
+    ;
+    OEM_TlData(giTNoSp)
+    bSpTlOverSize=(OEM_rColLen>=grTCLenOverSize)
+    ;
+    OEM_TlData(giTNoDG1)
+    bDG1TlOverSize=(OEM_rColLen>=grTCLenOverSize)
+    ;
+    OEM_TlData(giTNoDG2)
+    bDG2TlOverSize=(OEM_rColLen>=grTCLenOverSize)
+    ;
+    OEM_TlData(giTNoHG)
+    bHGTlOverSize=(OEM_rColLen>=grTCLenOverSize)
+    ;
+  ENDIF
+ENDIF
+
+;-20.1-Abbruchsituation/MTC-
+;---------------------------
+IF (bDGIsMTC)AND(bTcWasActive)AND(mcDBB_PlcStepTC<>0)AND((mcbDBB_DGLinInTCPos)OR(NOT bMagIsMiksch))
+  ;
+  bDGTurned=(((giTCStartDBB4 B_XOR $A_DBB[4]) B_AND 'B10000')<>0)
+  ;
+  gbDG2MagSide=(bDGTurned)AND(giTNoDG2>0)AND(bMagIsMiksch)
+  ;
+  IF (NOT OUT_DGRotInTCPos)
+    ;DG nicht horizontal
+    iTCStatus=2
+  ELSE
+    ;
+    IF ((mcDBB_PlcStepTC B_AND 'H80')<>0)
+      ;SollposDG<>IstposDG und DG horizontal
+      iTCStatus=1
+    ELSE
+      ;
+      ;SollposDG=IstposDG und DG horizontal
+      iTCStatus=4
+    ENDIF
+  ENDIF
+  ;
+  GOTOF STATUS_FINISHED
+ENDIF
+
+;-20.2-Abbruchsituation/NCDG-
+;----------------------------
+IF (bDGIsNcAxis)
+  ;
+  IF (NOT bTcWasActive)
+    ;
+    ;kein Abbruch im WzW
+    ;
+    IF ($AA_IM[mcAxDGRot]>=grHor2DGRot)OR($AA_IM[mcAxDGRot]<=grHor1DGRot)OR(OUT_DGRotInTCPos)
+      ;
+      ;Im Bereich vor oder nach WzW
+      ;
+      iTCStatus=5
+    ENDIF
+    ;
+    GOTOF STATUS_FINISHED
+  ENDIF
+  ;
+  bTurnedNeg=((mcDBB_StepTC B_AND 'B10')<>0)AND(bDGIsWM286)
+  ;
+  IF (NOT bTurnedNeg)
+    ;
+    ;ohne ueberlanges Wz
+    ;
+    rTmp1=grHor1DGRot-grPosWinDGRot rTmp2=grHor2DGRot-grPosWinDGRot
+    ;
+    IF (($AA_IM[mcAxDGRot]>=rEndPosDGRot)AND($AA_IM[mcAxDGRot]<rTmp1))OR(OUT_DGRotInBasePos)
+      iTCStatus=1
+      GOTOF STATUS_FINISHED
+    ENDIF
+    ;
+    IF ($AA_IM[mcAxDGRot]>=rTmp1)AND($AA_IM[mcAxDGRot]<=rTmp2)
+      ;DG in oder hinter Entladeposition und vor Beladeposition
+      iTCStatus=2
+      GOTOF STATUS_FINISHED
+    ENDIF
+  ELSE
+    ;
+    ;mit ueberlangem Wz
+    ;
+    rTmp1=grHor2DGRot+grPosWinDGRot rTmp2=grHor1DGRot+grPosWinDGRot
+    ;
+    IF ($AA_IM[mcAxDGRot]>rTmp1)OR(OUT_DGRotInBasePos)
+      ;DG in oder hinter Entladeposition, TC hat das Beladen noch nicht gestartet oder kein Abbruch beim WzW
+      iTCStatus=1
+      GOTOF STATUS_FINISHED
+    ENDIF
+    ;
+    IF ($AA_IM[mcAxDGRot]<=rTmp1)AND($AA_IM[mcAxDGRot]>=rTmp2)
+      ;DG in oder hinter Entladeposition und vor Beladeposition
+      iTCStatus=2
+      GOTOF STATUS_FINISHED
+    ENDIF
+  ENDIF
+  ;    
+  ;DG zwischen Beladeposition und GndSt
+  iTCStatus=4
+ENDIF
+
+;===============
+STATUS_FINISHED:
+;===============
+
+;-30.0-LogFile--
+; Initialisieren
+;---------------
+IF (ISFILE(sFName))
+  FileSize(iFError, sFName, iFSize)
+  iFMaxSize=($MN_LEN_PROTOCOL_FILE*1024)-1000
+  IF (iFSize > iFMaxSize) ;max. Laenge durch MD11420 beschraenkt !!
+    DELETE(iFError,sFName)
+  ENDIF
+ENDIF
+LOG(bEnableLog,iFError,sFName,"  ")
+LOG(bEnableLog,iFError,sFName,"------------ Start of "<<sCycName<<" ----------------")
+LOG(bEnableLog,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+LOG(bEnableLog,iFError,sFName,"  ")
+;
+; Status wegschreiben
+LOG(bEnableLog,iFError,sFName,"  analyzing status of tool change .. ")
+LOG(bEnableLog,iFError,sFName,"  bSpInTcPos="<<bSpInTcPos<<", OUT_HgInTcPos="<<OUT_HgInTcPos)
+LOG(bEnableLog,iFError,sFName,"  bTcWasActive="<<bTcWasActive<<", iTCStatus="<<iTCStatus)
+LOG(bEnableLog,iFError,sFName,"  giTlInSp="<<giTlInSp<<", giNextTlInSp="<<giNextTlInSp)
+
+;-100.0-Ruecklauf-
+;-----------------
+OUT_RevCha1Active=TRUE
+;
+MSG(MSG_HomePrgIsRunning)
+
+;-105.0-Ruecklauf-
+; APC mit NC
+;-----------------
+IF (bIsAPCNC)
+  ;
+  ;NC Palettenwechsler
+  ;
+  IF ($AA_IM[mcAxPalY]>(grPCYPosLow+rc0x1mm))
+    ;
+    IF ISFILE(sAPCHomeFile)
+      ;
+      MSG(MSG_APCInbasePos)
+      M0
+      CALL sPalChgHomeFile
+    ELSE    
+      MSG(MSG_APCNotInbasePos)
+      M0
+    ENDIF
+  ENDIF
+ENDIF
+
+;-110.0-TMReset-------------------
+; Abbruch im WzW, aber Daten nicht
+; (vollstaendig) nachgefuehrt
+; -> Daten an Status anpassen
+;---------------------------------
+IF (giSyncTC<>0)
+  ;
+  TMReset(1)
+  ;
+  IF (bMagIsChain)OR(bMagIsPickUpDisk)
+    iMagPos=OUTA_ActPosV1 iTNoMag=0
+    IF (iMagPos>0)
+      iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+    ENDIF
+  ENDIF
+ENDIF
+
+;-120.0-Ueberpruefungen-
+;-----------------------
+IF (NOT bHeadInTCPos)AND(bXInMag)
+  iAlarmNo=AL_HeadNotTcPos SYG_RM[iSYGArea]=120.0
+  GOTOF PROG_END
+ENDIF
+;
+;-121.0-Ueberpruefungen/Scheibe-
+;-------------------------------
+IF (bMagIsPickUpDisk)
+  ;
+  LOG(bEnableLog,iFError,sFName,"  iTNoMag="<<iTNoMag<<", iMagPos="<<iMagPos<<", giTNoSp="<<giTNoSp)
+  ;
+  IF (iTNoMag>0)AND(giTNoSp>0)AND(bXInMag)
+    ;
+    ;Sp im Magazinraum und Werkzeugdaten gleichzeitig im SP und Scheibe
+    ;
+    iAlarmNo=AL_TlSpDgHg SYG_RM[iSYGArea]=121.0
+    GOTOF PROG_END
+  ENDIF
+ENDIF
+;
+;-122.0-Ueberpruefungen/DG-
+;--------------------------
+IF (gbWithDG)
+  ;
+  LOG(bEnableLog,iFError,sFName,"  giTNoDG1="<<giTNoDG1<<", giTNoDG2="<<giTNoDG2<<", giTNoSp="<<giTNoSp)
+  ;
+  IF (bMagIsMiksch)
+    ;
+    IF ((NOT mcbDBB_DGLinInTCPos)OR(NOT mcbDBB_DGRetracted))AND(bXInMag)AND(NOT bTcWasActive)
+      ;
+      ;Sp im Magazinraum aber DG (XT) nicht abgesenkt in WzW-Position
+      ;
+      iAlarmNo=AL_HGNotInPrepPos SYG_RM[iSYGArea]=122.0
+      GOTOF PROG_END
+    ENDIF
+    ;
+    IF (giTNoSp>0)AND(((giTNoDG2>0)AND(NOT gbDG2MagSide))OR((giTNoDG1>0)AND(gbDG2MagSide)))
+      ;
+      ;Werkzeugdaten gleichzeitig im SP und DG auf der Magazinseite
+      ;
+      iAlarmNo=AL_TlSpDgHg SYG_RM[iSYGArea]=122.0
+      GOTOF PROG_END
+    ENDIF
+  ELSE
+    ;
+    IF (giTNoSp>0)AND(giTNoDG2>0)
+      ;
+      ;Werkzeugdaten gleichzeitig im DG2/SP
+      ;
+      iAlarmNo=AL_TlSpDgHg  SYG_RM[iSYGArea]=122.0
+      GOTOF PROG_END
+    ENDIF
+    ;
+    IF (NOT gbWithHG)AND(iTNoMag>0)AND(giTNoDG1>0)
+      ;
+      ;Werkzeugdaten gleichzeitig im DG1/Mag
+      ;
+      iAlarmNo=AL_TlSpDgHg SYG_RM[iSYGArea]=122.0
+      GOTOF PROG_END
+    ENDIF
+  ENDIF
+  ;
+  IF (bDG1TlOverSize)AND(bDG2TlOverSize)
+    ;
+    ;kein WzW moeglich, wenn sowohl das Neu- als auch das SpWz ueberlang ist
+    ;
+    iAlarmNo=AL_DG12TlOverSize SYG_RM[iSYGArea]=122.0
+    GOTOF HANDLE_ALARM
+  ENDIF
+  ;
+  ;-123.0-Ueberpruefungen/HG-
+  ;--------------------------
+  IF (gbWithHG)
+    ;
+    LOG(bEnableLog,iFError,sFName,"  giTNoHG="<<giTNoHG)
+    ;
+    IF (giTNoHG>0)AND(giTNoDG1>0)
+      ;
+      ;Werkzeugdaten gleichzeitig im DG1/HG
+      ;
+      iAlarmNo=AL_TlSpDgHg SYG_RM[iSYGArea]=123.0
+      GOTOF PROG_END
+    ENDIF
+    ;
+    IF (bHgTlOverSize)AND(bSpTlOverSize)
+      ;
+      ;kein WzW moeglich, wenn sowohl das Neu- als auch das SpWz ueberlang ist
+      ;
+      iAlarmNo=AL_SpHgTlOverSize SYG_RM[iSYGArea]=123.0
+      GOTOF HANDLE_ALARM
+    ENDIF
+    ;
+    IF (NOT OUT_HgInTcPos)AND((giTNoDG1>0)OR(giTNoDG2>0))
+      ;
+      ;HG nicht in WzW Position
+      ;
+      iAlarmNo=AL_HGNotInPrepPos SYG_RM[iSYGArea]=123.0
+      GOTOF PROG_END
+    ENDIF
+    ;
+    IF (giTNoHg>0)AND(NOT mcbDBB_HGClamped)AND(NOT OUT_DGRotInTCPos)
+      ;
+      ;Wz nicht geklemmt im HG und DG nicht in WzWPosition
+      ;
+      iAlarmNo=AL_ClampHg SYG_RM[iSYGArea]=123.0
+      GOTOF PROG_END
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (NOT mcbDBB_SpClamped)AND(NOT mcbDBB_SpClampedNoTl)AND(NOT mcbDBB_SpUnClamped)
+  ;
+  ;SpWzKlemmung in undefiniertem Zustand
+  ;
+  iAlarmNo=AL_SpNotClamped SYG_RM[iSYGArea]=124.0
+  GOTOF PROG_END
+ENDIF
+
+;-130.0-SonderWz-
+;----------------
+IF (gbSpecTlInSp)
+  ;
+  SpecTlMan(109)
+  ;
+  IF (giResult<>0)
+    iAlarmNo=giResult sAlarmParam=gsResult SYG_RM[iSYGArea]=130.0
+    GOTOF PROG_END
+  ENDIF
+ENDIF
+
+;-400.0--Schritt 1--------
+; Kanal 2:
+;- Bereitstellen HG bzw.
+;  DG LinearAchse
+;- Klemmen von Wz in HG /
+;  Uebergabeposition Kette
+;-------------------------
+;
+STOPRE
+giStepHome=1 iNextStep=giStepHome+1
+;
+LOG(bEnableLog,iFError,sFName,"  giStepHome="<<giStepHome<<": waiting for channel .. ")
+;
+REPEAT
+  STOPRE
+  G4 F=icWait
+UNTIL (giStepHome==iNextStep)
+;
+;-500.0--Schritt 2------------------
+; Kanal 2 hat Bereitstellung beendet
+; -> WzWechsler Freifahren
+;-----------------------------------
+;
+;Belegung Aktualisieren
+giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0 iMagPos=0
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG]
+ENDIF
+IF (bMagIsChain)OR(bMagIsPickUpDisk)
+  iMagPos=(OUTA_ActPosV1)
+  IF (iMagPos>0)
+    iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+  ENDIF
+ENDIF
+;
+OUT_ToolInSp=(giTNoSp>0)
+;
+LOG(bEnableLog,iFError,sFName,"  iTNoMag="<<iTNoMag<<", giTNoDG1="<<giTNoDG1<<", giTNoDG2="<<giTNoDG2<<", giTNoSp="<<giTNoSp)
+
+;-501.0-GndSt NC-
+;----------------
+Prog_Reset
+
+IF (NOT bTcWasActive)AND(mcbDBB_TCDoorClosed)
+  ;
+  ;-502.0--Schritt 2-------------------
+  ; - WzW ist beendet oder laeuft nicht
+  ; - WzWTuer geschlossen
+  ; - NCDG: DG in GndSt
+  ;
+  ; -> HOME beenden(weiter mit Schritt 3)
+  ;--------------------------------------
+  IF ((NOT bDGIsNcAxis)OR(OUT_DGRotInBasePos)) GOTOF TC_FINISHED
+  ;
+ENDIF
+
+;-510.0--Schritt 2-
+; Abbruch im WzW
+;------------------
+LOG(bEnableLog,iFError,sFName,"  opening tool change door, coolant off, stopping spindle .. ")
+;
+;WzW-Tuere Oeffnen, Kuehlmittel und Sp aus
+M_TcDoorOpen1 M_CoolantOFF M5
+
+;-520.0--Schritt 2/Scheibe-
+;--------------------------
+;
+IF (bMagIsPickUpDisk)
+  ;
+  IF (NOT bXInMag)
+    ;
+    ;X nicht im Magazin
+    ;
+    IF (NOT mcbDBB_DiskInPos)OR(giTNoSp>0)
+      ;
+      ;Scheibe nicht in
+      ;- Teilungsposition    -> Scheibe in Gueltige Position bringen
+      ;- Ablageposition SpWz -> Scheibe in Position SpWz bringen
+      ;
+      ;naechste Teilungsposition
+      rTargetPos=TRUNC($AA_IM[mcAxV1]/rMagPlDist)*rMagPlDist
+      ;
+      IF (giTNoSp>0)
+        ;
+        ;Mit SpWz
+        IF ($A_MYMLN[giTNoSp]>0)AND($A_MYMN[giTNoSp]==icMagNo)
+          ;
+          ;Position Altplatz SpWz
+          rTargetPos=($A_MYMLN[giTNoSp]-1)*rMagPlDist
+        ENDIF
+      ENDIF
+      ;
+      IF (NOT mcbDBB_DiskAdvanced)
+        ;
+        M_TcDiskAdv1
+        G04 F=icWait
+      ENDIF
+      ;
+      GETD(mcAxV1)
+      ;
+      ;Scheibe auf (neue) Position
+      FINEA[mcAxV1] FA[mcAxV1]=rFeedV1 POS[mcAxV1]=DC(rTargetPos)
+      WAITP(mcAxV1)
+      ;
+      RELEASE(mcAxV1)
+      ;
+      G04 F=icWait
+      ;
+      iMagPos=(OUTA_ActPosV1) iTNoMag=0
+      IF (iMagPos>0)
+        iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+      ENDIF
+    ENDIF
+    ;
+    IF (mcbDBB_DiskInPos)
+      ;
+      ;Scheibe in Teilungsposition
+      ;
+      IF (giTNoSp>0)
+        ;
+        ;Wz aus Magazin in Sp
+        ;
+        IF ($A_MYMLN[giTNoSp]==iMagPos)AND($A_MYMN[giTNoSp]==icMagNo)AND(iTNoMag<=0)
+          ;
+          ;Ablageplatz angefahren -> Scheibe Zurueck
+          ;
+          M_TcDiskRet1
+          G04 F=icWait
+          ;
+          GOTOF STEP_IS_DONE_DISK
+        ENDIF
+      ENDIF
+      ;
+      IF (NOT mcbDBB_DiskAdvanced)
+        ;
+        ;Demnaechst erfolgt Uebernahme eines neuen Wz's aus dem Magazin -> Scheibe Vor
+        M_TcDiskAdv1
+        G04 F=icWait
+      ENDIF
+      ;
+      GOTOF STEP_IS_DONE_DISK
+    ENDIF
+  ENDIF
+  ;
+  IF (bXInMag)
+    ;
+    ;-520.1--Schritt 2/Scheibe-
+    ; X im Magazin
+    ;--------------------------
+    ;
+    IF (giTNoSp>0)
+      ;
+      ;Wz fuer Sp
+      ;
+      IF (mcbDBB_DiskRetracted)AND(mcbDBB_DiskInPos)
+        ;
+        IF (bTCWasActive)AND(mcDBB_StepTC<='B101')AND($A_MYMN[giTNoSp]==icMagNo)AND($A_MYMLN[giTNoSp]==iMagPos)AND(bCSInTCPos)
+          ;
+          ;Wz ist altes SpWz, Sp gerichtet, Altplatz angefahren und soll entladen werden
+          ;
+          IF NOT (bXInTCPos)AND(bYInTCPos)
+            ;
+            G1 G601 G153 F=rVelo X=grTcPosX Y=grTcPosY M23
+          ENDIF
+          ;
+          M_SpUnClamp1
+          G04 F=icWait
+          ;
+          ;Abgleich WzV
+          iTmp=giTNoSp
+          iState=DELMLRES(icMagNo,iMagPos)
+          ToAckn(TRUE,50,2,iTmp,0,icMagNo,iMagPos,9998,mcLocSp,1) ;asynchron Sp->Scheibe
+          iTNoMag=iTmp giTNoSp=0
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from Sp to Disk")
+          ;
+          M_TcDiskAdv1
+          G04 F=icWait
+        ELSE
+          ;
+          ;Wz ist und bleibt in Sp
+          ;
+          IF (NOT mcbDBB_SpClamped)
+            M_SpClampWithTool1
+            G04 F=icWait
+          ENDIF
+        ENDIF
+        ;
+        GOTOF STEP_IS_DONE_DISK
+      ENDIF
+    ELSE
+      ;
+      ;kein Wz fuer Sp
+      ;
+      IF (mcbDBB_DiskInPos)AND(bXInTcPos)AND(bYInTcPos)
+        ;
+        M_SpUnClamp1
+        G04 F=icWait
+        ;
+        M_TcDiskAdv1
+        G04 F=icWait
+        ;
+        M_SpClampNoTool1
+        G04 F=icWait
+      ENDIF
+      ;
+      IF (mcbDBB_DiskAdvanced)AND(mcbDBB_SpClampedNoTl) GOTOF STEP_IS_DONE_DISK
+      ;
+      IF (mcbDBB_DiskRetracted)
+        ;
+        IF (mcbDBB_SpUnClamped)
+          ;
+          ;Wirklich kein Wz in Sp ?
+          M_SpClampNoTool1
+          G04 F=icWait
+        ENDIF
+        ;
+        IF (mcbDBB_SpClampedNoTl) GOTOF STEP_IS_DONE_DISK
+        ;
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  iAlarmNo=AL_PositionInvalid SYG_RM[iSYGArea]=520.0
+  GOTOF PROG_END
+  ;
+  ;=================
+  STEP_IS_DONE_DISK:
+  ;=================
+  ;
+  IF ($AA_IM[X]>=grTcPrePosX)AND(bYInTCPos)
+    ;
+    ;X aus Magazinraum fahren, sonst versucht GetMagStat die Scheibe abzusenken und PLC sperrt X
+    D0 G1 G60 G601 G153 F=rVelo X=grTcPrePosX-rc0x5mm M23
+  ENDIF
+  ;
+  GOTOF TC_FINISHED
+ENDIF
+
+;-530.0--Schritt 2/NCDG-
+;-----------------------
+;
+IF (bDGIsNcAxis)
+  ;
+  bSpInTcPos=(bXInTcPos)AND(bYInTcPos)AND(bHeadInTCPos)
+  ;
+  IF (iTCStatus==1)OR(iTCStatus==4)OR(iTCStatus==5)
+    ;
+    ;-530.1--Schritt 2/NCDG-
+    ; DG noch nicht oder
+    ; nicht mehr im WzW
+    ;-----------------------
+    IF (NOT bSpInTcPos)AND(bXInMag)AND(NOT OUT_DGRotInHomeArea)
+      iAlarmNo=AL_SpNotInTcPos SYG_RM[iSYGArea]=530.1
+      GOTOF PROG_END
+    ENDIF
+    ;
+    IF (giTNoDG1<>0)OR(giTNoDG2<>0)
+      ;
+      ;DG muss leer sein, ist es aber nicht
+      iAlarmNo=AL_DGNotEmpty
+      GOTOF PROG_END
+    ENDIF
+    ;
+    bTurnNeg=($AA_IM[mcAxDGRot]<180)
+    ;
+    GOTOF NCDG_IN_BASEPOS
+  ENDIF
+  ;
+  ;-530.2--Schritt 2/NCDG-
+  ; DG im Werkzeugwechsel
+  ;-----------------------
+  ;
+  IF (NOT bTCWasActive)
+    ;
+    ;kein Abbruch im WzW und DG nicht freigegeben
+    ;
+    iAlarmNo=AL_DgNotInBasePos
+    GOTOF PROG_END
+  ENDIF
+  ;
+  IF (NOT bSpInTcPos)
+    iAlarmNo=AL_SpNotInTcPos
+    GOTOF PROG_END
+  ENDIF
+  ;
+  IF (bTurnedNeg)
+    bTurnNeg=TRUE rNextPosDGRot=grHor1DGRot
+  ELSE
+    bTurnNeg=FALSE rNextPosDGRot=grHor2DGRot
+  ENDIF
+  ;
+  ;Spindel und HG loesen
+  M_SpUnclamp1 M_HGUnclamp1
+  G4 F=icWait
+  ;
+  ;DG eventuell ausheben um Sp zu richten
+  STOPRE
+  rTmp1=grLiftDGRot-grLiftWinDGRot rTmp2=grLiftDGRot+grLiftWinDGRot
+  IF ($AA_IM[mcAxDGRot]<rTmp1)
+    G153 FA[mcAxDGRot]=rFeedDGRot POS[mcAxDGRot]=ACP(rTmp1)
+  ELSE
+    IF ($AA_IM[mcAxDGRot]>rTmp2)
+      G153 FA[mcAxDGRot]=rFeedDGRot POS[mcAxDGRot]=ACN(rTmp2)
+    ENDIF
+  ENDIF
+  STOPRE
+  ;
+  ;Sp klemmen
+  M_SpClampNoTool1
+  G4 F=icWait
+  STOPRE
+  ;
+  ;Sp richten
+  SPOS=ACP(grTCSPos)
+  G4 F=icWait
+  STOPRE
+  ;
+  ;Sp loesen
+  M_SpUnclamp1
+  G4 F=icWait
+  STOPRE
+  ;
+  ;DG in Beladeposition Sp drehen
+  IF (bTurnNeg)
+    G153 FA[mcAxDGRot]=rFeedDGRot POS[mcAxDGRot]=ACN(rNextPosDGRot)
+  ELSE
+    G153 FA[mcAxDGRot]=rFeedDGRot POS[mcAxDGRot]=ACP(rNextPosDGRot)
+  ENDIF
+  ;
+  STOPRE
+  ;
+  ;Nachfuehren der Ortswechsel
+  ;---------------------------
+  IF (giTNoDG1>0)AND(giTNoSp==0)
+    ;
+    ;NeuWz in Sp
+    iTmp=giTNoDG1
+    ToAckn(TRUE,50,2,iTmp,0,9998,mcLocSp,9998,mcLocDG1,1) ;asynchron DG1->SP
+    giTNoSp=iTmp giTNoDG1=0
+    ;
+    LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to Sp")
+  ENDIF
+  ;
+  IF (NOT gbWithHG)AND(giTNoDG2>0)AND(iTNoMag==0)
+    ;
+    ;AltWz in Mag
+    iTmp=giTNoDG2
+    iState=DELMLRES(icMagNo,iMagPos)
+    ToAckn(TRUE,50,2,iTmp,0,icMagNo,iMagPos,9998,mcLocDG2,1) ;asynchron DG2->Kette
+    iTNoMag=iTmp giTNoDG2=0
+    ;
+    LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to Chain")
+  ENDIF
+  ;
+  IF (gbWithHG)AND(giTNoDG2>0)AND(giTNoHG==0)
+    ;
+    ;AltWz in HG
+    iTmp=giTNoDG2
+    ToAckn(TRUE,50,2,iTmp,0,9998,mcLocHG,9998,mcLocDG2,1) ;asynchron DG2->HG
+    giTNoHg=iTmp giTNoDG2=0
+    ;
+    LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to HG")
+  ENDIF
+  ;
+  ;===============
+  NCDG_IN_BASEPOS:
+  ;===============
+  ;
+  OUT_ToolInSp=(giTNoSp>0)
+  ;
+  IF (giTNoSp>0)
+    M_SpClampWithTool1
+  ELSE
+    M_SpClampNoTool1
+  ENDIF
+  ;
+  IF (NOT gbWithHG)OR(OUT_HgInTcPos)
+    ;
+    ;HG oder Kette klemmen
+    M_HGClamp1
+  ENDIF
+  ;
+  G4 F=icWait
+  STOPRE
+  ;
+  ;DG in GndST
+  IF (bTurnNeg)
+    G153 FA[mcAxDGRot]=rFeedDGRot POS[mcAxDGRot]=ACN(rEndPosDGRot)
+  ELSE
+    G153 FA[mcAxDGRot]=rFeedDGRot POS[mcAxDGRot]=ACP(rEndPosDGRot)
+  ENDIF
+  ;
+  IF (giForceTMSync>=10)
+    ;
+    ;=========
+    NCDG_SYNC:
+    ;=========
+    ;
+    ;Synchronisieren erforderlich
+    ;
+    IF (OUT_DGRotInHomeArea)
+      ;
+      ;X aus Magazin fahren
+      G153 F=rVelo X=grTcPrePosX-rc0x5mm M23
+    ENDIF
+    ;
+    IF ($AA_IM[X]<=grTcPrePosX)
+      ;
+      ;WzWTuer Schliessen
+      M_TcDoorClose0
+    ENDIF
+    ;
+    iAlarmNo=AL_PleaseSyncFirst SYG_RM[iSYGArea]=530.2
+    GOTOF PROG_END
+  ENDIF
+  ;
+  GOTOF TC_FINISHED
+ENDIF
+
+;-540.0--Schritt 2/MTC-
+;----------------------
+;
+IF (bDGIsMTC)
+  ;
+  IF (giTNoDG1>0)OR(giTNoDG2>0)
+    ;
+    ;Wz(e) in DG
+    ;
+    IF (NOT bXInMag)
+      ;
+      ;Sp steht nicht im Magazinraum
+      ;
+      IF (bMagIsMiksch)AND(mcbDBB_DGHorizontal)
+        ;
+        ;Ein Wz ist regulaer vorbereitet im DG1 und DG2 ist leer -> DG1 entladen
+        IF (giTNoDG2==0) GOTOF TC_FINISHED
+        ;
+        ;DG1 ist leer und das SpWz ist regulaer entnommen worden -> DG2 Entladen      
+        IF (giTNoDG1==0)AND(gbDG2MagSide) GOTOF TC_FINISHED
+        ;
+      ENDIF
+      ;
+      GOTOF MTC_SYNC	
+    ENDIF
+    ;
+    bSpInTcPos=((bXInTcPos)OR((iTCStatus==4)AND(OUT_DGRotInTCPos)))AND(bYInTcPos)
+    IF (NOT bSpInTcPos)
+      ;X im Magazinbereich und WzW noch nicht beendet, DG nicht in GndSt
+      iAlarmNo=AL_SpNotInTcPos SYG_RM[iSYGArea]=540.0
+      GOTOF PROG_END
+    ENDIF
+    ;
+    IF (iTCStatus<>0)
+      ;
+      ;WzW wurde abgebrochen
+      ;
+      IF (iTCStatus==1)OR(iTCStatus==2)
+        ;
+        ;WzW noch erfolgt
+        ;
+        IF (NOT bCSInTCPos)
+          ;
+          ;Sp nicht in WzW-Pos gerichtet
+          ;
+          M_SpUnclamp1
+          G4 F=icWait
+          ;
+          ;DG nach ausgehoben verfahren mit ELSP
+          M124
+          STOPRE
+          ;
+          ;Spindel klemmen ohne WZ
+          M_SpClampNoTool1
+          G4 F=icWait
+          ;
+          ;Spindel richten
+          SPOS=ACP(grTCSPos)
+          STOPRE
+          ;
+        ENDIF
+        ;
+        ;Spindel loesen
+        M_SpUnclamp1
+        G4 F=icWait
+        ;
+        ;Fahren in naechste Grundstellung mit Einlesesperre
+        M125
+        G4 F=icWait
+        ;
+        IF (NOT OUT_DGRotInTCPos)
+          ;...DG sollte in WzW Position sein
+          iAlarmNo=AL_DgNotInBasePos
+          GOTOF PROG_END
+        ENDIF
+      ENDIF
+      ;
+      bDGTurned=(((giTCStartDBB4 B_XOR $A_DBB[4]) B_AND 'B10000')<>0)
+      ;
+      gbDG2MagSide=(bDGTurned)AND(giTNoDG2>0)AND(bMagIsMiksch)
+      ;
+      IF (giTNoSp==0)AND(giTNoDG1>0)AND(bDGTurned)
+        ;
+        iTmp=giTNoDG1
+        ToAckn(TRUE,50,2,iTmp,0,9998,mcLocSp,9998,mcLocDG1,1) ;asynchron DG1->SP
+        giTNoSp=iTmp giTNoDG1=0 OUT_ToolInSp=TRUE
+        ;
+        M_SpClampWithTool1
+        G4 F=icWait
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to Sp")
+      ENDIF
+      ;
+      IF ((giTNoHG==0)AND(giTNoDG2>0))AND(gbWithHG)
+        ;
+        IF (giTNoDG2>0)
+          ;
+          iTmp=giTNoDG2
+          ToAckn(TRUE,50,2,iTmp,0,9998,mcLocHG,9998,mcLocDG2,1) ;asynchron DG2->HG
+          giTNoHG=iTmp giTNoDG2=0
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to HG")
+        ENDIF
+      ENDIF
+      ;
+      IF ((iTNoMag==0)AND(giTNoDG2>0))AND(NOT gbWithHG)AND(NOT bMagIsMiksch)
+        ;
+        IF (giTNoDG2>0)
+          ;
+          iTmp=iTNoMag
+          iState=DELMLRES(icMagNo,iMagPos)
+          ToAckn(TRUE,50,2,iTmp,0,icMagNo,iMagPos,9998,mcLocDG2,1) ;asynchron DG2->Magazin
+          iTNoMag=iTmp giTNoDG2=0
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to Chain")
+        ENDIF
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    ;DG leer...
+    ;
+    IF (NOT mcbDBB_DGHorizontal)AND(NOT OUT_DGRotInBasePos)
+      ;...DG sollte in WzW Position sein
+      iAlarmNo=AL_DgNotInBasePos
+      GOTOF PROG_END
+    ENDIF
+  ENDIF
+  ;
+  ;DG ist leer -> WzW beenden
+  IF (giTNoDG1==0)AND(giTNoDG2==0) GOTOF TC_FINISHED
+  ;
+  IF (bMagIsMiksch)
+    ;
+    ;DG1 ist leer und ein zu entladende Wz im DG2 ist auf der Magazinseite -> WzW beenden
+    IF (giTNoDG1==0)AND(gbDG2MagSide) GOTOF TC_FINISHED
+    ;
+    ;zu Beginn oder Ausserhalb des WzW's darf das vorzubereitende Wz im DG1 auf der Magazinseite sein
+    IF (giTNoDG1<>0)AND(giTNoDG2==0)AND(NOT gbDG2MagSide)AND(OUT_DGRotInTCPos)AND(iTCStatus<=1) GOTOF TC_FINISHED
+    ;
+  ENDIF
+  ;
+  ;========
+  MTC_SYNC:
+  ;========
+  ; 
+  ;Synchronisieren erforderlich
+  ;
+  giForceTMSync=10+iTCStatus
+  ;
+  iAlarmNo=AL_PleaseSyncFirst SYG_RM[iSYGArea]=540.0
+  GOTOF PROG_END
+  ;
+ENDIF
+
+;===========
+TC_FINISHED:
+;===========
+;
+;Belegung Aktualisieren
+giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0 iMagPos=0
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG]
+ENDIF
+IF (bMagIsChain)OR(bMagIsPickUpDisk)
+  iMagPos=OUTA_ActPosV1
+  IF (iMagPos>0)
+    iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+  ENDIF
+ENDIF
+;
+OUT_ToolInSp=(giTNoSp>0)
+
+;-580.0--Schritt 2-
+; WzW abgeschlossen
+;------------------
+;
+STOPRE
+LOG(bEnableLog,iFError,sFName,"  tool change (Step 2) has finished .. ")
+;
+IF (bDGIsMTC)
+  ;
+  M_ResetPLCTCCount
+  ;
+  mcDBB_PLCStepTC=0
+  ;
+  IF (giTNoDG2==0)
+    giTCStartDBB4=$A_DBB[4]
+  ENDIF
+ENDIF
+;
+mcDBB_StepTC=0 giSyncTC=0 grSyncPickupDrop=0
+;
+;Damit PLC mcDBB_PLCStepTC=0 erkennt, bevor OUT_TcActive=FALSE wird.
+;Anderenfalls wird wieder Synchronisieren verlangt
+G04 F=icWait
+;
+OUT_TcActive=FALSE OUT_ForceTMSync=FALSE
+;
+;-600.0--Schritt 3-----------------------
+; Synchronisieren mit Kanal 2
+;
+; Kanal 2 ermittelt jetzt den Magazin
+; Status und stellt ihn eventuell richtig
+;----------------------------------------
+giStepHome=iNextStep+1 iNextStep=giStepHome+1
+;
+LOG(bEnableLog,iFError,sFName,"  giStepHome="<<giStepHome<<": waiting for channel 2")
+;
+REPEAT
+  STOPRE
+  G4 F=icWait
+UNTIL (giStepHome==iNextStep)
+;
+;-700.0--Schritt 4----------
+; Magazin Status hergestellt
+; (durch Kanal 2)
+;---------------------------
+;
+;Belegung aktualisieren
+giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0 iMagPos=0
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG]
+ENDIF
+IF (bMagIsChain)OR(bMagIsPickUpDisk)
+  iMagPos=OUTA_ActPosV1
+  IF (iMagPos>0)
+    iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+  ENDIF
+ENDIF
+;
+OUT_ToolInSp=(giTNoSp>0) OUT_RevCha1Active=TRUE
+;
+;-710.0--Schritt 4-----------
+; Kanal 1 beauftragt Kanal 2,
+; das HG(ohne Spindel) leer
+; zu fahren
+;---------------------------
+FreeHgSp(FALSE)
+
+;-800.0--Schritt 5-------------
+; HG Freifahren an Kanal 2
+;
+; Sys_Cha2 (Kanal 2) faehrt das
+; HG (ohne Spindel) leer
+;------------------------------
+STOPRE
+giStepHome=iNextStep+1 iNextStep=giStepHome+1
+;
+LOG(bEnableLog,iFError,sFName,"  giStepHome="<<giStepHome<<": waiting for channel 2 finished work .. ")
+
+;-800.1--Schritt 5----
+; X aus Magazin fahren
+;---------------------
+;
+OUT_ToolInSp=(giTNoSp>0)
+;
+IF (giTNoSp>0)
+  M_SpClampWithTool1
+ELSE
+  M_SpClampNoTool1
+ENDIF
+;
+IF ($AA_IM[X]>=grTcPrePosX)AND((bYInTCPos)OR(bDGIsWM286))AND(bHeadInTCPos)
+  ;
+  ;X aus Magazinraum fahren
+  D0 G1 G60 G601 G153 F=rVelo X=grTcPrePosX-rc0x5mm M23
+ENDIF
+;
+IF ($AA_IM[X]<=grTcPrePosX)
+  ;
+  ;-800.2--Schritt 5---
+  ; WzW Tuer schliessen
+  ;--------------------
+  M_TcDoorClose0
+ENDIF
+
+;-810.0--Schritt 5-----------
+; Aktualisierung Spindeldaten
+;----------------------------
+SpTlData(1,giTNoSp)
+
+;-820.0--Schritt 5-------------
+; Ruecklauf aus dem Arbeitsraum
+;------------------------------
+;
+IF (CustomerHome=="")
+  ;
+  ;Es wurde kein kundenspezifischer Name festgelegt
+  sCusHome=("/_N_SPF_DIR/_N_CUS_HOME_SPF") bWithExtCall=FALSE
+ELSE
+  ;
+  bWithExtCall=((giActDeviceNo>0)AND(NOT gbWithEES)) sCusHome=CustomerHome
+ENDIF
+;
+;-820.1--Schritt 5-------------------
+; Aufruf nur, wenn Ruecklaufprogramm
+; existiert. Sonst keine Aktion.
+;------------------------------------
+IF (bWithExtCall)
+  ;
+  EXTCALL sCusHome
+  ;
+  LOG(bEnableLog,iFError,sFName,"  CustomerHome (EXTCALL "<<CustomerHome<<") done")
+ELSE
+  ;
+  IF ISFILE(sCusHome)
+    ;
+    CALL sCusHome
+    ;
+    LOG(bEnableLog,iFError,sFName,"  CustomerHome ("<<CustomerHome<<") done")
+  ENDIF
+ENDIF
+
+IF (gbSpecTlInSp)
+  ;
+  ;-830.0--Schritt 5------------
+  ; - Plandrehkopf Referenzieren
+  ; - Einstechkopf Kalibrieren
+  ;-----------------------------
+  SpecTlMan(104)
+  ;
+  IF (giResult<>0)
+    iAlarmNo=giResult sAlarmParam=gsResult SYG_RM[iSYGArea]=830.0
+    GOTOF PROG_END
+  ENDIF
+  ;
+  LOG(bEnableLog,iFError,sFName,"  Special Tool ("<<mcDBB_SpecToType<<") referenced or calibrated")
+ENDIF
+
+;-840.0--Schritt 5--------------
+; warten, bis Kanal 2 fertig ist
+;-------------------------------
+LOG(bEnableLog,iFError,sFName,"  giStepHome="<<giStepHome<<": waiting for channel 2 finished work .. ")
+;
+REPEAT
+  ;auf Ende RevCha2 warten
+  STOPRE
+  G4 F=icWait
+UNTIL (NOT OUT_RevCha2Active)
+
+;-900.0--Schneide Anwaehlen-
+;---------------------------
+;
+;SpWz koennte sich im CustomerHome geaendert haben
+giTNoSp=$TC_MPP6[9998,mcLocSp] OUT_ToolInSp=(giTNoSp>0)
+;
+IF (giTNoSp>0)
+  ;
+  IF ($P_TOOL<=0)
+    ;
+    ;keine Schneide aktiviert
+    ;
+    IF ((mcDBB_DNoAllowed B_AND 'B1')<>0)
+      ;
+      ;D1 angelegt -> Anwaehlen
+      ;
+      D1
+    ENDIF
+  ELSE
+    ;
+    ;Schneidenanwahl bleibt erhalten
+  ENDIF
+ELSE
+  ;
+  D0
+ENDIF
+
+;-1000.0--Ende-
+;--------------
+;
+;========
+PROG_END:
+;========
+;
+MSG("")
+;
+OUT_RevCha1Active=FALSE
+;
+;-1000.1--Ende-----
+; Protokoll beenden
+;------------------
+IF (iAlarmNo>0)
+  LOG(bEnableLog,iFError,sFName,"  iAlarmNo="<<iAlarmNo)
+ENDIF
+;
+LOG(bEnableLog,iFError,sFName," ")
+LOG(bEnableLog,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+LOG(bEnableLog,iFError,sFName,"------------ End of "<<sCycName<<" ----------------")
+LOG(bEnableLog,iFError,sFName," ")
+;
+;-9999.0--Alarme-
+;----------------
+IF (iAlarmNo>0)
+  ;
+  IF (SYG_RM[iSYGArea]>0)
+    MakeAlarmParam(sAlarmParam,sAlarmParam," {"<<SYG_RM[iSYGArea]<<"}")
+  ENDIF
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+M30
+

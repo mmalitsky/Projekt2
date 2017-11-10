@@ -1,0 +1,78 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CleanTl.SPF
+;# Task:      Wz Kegel Reinigung
+;# Version:   V06.00.08
+;# Date:      20.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 20.08.2017 / Simons
+; - Neuversionierung
+; - SAVE entfernt
+;
+; V06.00.06 - 15.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 14.04.2015 / Simons
+; - Ueberarbeitung
+; - giNumRealMag,giMagNoLoadList
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Fuer Kanal 1:
+; Werkzeugkegel (im Magazin) reinigen lassen
+;
+; Eingangsparameter:
+; iMagNo=  0: alle (realen) Teilmagazine
+;        >=1: nur das vorgegebene Teilmagazin
+;
+; Wird angestossen durch Kundenprogramm
+; bzw. direkten Aufruf in MDA
+;
+;------------------------------------
+
+PROC CleanTl(INT iMagNo) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="CleanTl V06.00.08"
+
+IF (NOT $P_SUBPAR[1])
+  ;iMagNo nicht vorgegeben
+  iMagNo=0
+ENDIF
+
+WHILE (giTaskID<>0)
+  ;
+  ;Warten bis laufenderAuftrag fertig ist
+  ;
+  STOPRE
+  G04 F0.1
+ENDWHILE
+
+IF (iMagNo<0)OR(iMagNo>giNumRealMag)
+  ;
+  RET
+ENDIF
+;
+;Auftrag an Kanal 2 (nicht auf Beendigung Warten)
+;
+giTaskOption=0 giTaskData[0]=iMagNo giTaskData[1]=0 giTaskData[2]=0 giTaskState=1
+;
+;Start - Werkzeugkegel Reinigen
+;
+giTaskID=10
+;
+RET

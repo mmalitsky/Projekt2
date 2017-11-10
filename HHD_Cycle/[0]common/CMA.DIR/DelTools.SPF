@@ -1,0 +1,106 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     DelTools.SPF
+;# Task:      Wz'e Loeschen
+;# Version:   V06.00.06
+;# Date:      11.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 07.05.2015 / Simons
+; - Ueberarbeitung
+; - giNumPlacesInMag,giNumRealMag
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+;--------------
+;
+; Alle Werkzeuge des Teilmagazins/des
+; gesamten Magazins loeschen
+; Ggf. zusaetzlich auch aus der
+; Wz-Liste loeschen
+;
+; Eingangsparameter:
+; ------------------
+;  iMode     =0: Nur aus dem Magazin loeschen
+;            =1: Aus dem Magazin und aus der Wz-Liste loeschen
+;  iMagNo    =0: Alle Wz aus allen Teilmagazinen loeschen
+;            >0: Alle Wz aus dem angegebenen Teilmagazin loeschen
+;
+;------------------------------------
+
+PROC DelTools(INT iMode, INT iMagNo)
+
+DEF STRING[32] sCycName="DelTools V06.00.06"
+;
+DEF INT iTNo, iMag, iPl, iMag1, iMag2
+
+IF (iMode<0)OR(iMode>1)OR(iMagNo<0)OR(iMagNo>iNumRealMag) GOTOF ENDE
+
+SETAL(AL_AllToolsWillBeDeleted67)
+;
+M0
+;
+STOPRE
+
+;Loeschen
+;
+IF (iMagNo==0)
+  ;
+  ;alle Magazine
+  ;
+  iMag1=1 iMag2=iNumRealMag
+ELSE
+  ;
+  ;vorgegebenes Magazin
+  ;
+  iMag1=iMagNo iMag2=iMagNo
+ENDIF
+
+FOR iMag=iMag1 TO iMag2
+  ;
+  FOR iPl=1 TO giNumPlacesInMag[iMag]
+    ;
+    STOPRE
+    iTNo=$TC_MPP6[iMag,iPl]
+    IF (iTNo>0)
+      ;
+      ;Wz auf Platz Loeschen
+      ;
+      $TC_MPP6[iMag,iPl]=0
+      ;
+      IF (iMode==1)
+        ;
+        ;auch aus WzListe
+        $TC_DP1[iTNo,0]=0
+      ENDIF
+    ENDIF
+  ENDFOR
+ENDFOR
+
+IF (iMode==1)AND(iMagNo==0)
+  ;
+  ;alle Wz aus Wz-Liste loeschen, also auch die Handwerkzeuge
+  ;
+  $TC_DP1[0,0]=0
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET

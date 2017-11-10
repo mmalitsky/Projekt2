@@ -1,0 +1,502 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MMAC_AL.DEF
+;# Task:      Alarme und Meldungen
+;# Version:   V06.00.08
+;# Date:      29.10.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+;Beschreibung:
+;-------------
+; Herstellerspezifische Makros
+; Alarme und Meldungen
+; Achtung:
+; Anzahl begrenzt durch MD 18160
+; (MM_NUM_USER_MACROS)
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 29.10.2017 / Simons
+; - Neuversionierung
+; - Palettenwechsler mit NC HubAchse
+; - MSG_WaitForAPCInBasePos, 67030 hinzu
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Prototyp (aus MMAC_BS.DEF)
+; - zusaetzliche Textelemente
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Prototyp (aus MMAC_BS.DEF)
+;
+; V06.00.06 - 12.04.2017 / Simons
+; - Vorlage
+;
+;-------------------------------------
+
+;allgemeine Msg-Texte
+DEFINE MSG_ForLoadingPressNCSTART AS "$89600"
+DEFINE MSG_MovingToolToMagazine AS "$89605"
+DEFINE MSG_MovingToolToSp AS "$89607"
+
+DEFINE MSG_WaitForDGCleared AS "$89611"
+DEFINE MSG_WaitForToolPutToSp AS "$89612"
+DEFINE MSG_WaitForToolRemovedFromSp AS "$89613"
+DEFINE MSG_WaitForHgCleared AS "$89614"
+
+DEFINE MSG_TlMeasCheckRunning AS "$89615"
+DEFINE MSG_TlCheckRunning AS "$89616"
+DEFINE MSG_TlMeasRunning AS "$89617"
+DEFINE MSG_TlTeachRunning AS "$89618"
+
+DEFINE MSG_HomePrgIsRunning AS "$89619"
+
+DEFINE MSG_WaitForEmptySp AS "$89622"
+DEFINE MSG_WaitForPrepEnd AS "$89623"
+DEFINE MSG_ToBreakCtrlRunning AS "$89624"
+
+DEFINE MSG_WarningReConfig AS "$89630"
+DEFINE MSG_ReConfigRunning AS "$89631"
+
+;$89632..89634 reserviert fuer Mag-Umkonfiguration
+DEFINE MSG_TMResetRunning AS "$89635"
+DEFINE MSG_TMSyncRunning AS "$89636"
+DEFINE MSG_TestStopRunning AS "$89637"
+DEFINE MSG_CleanTlRunning AS "$89638"
+DEFINE MSG_TcRunning AS "$89639"
+DEFINE MSG_PrepareByTc AS "89640"
+
+DEFINE MSG_OpenDoorPutToolIntoHg AS "$89641"
+DEFINE MSG_OpenDoorGetToolFromHg AS" $89642"
+DEFINE MSG_WaitForAPCInBasePos AS" $89644"
+
+DEFINE MSG_LubCycleActive AS" $89645"
+
+DEFINE MSG_SavingData AS "$89648"
+DEFINE MSG_ReadingData AS "$89649"
+
+DEFINE MSG_WaitForDiskPositioned AS "$89652" ;MSG_WaitForChainPositioned
+DEFINE MSG_WaitWhileDiskRunning AS "$89653"  ;MSG_WaitWhileChainRunning
+
+DEFINE MSG_WaitDGForCleared AS "$89659" 
+
+;Textelemente
+DEFINE T_Start AS "$89669"
+DEFINE T_UnloadTl AS "$89670"
+DEFINE T_LoadTl AS "$89671"
+DEFINE T_Started AS "$89672"
+DEFINE T_GetTlOutOfSp AS "$89673"
+DEFINE T_PutTlIntoSp AS "$89674"
+DEFINE T_GetTlOutOfMag AS "$89675"
+DEFINE T_PutTlIntoMag AS "$89676"
+DEFINE T_CheckTl AS "$89677"
+DEFINE T_Error AS "$89678"
+
+;Magazin-spezifische Messages:
+DEFINE MSG_PrepareIsRunning AS "$89681"
+DEFINE MSG_PreparedWaitingForTC AS "$89682"
+DEFINE MSG_PrepToolIsManTool AS "$89683"
+DEFINE MSG_WaitForHgPickedUpTl AS "$89684"
+DEFINE MSG_WaitForHgDroppedTl AS "$89685"
+
+DEFINE MSG_WaitForEndOfChan2Stop AS "$89688"
+DEFINE MSG_WaitForPrepByChan2 AS "$89689"
+
+DEFINE MSG_WaitForSysProg2Run AS "$89690"
+DEFINE MSG_WaitForSysProg2Stop AS "$89691"
+
+;Flaechenmagazin-spezifische Messages:
+DEFINE MSG_WaitForCassPutIn AS "$89695"
+DEFINE MSG_WaitForCassUnlocked AS "$89696"
+
+;Werkzeug-Chip Messages:
+DEFINE MSG_ReadChipRunning AS "$89771"
+DEFINE MSG_WriteChipRunning AS "$89772"
+DEFINE MSG_CompChipRunning AS "$89773"
+
+;Messages fuer Werkzeug vermessen/pruefen:
+DEFINE MSG_MovingTlToMeasPos AS "$89780"
+DEFINE MSG_WaitForTlMeasured AS "$89781"
+DEFINE MSG_WaitForMeasReset AS "$89782"
+
+;Meldungen für Lastfallüberwachung B-Achse (Torque)
+DEFINE MSG_StartLoadCase AS "$89820"
+DEFINE MSG_RunLoadCase AS "$89821"
+DEFINE MSG_FeedOvrBelow100 AS "$89822"   ;Override auf 100% stellen. Weiter = NCSTART, Abbruch = RESET
+DEFINE MSG_LC_OutOfRange AS "$89823"     ;Errechneter Wert außerhalb der Vorgabe
+DEFINE MSG_LC_LicenseMissing AS "$89824" ;Lizenz <Lesen von Antriebsgrößen> fehlt
+DEFINE MSG_LC_InvalidAdaption AS "$89825";Adaptionsdaten fehlen/ungültig
+DEFINE MSG_LC_PalNotMounted AS "$89826"  ;Palette eingebaut fehlt
+DEFINE MSG_LC_PalOverLoad AS "$89827"    ;Palettenüberladung
+DEFINE MSG_LC_SpecDynamic AS "$89828"    ;Sonder - Dynamik!
+DEFINE MSG_LC_StndDynamic AS "$89829"    ;Standard - Dynamik!
+
+;Palettenwechsler
+DEFINE MSG_PalClamp_LoadPlace AS "$89830"
+DEFINE MSG_PalUnClamp_LoadPlace AS "$89831"
+DEFINE MSG_PalClamp_Table AS "$89832"
+DEFINE MSG_PalUnClamp_Table AS "$89833"
+DEFINE MSG_APC_0Deg AS "$89834"
+DEFINE MSG_APC_180Deg AS "$89835"
+DEFINE MSG_APCHome_Start AS "$89836"
+DEFINE MSG_APCHome_Continue AS "$89837"
+DEFINE MSG_RotTable_NoPCPos AS "$89838"
+
+;allgemeine ALARME
+DEFINE AL_APCNotInBasePos AS 66000
+DEFINE AL_InvalidGUD AS 66001
+DEFINE AL_SpNotClamped AS 66002
+DEFINE AL_TInSpButSpClampedNoTool AS 66003
+DEFINE AL_MovingTlOnlyInMag AS 66004
+DEFINE AL_AxisNameInvalid AS 66005
+DEFINE AL_AxisPosMissing AS 66006
+DEFINE AL_ZPosInvalid AS 66007
+DEFINE AL_NoToolInSpindle AS 66010
+DEFINE AL_TlPlaceNotEmpty AS 66013  ;Platz belegt
+DEFINE AL_TlPlaceEmpty AS 66014  ;kein Wz auf dem Platz
+DEFINE AL_NoFreeLocFound AS 66015  ;Kein Leerplatz gefunden
+DEFINE AL_TLocIsNotFree AS 66016  ;Zielplatz nicht frei/nicht gefunden
+DEFINE AL_PosBehindEndSwitch AS 66017 ;Pos. hinter Softwareendschalter
+DEFINE AL_TlNotMoved AS 66018  ;Wz nicht an den Zielplatz gebracht
+DEFINE AL_TlNotPrepared AS 66019  ;Wz (noch) nicht vorbereitet
+DEFINE AL_TlNotFound AS 66020  ;Wz nicht gefunden
+DEFINE AL_TlNotAvail AS 66021  ;Wz nicht verfügbar/nicht einsetzbar
+DEFINE AL_LocInvalid AS 66022  ;Angaben für Wz-Platz ungültig
+DEFINE AL_TNoNotAllowed AS 66023  ;ungueltige T-Nr
+DEFINE AL_InvalidMissingInput AS 66024  ;ungueltige(r)/fehlende(r) Eingangsparameter
+DEFINE AL_InvalidCaNr AS 66025  ;Ungueltige Ca-Nr
+DEFINE AL_InvalidPlNr AS 66026  ;Ungueltige Pl-Nrl
+DEFINE AL_ErrorPlDat AS 66027   ;Fehler bei Bestimmung der Platzdaten
+DEFINE AL_TlNotInMag AS 66028   ;Wz z.Zt. nicht im Magazin
+DEFINE AL_TaskIDInvalid AS 66029 ;Ungültige TaskID (für Quittung FC8)
+DEFINE AL_ScalingSystemUnknown AS 66030 ;unbekanntes Skalierungssystem (inch/metrisch)
+DEFINE AL_PleaseUnloadSpTl AS 66031 ;Bitte erst SpWz entladen
+DEFINE AL_PleaseSyncFirst AS 66032 ;WzV vorher synchronisieren
+DEFINE AL_PlLockedInMag9998 AS 66033 ;mind. 1 Platz im Zwischenspeichermagazin ist gesperrt
+DEFINE AL_ClampSp AS 66034  ;Lt. WzV Wz in Spindel: Bitte Spindel spannen
+DEFINE AL_WrongMagType AS 66035 ;In Konfigurationsseite falscher Magazintyp
+DEFINE AL_PosProgNotFound AS 66036 ;POS-Programm nicht gefunden
+DEFINE AL_PrgTestActive AS 66037 ;Satzsuchlauf/PrgTest/PrgSimulation aktiv
+DEFINE AL_TakeTlToMag AS 66038 ;Wz erst im Magazin ablegen
+DEFINE AL_TlNotCreated AS 66039 ;Wz <%4> konnte nicht (neu) angelegt werden
+DEFINE AL_TlNotCreatedOnLoc AS 66040 ;Wz konnte auf Platz %4 nicht angelegt werden
+DEFINE AL_StopDueToErrors AS 66041 ; Abbruch wg. Fehler
+DEFINE AL_VerifyTlPosition AS 66042 ; Pruefen, ob Wz auf Platz richtig eingesetzt
+DEFINE AL_TlPlaceUsedByOtherTool AS 66043 ;Pl. belegt durch Wz auf Nachbarpl.
+DEFINE AL_TlPlaceReserved AS 66044 ;Pl. reserviert
+DEFINE AL_WrongMachType AS 66045 ;In der Konfigurationsseite falscher Maschinentyp
+DEFINE AL_LoadListNotTarget AS 66046 ;Beladeliste als Zielmag. nicht erlaubt
+DEFINE AL_TlInLoadList AS 66047 ;Wz momentan in Beladeliste
+DEFINE AL_TlNotInMagazine AS 66048 ;Wz nicht im Magazin
+DEFINE AL_WrongTlAtLoadingPos AS 66049 ;falsches Wz an der Beladestelle
+DEFINE AL_HgAtLoadingPosNotEmpty AS 66050
+DEFINE AL_MagazineSpecifiedInvalid AS 66051
+DEFINE AL_ConfigTooMuchLocs AS 66052
+DEFINE AL_InvalidTargetPlace AS 66053
+
+DEFINE AL_SpTlOverSize AS 66062
+DEFINE AL_NumTlOfTypeLimited AS 66062
+
+DEFINE AL_SpHgTlOverSize AS 66066
+
+DEFINE AL_HGTlOverSize AS 66067
+DEFINE AL_TCNotFinished AS 66068
+DEFINE AL_PosUnvalid AS 66069
+
+DEFINE AL_PosBZ_ProtectedArea AS 66070  ;Sollposition B-/Z-Achse liegen im geschützten Bereich
+DEFINE AL_WorkSpaceBZViolation AS 66071 ;Arbeitsraumverletzung B-/Z-Achse / Z-Achse freifahren
+DEFINE AL_SwivSpCollision AS 66072      ;Schwenkspindel im Kollisionsbereich Werkzeugwechseltür
+DEFINE AL_SpiNotEmpty AS 66073          ;Spindel nicht geklemmt ohne Werkzeug
+DEFINE AL_HeadNotTcPos AS 66074         ;Kopf nicht in WzW-Stellung
+
+DEFINE AL_WaitFor AS 66077
+DEFINE AL_NotAvailable AS 66079
+
+DEFINE AL_APC_NotIn_0_180 AS 66080
+DEFINE AL_APC_NotRetracted AS 66081
+DEFINE AL_A_NoPCPos AS 66082
+DEFINE AL_Z_NoFreePos AS 66083
+DEFINE AL_APC_NoFreePos AS 66084
+DEFINE AL_B_NoPCPos AS 66085
+DEFINE AL_APCInvalidTargetPos AS 66086
+
+DEFINE AL_NoSupport AS 66087
+DEFINE AL_SyntaxError AS 66088
+DEFINE AL_PosMissing AS 66089
+DEFINE AL_NoBridgeToolsAllowed AS 66090
+DEFINE AL_Missing AS 66091
+DEFINE AL_CombNotAllowed AS 66092
+DEFINE AL_WriteError AS 66093
+DEFINE AL_ReadError AS 66094
+
+DEFINE AL_CycleInvalid AS 66096
+DEFINE AL_MDInvalid AS 66098
+
+;zusaetzliche HHD-WzV-Alarme
+DEFINE AL_CommunicationErr AS 66100
+DEFINE AL_UpdateLocFailed AS 66101  
+DEFINE AL_NegTelAckn AS 66102       
+DEFINE AL_InvalidMissingData AS 66103
+
+DEFINE AL_NameDuploInvalid AS 66105
+
+DEFINE AL_NegTelAcknReason AS 66107
+DEFINE AL_1Reason AS 66108
+DEFINE AL_1WorkAround AS 66109
+
+DEFINE AL_InvalidAcknData AS 66112 
+
+;allgemeine ALARME
+DEFINE AL_TlDataChanged AS 66113
+DEFINE AL_DG12TlOverSize AS 66115
+DEFINE AL_DGTlOverSize AS 66116
+
+;Doppelscheibe
+DEFINE AL_PositionInvalid AS 66201
+DEFINE AL_DiskPositionInvalid AS 66200
+
+DEFINE AL_HgNotReturned AS 66216  ;HG nicht hinten
+DEFINE AL_HgNotAdvanced AS 66217 ;HG nicht vorne
+DEFINE AL_HgClampedNotAdvanced AS 66218 ;Hg gespannt, aber nicht vorne
+DEFINE AL_HgNotAdvancedNotReturned AS 66220 ;HG ist weder vorne noch hinten
+DEFINE AL_HgPosInvalid AS 66226 ;HG (X1) in ungueltiger Position
+DEFINE AL_HgNotInTcPos AS 66227 ;HG nicht in WzW-Pos.
+
+DEFINE AL_DiskNotIndexPos AS 66230 ;Scheibe nicht in Teilungsposition
+DEFINE AL_DiskNotInPassage AS 66231 ;Scheibe nicht in Durchfahrposition
+
+;Magazin-spezifische ALARME
+DEFINE AL_ClampHg AS 66301  ;Lt. WzV Wz im HG: Bitte HG spannen
+
+DEFINE AL_CassIsMissing AS 66305  ;Cass. nicht vorhanden/nicht eingefahren
+DEFINE AL_CassIsLocked AS 66306   ;Cass. gesperrt
+
+DEFINE AL_TlToBigForDrawer AS 66310  ;Werkzeug zu groß für Schublade
+
+DEFINE AL_HgNotEmpty AS 66317  ;HG nicht leer
+DEFINE AL_MoveFromToDgSpNotAllowed AS 66318 ;Umsetzen von DG/SP bzw. nach DG/SP nicht erlaubt
+
+DEFINE AL_WrongTlInHG AS 66321  ;Falsches Wz im HG 
+DEFINE AL_NoTlInHG AS 66322  ;Kein Wz im HG 
+
+DEFINE AL_WayNotSpecified AS 66329 ;Ungueltige Fahrlogik
+DEFINE AL_NoLaneDataFound AS 66330 ;Es liegen keine Daten fuer X- bzw. Z-Gassen vor
+
+DEFINE AL_DiffLaneData AS 66332  ;unterschiedliche Gassen Z fuer Quelle und Ziel
+DEFINE AL_HGNotInValidPos AS 66333  ;HG nicht auf gültiger Mittelgasse
+DEFINE AL_EmptyHgNotPrepared AS 66334  ;Kein leeres HG vorbereitet
+DEFINE AL_HgNotVertAxisBlocked AS 66335 ;HG horizontal: Achsbewegung blockiert
+DEFINE AL_AxisMinusBlocked AS 66336 ; Verfahrbewegung "Minus" zum Schutz des DG gesperrt
+DEFINE AL_AxMinusBlocked AS 66337 ; Verfahrbewegung "Minus" gesperrt
+
+;Flächenmagazin-spezifische Alarme
+DEFINE AL_HgNotVertical AS 66340 ;HG nicht in vertikaler Stellung
+DEFINE AL_HgNotHorizontal AS 66341 ;HG nicht in horizontaler Stellung
+DEFINE AL_HgNotLifted AS 66342  ;HG nicht gehoben
+DEFINE AL_HgNotLowered AS 66343 ;HG nicht (ab-)gesenkt
+DEFINE AL_HgClampedNotLowered AS 66344 ;Hg gespannt, aber nicht abgesenkt
+DEFINE AL_HgNotLiftedHoriz AS 66345 ;Hg nicht gehoben und/oder nicht horizontal
+DEFINE AL_HgNotLoweredVert AS 66346 ;HG nicht gesenkt und nicht vertikal
+DEFINE AL_HgWithTlNotClamped AS 66347 ;Hg mit Wz, aber nicht gespannt
+DEFINE AL_HgNotLowVertNotLiftHoriz AS 66348 ;HG ist weder gesenkt/vertikal noch gehoben/horizontal
+
+DEFINE AL_DgNotInBasePos AS 66350 ;DG nicht in Grundstellung (horizontal)
+DEFINE AL_TlSpDgHg AS 66351 ;Wz sowohl im Doppelgreifer als auch in SP/HG
+DEFINE AL_DGNotEmpty AS 66352  ;mind. 1 Wz im DG
+DEFINE AL_SpNotInTcPos AS 66353 ;Wz(e) im DG, SP aber nicht in WzW-Pos
+DEFINE AL_HgNotInPrepPos AS 66354 ;Wz(e) im DG, HG aber nicht in Wz-Bereitstellungspos
+DEFINE AL_DGNotVertical AS 66356 ;DG nicht vertikal
+
+DEFINE AL_DGNotUnclamped AS 66401 ;"Doppelgreifer nicht gelöst"
+DEFINE AL_DGNotClamped AS 66408   ;"Doppelgreifer nicht geklemmt"
+
+;Alarme bzgl. Balluff-Chip 66600 .. 66619
+DEFINE AL_HGCloseByRWStation AS 66600
+DEFINE AL_ProtectRWHeadX1Blocked AS 66601
+DEFINE AL_ProtectRWHeadZ1Blocked AS 66602
+
+DEFINE AL_NoToolInHGAfterRW AS 66606
+DEFINE AL_TlIdChangedAfterRW AS 66607
+DEFINE AL_InvalidTlIdAfterRW AS 66608
+
+DEFINE AL_NoWriteData AS 66615
+
+;Alarme bzgl. Wz-Vermessen
+DEFINE AL_TlMeasUnitNotCalibrated AS 66620
+DEFINE AL_NoMeasValueFromPLC AS 66621
+DEFINE AL_LastTlBroken AS 66622
+DEFINE AL_PrevTlBroken AS 66623
+DEFINE AL_TlOutOfRange AS 66624
+
+DEFINE AL_BreakCtrlNoBasePos AS 66625
+
+DEFINE AL_LenOrCounterInvalid  AS 66627
+DEFINE AL_TlNotMeasured AS 66628
+DEFINE AL_TlMeasInvalidCutNo AS 66629
+DEFINE AL_TlPresetDataInvalid AS 66630
+DEFINE AL_CheckLenInvalid AS 66631
+DEFINE AL_CheckNotSuitable AS 66632
+DEFINE AL_TlNoInBreakChkPos AS 66634
+DEFINE AL_CheckBreakCtrlUnit AS 66635
+
+;Alarme für Lastfallüberwachung B-Achse (Torque) 
+DEFINE AL_LCOvrNot100 AS 66700
+DEFINE AL_LCLoadLimit AS 66701
+DEFINE AL_LCOptReadDataMissing AS 66702
+DEFINE AL_LCReadAxisDataMissing AS 66703
+DEFINE AL_LCValProgNotFound AS 66704
+DEFINE AL_LCInvalidAxisNo AS 66705
+DEFINE AL_LCMeasProgNotFound AS 66706
+DEFINE AL_LCInvalidAxisName AS 66707
+DEFINE AL_LCInitProgNotFound AS 66708
+
+;Allgemein
+DEFINE AL_AXNotInPosFine AS 66710
+DEFINE AL_AxNotInTCPos AS 66711
+
+;Alarme, kein RESET erforderlich
+DEFINE AL_PleasePrepTool67 AS 67000
+DEFINE AL_PleaseUnloadSpTl67 AS 67001
+DEFINE AL_FunctionLocked67 AS 67002
+DEFINE AL_RaiseNCKReset67 AS 67003
+DEFINE AL_PleaseSync67 AS 67004
+DEFINE AL_FirstUseOfTool67 AS 67005
+DEFINE AL_NoValidMagKonf67 AS 67006 
+DEFINE AL_AllToolsWillBeDeleted67 AS 67007
+DEFINE AL_PressNCStart67 AS 67008
+
+DEFINE AL_NoOrInvalidTargetData67 AS 67010
+DEFINE AL_InvalidTargetPlace67 AS 67011
+DEFINE AL_TargetLocNotQualified67 AS 67012
+DEFINE AL_NoFreeTargetFound67 AS 67013
+DEFINE AL_TargetLocNotFree67 AS 67014
+DEFINE AL_SourceEqualDestCass67 AS 67015
+DEFINE AL_SourceEqualDestLoc67 AS 67016
+DEFINE AL_NoUnloadPlaceFound67 AS 67017
+DEFINE AL_IsManualTool67 AS 67018
+
+DEFINE AL_TlLocBlocked67 AS 67020
+DEFINE AL_TlNotFound67 AS 67021
+DEFINE AL_TNoNotAllowed67 AS 67023
+DEFINE AL_SpTlBlockedNotFree67 AS 67024
+DEFINE AL_InvalidCaNr67 AS 67025
+DEFINE AL_InvalidPlNr67 AS 67026
+DEFINE AL_WrongPalletNo67 AS 67030
+
+DEFINE AL_TakeTlFromLoc67 AS 67037 ;Wz(e) von/vom Platz/Plaetzen entfernen
+DEFINE AL_TakeTlToMag67 AS 67038 ;Wz erst im Magazin ablegen
+DEFINE AL_UnloadTlFromHg67 AS 67039 ;Wz erst aus HG entladen
+DEFINE AL_WarnLoadStationMismatch67 AS 67040
+DEFINE AL_AbortDueToErrors67 AS 67041 ; Abbruch wg. Fehler
+DEFINE AL_VerifyTlPosition67 AS 67042 ; Pruefen, ob Wz auf Platz richtig eingesetzt
+DEFINE AL_TlPlaceUsedByOtherTool67 AS 67043 ;Pl. belegt durch Wz auf Nachbarpl.
+DEFINE AL_TlPlaceReserved67 AS 67044 ;Pl. reserviert
+DEFINE AL_AbortDueToUser67 AS 67045 ; Abbruch wg. Bediener
+DEFINE AL_LoadListNotTarget67 AS 67046 ;Beladeliste als Zielmag. nicht erlaubt
+DEFINE AL_TlAlreadyLoaded67 AS 67047 ;Wz bereits beladen
+DEFINE AL_TlAlreadyUnloaded67 AS 67048 ;Wz bereits entladen
+DEFINE AL_TlInSpDG67 AS 67049 ;Wz im DG/SP
+DEFINE AL_TlInLoadList67 AS 67050 ;Wz momentan in Beladeliste
+DEFINE AL_TLocIsNotFree67 AS 67051  ;Zielplatz ist nicht frei/Zielplatz nicht gefunden
+DEFINE AL_NoFreeLocFound67 AS 67052  ;Kein Leerplatz gefunden
+DEFINE AL_TlNotInMagazine67 AS 67053 ;Wz nicht im Magazin
+DEFINE AL_TlInSp67 AS 67054 ;Wz in SP
+DEFINE AL_TlNotFitForRWChip67 AS 67055
+DEFINE AL_RemoveTlFromHG67 AS 67056
+DEFINE AL_InvalidToolData67 AS 67059
+
+DEFINE AL_NumTlOfTypeLimited67 AS 67068
+DEFINE AL_TlCollValuesWrong67 AS 67069
+DEFINE AL_NoLoadUnloadByHG67 AS 67091
+DEFINE AL_MDInvalid67 AS 67098
+
+;zusaetzliche HHD-WzV-Alarme
+DEFINE AL_CommunicationErr67 AS 67100
+DEFINE AL_UpdateLocFailed67 AS 67101  
+DEFINE AL_NegTelAckn67 AS 67102       
+DEFINE AL_InvalidMissingData67 AS 67103
+DEFINE AL_InvalidCutData67 AS 67104
+DEFINE AL_NameDuploInvalid67 AS 67105
+DEFINE AL_ConfirmNewSpTl67 AS 67106
+DEFINE AL_NegTelAcknReason67 AS 67107
+DEFINE AL_1Reason67 AS 67108
+DEFINE AL_1WorkAround67 AS 67109 
+DEFINE AL_InvalidAcknData67 AS 67112 
+DEFINE AL_InvMissTOffsData67 AS 67114
+
+;Scheibenmagazin
+DEFINE AL_WrongTlInHG67 AS 67213 ;Falsches Wz im HG
+DEFINE AL_NoToolInHG67 AS 67214  ;kein Wz im HG
+
+DEFINE AL_DiskOutOfBalance67 AS 67220 ;max. zul. einseitige Beladung der Scheibe ueberschritten
+DEFINE AL_DiskPlusHalted67 AS 67232
+DEFINE AL_DiskMinusHalted67 AS 67233
+
+;Kassettenmagazin
+DEFINE AL_WaitForCassUnlocked67 AS 67300
+DEFINE AL_WaitForCassPutIn67 AS 67301
+DEFINE AL_WaitForToolPutIn67 AS 67302
+DEFINE AL_WaitForToolRemoved67 AS 67303
+DEFINE AL_CassIsMissing67 AS 67305  ;Cass nicht vorhanden/nicht eingefahren
+DEFINE AL_CassIsLocked67 AS 67306   ;Cass gesperrt
+DEFINE AL_Oversized1Coll67 AS 67307
+DEFINE AL_Oversized2Coll67 AS 67308
+
+;Balluff-Chip
+DEFINE AL_HGCloseByRWStation67 AS 67600
+DEFINE AL_ProtectRWHeadX1Blocked67 AS 67601
+DEFINE AL_ProtectRWHeadZ1Blocked67 AS 67602
+DEFINE AL_RWUnitDisabled67 AS 67605
+DEFINE AL_TlIdChangedAfterRW67 AS 67607
+DEFINE AL_InvalidTlIdAfterRW67 AS 67608
+DEFINE AL_TlLockedDueRWError67 AS 67609
+DEFINE AL_TlWithoutChip67 AS 67610
+DEFINE AL_IdentSystemErr67 AS 67611
+DEFINE AL_DataKonversionErr67 AS 67612
+DEFINE AL_ToTMTransfErr67 AS 67613
+DEFINE AL_FromTMTransfErr67 AS 67614
+DEFINE AL_ReadToolInMagDGSP67 AS 67615
+DEFINE AL_DifferentTData67 AS 67616
+DEFINE AL_ErrFromTDataSvr67 AS 67617
+DEFINE AL_NoChipOrNoTool67 AS 67618
+
+;Vermessen/Pruefen
+DEFINE AL_LastTlBroken67 AS 67622
+DEFINE AL_PrevTlBroken67 AS 67623
+DEFINE AL_TlOutOfRange67 AS 67624
+DEFINE AL_LastTlBrokenAsk67 AS 67625
+DEFINE AL_PrevTlBrokenAsk67 AS 67626
+DEFINE AL_LenOrCounterInvalid67  AS 67627
+DEFINE AL_TlMeasInvalidCutNo67 AS 67629
+DEFINE AL_TlPresetDataInvalid67 AS 67630
+DEFINE AL_CheckLenInvalid67 AS 67631
+
+;Einstechkopf
+DEFINE AL_RecHeadCheck67 AS 67730
+DEFINE AL_RecHeadNotCalibrated67 AS 67731
+DEFINE AL_RecHeadCalibNotInPart67 AS 67732
+DEFINE AL_RecHeadCalibNotInTC67 AS 67733
+
+;Konfiguration
+DEFINE AL_WrongCFG67 AS 67071
+DEFINE AL_ProgNotFound67 AS 67072
+DEFINE AL_MissingMachIdent67 AS 67073
+DEFINE AL_CopyError67 AS 67074
+
+;Alarme für Lastfallüberwachung B-Achse (Torque) 
+DEFINE AL_LCLinesNotEntered67 AS 67700
+DEFINE AL_LCNoMemoryDelete67 AS 67701
+DEFINE AL_LCProgNotWrite AS 67702 ;Lastfall-Programm konnte nicht geschrieben werden
+DEFINE AL_LCMinProgNotExist AS 67703 ;Minimal Lastfall-Programm (LC_MINV.SPF) fehlt
+
+
+
+
+M30

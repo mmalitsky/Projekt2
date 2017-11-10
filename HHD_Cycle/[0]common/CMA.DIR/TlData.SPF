@@ -1,0 +1,221 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TlData.SPF
+;# Task:      Wz Daten Handling
+;# Version:   V06.00.06
+;# Date:      29.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 29.10.2017 / Simons
+; - DISPLOF
+; - Formale Aenderungen
+;
+; V06.00.06 - 17.04.2017 / Simons
+; - Prototyp
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Eingabeparameter:
+; -----------------
+;
+; Dienst: (binaere Anwahl Bit 0..30)
+;
+; =0 Ergebnisstruktur versorgen
+; >0 Kennungen ($TC_TP8) aktualisieren
+; <0 Sonderauftraege
+;
+; mcSetLockTl/1        <Gesperrt> Setzen
+; mcResLockTl/2        <Gesperrt> zuruecksetzen
+; mcSetFixPlaceTl/4    <FestplatzWz> Setzen
+; mcRestFixPlaceTl/8    <FestplatzWz> zuruecksetzen
+; mcResLoadUnloadTl/16 <Entladen> und <Beladen> zuruecksetzen
+; mcResActiveTl/32     <Aktiv> und <War im Einsatz> zuruecksetzen
+; mcSetRelTl/64        <Freigabe> setzen und <Gesperrt> zuruecksetzen
+; mcResRelTl/128       <Gesperrt> setzen und <Freigabe> zuruecksetzen
+; mcSetManTl/256       <HandWz> setzen
+;
+; mcResMonData/-1    Standzeiten / Standmenge zuruecksetzen
+; mcResWear/-2       Verschleissistwert loeschen
+;
+;------------------------------------
+
+PROC TlData(INT iTNo, INT iMode, INT iCutNo) DISPLOF
+
+DEF STRING[32] sCycName="TlData V06.00.06"
+;
+DEF INT iMask=1, iSet=0, iReset=0, iTP8, iEnd, iStart
+
+IF (iTNo<=0) GOTOF _NO_TL
+
+IF (NOT $P_TOOLEXIST[iTNo]) GOTOF _NO_TL
+
+IF (iMode<0) GOTOF _SPECIAL
+
+IF (NOT $P_SUBPAR[2])AND(NOT $P_SUBPAR[3])
+  iTP8=$TC_TP8[iTNo] TL_Released=((iTP8 B_AND 'B10')<>0) TL_Locked=(((iTP8 B_AND 'B100')<>0)OR(NOT TL_Released)) TL_FixPlace=((iTP8 B_AND 'H40')<>0) TL_Load=((iTP8 B_AND 'H800')<>0) TL_UnLoad=((iTP8 B_AND 'H400')<>0) TL_Manual=(((iTP8 B_AND 'H8000')<>0)OR(($A_MYMN[iTNo]==0)AND($A_MYMLN[iTNo]==0)))
+  GOTOF _END
+ENDIF
+
+;Wz Kennungen in $TC_TP8
+;-----------------------
+;
+;======
+_START:
+;======
+;
+IF ((iMode B_AND iMask)<>0) GOTOF "_L"<<iMask
+GOTOF _NEXT
+
+;===
+_L1:
+;===
+;<Gesperrt> Setzen
+iSet=iSet B_OR 'B100'
+GOTOF _NEXT
+
+;===
+_L2:
+;===
+;<Gesperrt> zuruecksetzen
+iReset=iReset B_OR 'B100'
+GOTOF _NEXT
+
+;===
+_L4:
+;===
+;<Festplatz> Setzen
+iSet=iSet B_OR 'H40'
+GOTOF _NEXT
+
+;===
+_L8:
+;===
+;<Festplatz> zuruecksetzen
+iReset=iReset B_OR 'H40'
+GOTOF _NEXT
+
+;====
+_L16:
+;====
+;<Wz entladen> und <Wz beladen> zuruecksetzen
+iReset=iReset B_OR 'HC00'
+GOTOF _NEXT
+
+;====
+_L32:
+;====
+;<Wz Aktiv>, <Wz war Im Einsatz>, <Vorwarngrenze>, <Vermessen> zuruecksetzen
+iReset=iReset B_OR 'B10011001'
+GOTOF _NEXT
+
+;====
+_L64:
+;====
+;<Freigabe> Setzen und <Gesperrt> zuruecksetzen
+iSet=(iSet B_OR 'B10') iReset=(iReset B_OR 'B100')
+GOTOF _NEXT
+
+;=====
+_L128:
+;=====
+;<Freigabe> zuruecksetzen und <Gesperrt> Setzen
+iReset=(iReset B_OR 'B10') iSet=(iSet B_OR 'B100')
+GOTOF _NEXT
+
+;=====
+_L256:
+;=====
+;<HandWz> Setzen
+iSet=iSet B_OR 'H8000'
+GOTOF _NEXT
+
+;=====
+_NEXT:
+;=====
+;laufenden Auftrag quittieren, naechsten anwaehlen
+iMode=(iMode B_AND (B_NOT iMask)) iMask=(iMask*2)
+IF (iMode==0)
+  ;
+  ;Alle Auftraege bearbeitet
+  ;
+  $TC_TP8[iTNo]=($TC_TP8[iTNo] B_OR iSet) B_AND (B_NOT iReset)
+  GOTOF _END
+ENDIF
+GOTOB _START
+
+;========
+_SPECIAL:
+;========
+;
+;Sonderauftraege
+;---------------
+iMode=ABS(iMode)
+CASE iMode OF 1 GOTOF _S1 2 GOTOF _S1 3 GOTOF _S1 DEFAULT GOTOF _END
+;
+;===
+_S1:
+;===
+;
+IF ($P_SUBPAR[3])
+  ;
+  IF (iCutNo<1)AND(iCutNo>$P_TOOLND[iTNo]) GOTOF _END
+  ;
+  iStart=iCutNo iEnd=iStart
+ELSE
+  iStart=1 iEnd=$P_TOOLND[iTNo]
+ENDIF
+;
+FOR iCutNo=iStart TO iEnd
+  ;
+  IF ((iMode B_AND 2)<>0)
+    ;
+    ;Alle WzUeberwachungsdaten zuruecksetzen
+    ;
+    IF ($TC_TP9[iTNo]==1)
+        ; Standzeit
+      $TC_MOP2[iTNo,iCutNo]=$TC_MOP11[iTNo,iCutNo]
+    ELSE
+      IF ($TC_TP9[iTNo]==2)
+        ;Standmenge
+        $TC_MOP4[iTNo,iCutNo]=$TC_MOP13[iTNo,iCutNo]
+      ELSE
+        IF ($TC_TP9[iTNo]==4)
+          ;Verschleiss
+          $TC_MOP6[iTNo,iCutNo]=0
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF ((iMode B_AND 1)<>0)  
+    ;
+    ;Alle Verschleisswerte Loeschen
+    ;
+    $TC_DP12[iTNo,iCutNo]=0 $TC_DP13[iTNo,iCutNo]=0 $TC_DP14[iTNo,iCutNo]=0 $TC_DP15[iTNo,iCutNo]=0
+    $TC_DP16[iTNo,iCutNo]=0 $TC_DP17[iTNo,iCutNo]=0 $TC_DP18[iTNo,iCutNo]=0 $TC_DP19[iTNo,iCutNo]=0 $TC_DP20[iTNo,iCutNo]=0
+  ENDIF
+ENDFOR
+;
+GOTOF _END
+
+;======
+_NO_TL:
+;======
+TL_Released=FALSE TL_Locked=FALSE TL_FixPlace=FALSE TL_Load=FALSE TL_UnLoad=FALSE TL_Manual=FALSE
+
+;====
+_END:
+;====
+;
+RET

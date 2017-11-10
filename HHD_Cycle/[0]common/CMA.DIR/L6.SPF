@@ -1,0 +1,65 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     L6.SPF
+;# Task:      Call of TC_BS.SPF
+;# Version:   V06.00.07
+;# Date:      27.07.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; Verlauf:
+; --------
+; V06.00.07 - 27.07.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.00 - 20.09.2015 / Simons
+; - ProtoTyp
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+; Werkzeugwechselzyklus fuer Siemens Werkzeugverwaltung
+; Aus Kompatibilitaetsgruenden eingefuehrt !!!
+;   a) Aufruf aus dem Bearbeitungsprogramm heraus
+;   b) Comandstring wie bei TC
+;
+; Bedingung:
+;   Es muss ein Wz-Aufruf in einem vorausgehenden
+;   NC-Satz programmiert sein, z.B.
+;     N010 T12
+;     N020 L6
+;   oder
+;     N010 T="Mein´Fraeser"
+;     N020 L6("B",185.3)
+;
+;---------------------------------------
+
+PROC L6(STRING[128] sNameOfAxis1, REAL rPosOfAxis1, STRING[1] sNameOfAxis2, REAL rPosOfAxis2) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="L6 V06.00.07"
+
+IF ($P_SUBPAR[1] AND $P_SUBPAR[3] AND $P_SUBPAR[4])
+  IF ($P_SUBPAR[2])
+    TC_BS(mcTaskPrep, , 0, sNameOfAxis1, rPosOfAxis1, sNameOfAxis2, rPosOfAxis2)
+  ELSE
+    TC_BS(mcTaskPrep, , 0, sNameOfAxis1, , sNameOfAxis2, rPosOfAxis2)
+  ENDIF
+ELSE
+  IF ($P_SUBPAR[1] AND $P_SUBPAR[2])
+    TC_BS(mcTaskPrep, , 0, sNameOfAxis1, rPosOfAxis1)
+  ELSE
+    IF ($P_SUBPAR[1])
+      TC_BS(mcTaskPrep, , 0, sNameOfAxis1, rPosOfAxis1)
+    ELSE
+      TC_BS(mcTaskPrep)
+    ENDIF
+  ENDIF
+ENDIF
+RET

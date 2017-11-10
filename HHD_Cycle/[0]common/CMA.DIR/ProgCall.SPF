@@ -1,0 +1,923 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     PogCall.SPF
+;# Task:      Call Machining Program
+;# Version:   V06.00.08
+;# Date:      21.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 21.10.2017 / Simons
+; - Integration Bearbeitungszeitzaehler
+; - Direktbeladung mit MPS
+;
+; V06.00.08 - 01.07.2017 / Simons
+; - Neuversionierung
+; - Palettenwechsler mit NC Hubachse
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 18.03.2017 / Simons
+;- gbToCheckAtTC zuruecksetzen
+;
+; V06.00.05 - 26.11.2016 / Simons
+; - Temperaturkompensation Z aus
+;   ($A_DBR[152]) entfernt
+;
+; V06.00.05 - 18.11.2016 / Simons
+; - EES und NC Extern
+; - gbTCFirstZMove
+; - Aufruf LrSpTDat entfernt
+;
+; V06.00.05 - 30.10.2016 / Simons
+; - Temperaturkompensation Z aus
+;   ($A_DBR[152])
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - Neuversionierung
+; - gsPrepProgName entfernt
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neuversionierung
+; - TstStop1 -> TestStop
+; - Aufrufvariable Mode entfernt
+; - ToPrepOptInit,bSwiv.. hinzu
+;
+; V06.00.03 - 04.07.2016 / Simons
+; - gbWith... Ersetzt durch gbSwivHeadExist
+; - ProgMode[0]=... entfernt
+;
+; V06.00.03 - 24.06.2016 / Simons
+; - Einfuehrung CFG_MAN
+;
+; V06.00.03 - 09.05.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.02 - 14.11.2014 / Trappmann
+; - Vorlage
+;
+;------------------------------------
+
+PROC ProgCall
+
+DEFINE mcSinglePalNo AS $A_DBB[18]
+DEFINE mcPalPosReqFromPLC AS $A_DBB[17]
+
+DEF AXIS axHead
+;
+DEF STRING[32] sOption
+;
+DEF BOOL bNewProg, bHelpPos, bWithMPS, bMPSWithHost, bChainChanger, bWithHead, bIsAPCNC, bIsDirectLoadMPS
+;
+DEF INT iSinglePal, iSelPos, iFreePal, iIndex, iHelp, iActPal, iPalMMC, iBufNum, iPalModeOld
+;
+DEF REAL rc0x01Deg=0.01, rTCPosHead, rPosZ
+
+;Maschine mit MPS
+CFG_MAN("MPS",sOption)
+bWithMPS=(sOption<>"")
+;
+;Maschine mit MPS und Leitrechner
+CFG_MAN("MPS_HOST",sOption)
+bMPSWithHost=(sOption<>"")
+;
+CFG_MAN("APCNC",sOption)
+bIsAPCNC=(sOption<>"")
+;
+;Maschine mit Kettenwechsler  / Systemprogramm laeuft / kein Einzelpalettenbetrieb / Spannablaeufe GndSt / Directbeladung
+bChainChanger=(($A_DBB[19] B_AND 'B1000')<>0) OUT_SysPrgActive=TRUE mcSinglePalNo=0 giClampCycle=0 giClampStatus=0 gbTCFirstZMove=TRUE gbToCheckAtTC=FALSE bIsDirectLoadMPS=(($A_DBB[19] B_AND 'B10')<>0)
+;
+IF (gbSwivHeadExist)
+  rTCPosHead=grTcPosC axHead=mcAxC bWithHead=TRUE
+ENDIF
+;
+IF (gbTiltHeadExist)
+  rTCPosHead=grTcPosA axHead=mcAxA bWithHead=TRUE
+ENDIF
+
+;HNT
+M93
+
+IF (bMPSWithHost)
+  ;
+  IF (giMPSActivPal<>INA_APCPos)
+    ;
+    ;MPSProgramm und Status loeschen
+    Del_MPSGUD
+  ENDIF
+ELSE
+  giMPSActivProg=0
+ENDIF
+
+;******************* WarmUp *************************
+IF (IN_WarmUp)
+  ;
+  ;Warmlauf gewaehlt
+  ;
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  ;
+  ActivatePalData
+  ;
+  ;In case of no program or path is defined in the warm up menu, the active
+  ;Program Prog_Name in directory Prog_Path is called.
+  ;
+  IF (NOT gbProgExist)
+    SETAL(AL_Missing,PROGNAME)
+  ENDIF
+  ;
+  WHILE (IN_WarmUp)
+    ;
+    IF (IN_TeststopReq)
+      ;
+      ;Teststop angefordert -> fuer Kanal 1 Teststop
+      TestStop
+    ENDIF
+    ;
+    M94
+    ;
+    ;Loadcase
+    LC_Exec
+    ;
+    ;The warm up program will be called as long as the warm up Mode is on.
+    IF (giActDeviceNo==0)OR(gbWithEES)
+      CALL PROGNAME
+    ELSE
+      EXTCALL PROGNAME
+    ENDIF
+    ;
+    M93
+    ;
+  ENDWHILE
+  ;
+  M30
+ENDIF
+
+;**************** None of the automatic Modes are selected***************
+IF (giMMC_PAL[0,0]==0)
+  ;
+  IF (giMPSActivProg<>0)AND(bMPSWithHost)
+    ;
+    ;Create program list
+    Write_SysProg
+    ;
+    ;Delete active data
+    Del_MPSGUD
+  ENDIF
+  ;
+  IF (NOT IN_APCInPos)
+    ;APC not in Position
+    SETAL(AL_APCNotInBasePos)
+  ENDIF
+  ;
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  ;
+  ActivatePalData
+  ;
+  IF (NOT gbProgExist)
+    ;
+    ;Program is missing
+    giMMC_PAL[1,BufNo]=9
+    ;
+    M30
+  ENDIF
+  ;
+  Prog_Reset(1)
+  ;
+  M94
+  ;
+  IF (giMPSActivProg==0)OR(NOT bMPSWithHost)
+    ;
+    ToPrepOptInit(Prog_Path,Prog_Name)
+    ;
+    ;Loadcase
+    LC_Exec
+    ;
+    ;Bearbeitungszeiterfassung Start
+    $AC_PROG_NET_TIME_TRIGGER=2
+    ;
+    IF (giActDeviceNo==0)OR(gbWithEES)
+      CALL PROGNAME
+    ELSE
+      EXTCALL PROGNAME
+    ENDIF
+    ;
+    ;Bearbeitungszeiterfassung Stop
+    $AC_PROG_NET_TIME_TRIGGER=3
+    ;
+    IF (bMPSWithHost)
+      giMPSActivProg=1
+    ENDIF
+  ENDIF
+  ;
+  IF (bMPSWithHost)
+    ;
+    HostData
+  ENDIF
+  ;
+  STOPRE
+  M93
+  ;
+  M5
+  ;
+  IF NOT ($P_SEARCH OR $P_SIM)
+    ;
+    IF (NOT bMPSWithHost)
+      ;
+      IF (giMMC_PAL[1,BufNo]==1)
+        ;
+        ;Still released -> Interrupted
+        giMMC_PAL[1,BufNo]=3
+      ELSE
+        IF (giMMC_PAL[1,BufNo]==2)
+          ;
+          ;Ready -> Increment machining giCOUNTER
+          giCOUNTER[BufNo+20]= giCOUNTER[BufNo+20]+1
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  M30
+ENDIF
+
+;********************  Move Pallet out of Machine *******************
+IF (giMMC_PAL[0,0]==3)
+  ;
+  IF (NOT IN_APCInPos)
+    ;IsAPCinPosition
+    SETAL(AL_APCNotInBasePos)
+  ENDIF
+  ;
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  ;
+  IF NOT ($P_SEARCH OR $P_SIM)
+    ;
+    IF (giMMC_PAL[1,BufNo]==1)
+      ;Still released -> Interrupted
+      giMMC_PAL[1,BufNo]=3
+    ENDIF
+  ENDIF
+  ;
+  MovePallet(BufNo)
+  ;
+  M30
+ENDIF
+
+;******************** Single Pallet Mode *******************
+IF (giMMC_PAL[0,0]==2)
+  ;
+  IF (giMPSActivProg<>0)AND(bMPSWithHost)
+    ;
+    ;Create program list
+    Write_SysProg
+    ;
+    ;Delete active data
+    Del_MPSGUD
+    ;
+    STOPRE
+  ENDIF
+  ;
+  IF (giMMC_PAL[1,0]<=0)
+    ;
+    ;Wrong pallet No
+    SETAL(Al_WrongPalletNo)
+    ;
+    M30
+  ENDIF
+  ;
+  iPalMMC=giMMC_PAL[1,0]
+  ;
+  IF (bWithMPS)
+    ;
+    IF (NOT IN_APCInPos)
+      ;APC not in Position
+      SETAL(AL_APCNotInBasePos)
+    ENDIF
+    ;
+    iActPal=giPAL_BUFNO[INA_APCPos] iSinglePal=iActPal
+    IF (giMMC_Pal[0,iActPal]==giMMC_PAL[1,0])
+      ;
+      ;Requested pallet number in machine ?
+      iSinglePal=iActPal
+    ELSE
+      ;
+      iSelPos=3-INA_APCPos iBufNum=giPAL_BUFNO[iSelPos]
+      ;
+      IF ((giMMC_Pal[0,iBufNum]==giMMC_PAL[1,0])OR(giMMC_PAL[1,iBufNum]==6))
+        ;
+        ;Requested pallet number on loading station or empty?
+        iSinglePal=iBufNum
+      ELSE
+        iSinglePal=iActPal
+      ENDIF
+    ENDIF
+    ;
+    ;Requested pallet changer place
+    mcSinglePalNo=iSinglePal
+  ELSE
+    ;
+    iSinglePal=giMMC_PAL[1,0] iActPal=giPAL_BUFNO[INA_APCPos] mcSinglePalNo=iSinglePal
+  ENDIF
+  ;
+  IF (giMMC_PAL[1,iSinglePal]<>1)AND(iActPal==iSinglePal)
+    ;
+    ;Pallet not released -> Move pallet out of machine
+    MovePallet(iActPal)
+  ENDIF
+  ;
+  WHILE (iPalMMC==giMMC_PAL[1,0])AND(giMMC_PAL[0,0]==2)
+    ;
+    ;Waiting until program Mode is no more single pallet Mode
+    ;
+    IF (giMMC_PAL[1,iSinglePal]==1)
+      ;
+      ;single pallet is released
+      ;
+      IF (bChainChanger)
+        iSelPos=iSinglePal
+      ELSE
+        iSelPos=3-INA_APCPos
+      ENDIF
+      BufNo=giPAL_BUFNO[iSelPos]
+      ;
+      IF (NOT IN_APCInPos)OR(BufNo==iSinglePal)OR(giPAL_BUFNO[INA_APCPos]==iSinglePal)
+        ;
+        ;single pallet is in machine or in transfer position
+        ;
+        IF (IN_TeststopReq)
+          ;Teststop angefordert
+          Teststop
+        ENDIF
+        ;
+        ;Reset of all Frames and Tranformations V01.04.03
+        Prog_Reset(1)
+        ;
+        ;Is single pallet in transfer position ?
+        IF (giPAL_BUFNO[INA_APCPos]<>iSinglePal)
+          ;
+          IF (bWithHead)
+            ;
+            IF (ABS($AA_IM[axHead]-rTcPosHead)>rc0x01Deg)
+              ;Kopf nicht in Grundstellung
+              SETAL(AL_HeadNotTcPos)
+            ENDIF
+          ENDIF
+          ;
+          IF (bIsAPCNC)
+            M10 M20
+            PalChg(iSelPos)
+          ELSE
+            ;
+            IF (bChainChanger)
+              ;
+              G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grPalLoadPosZ
+              M[iSelPos]=190 M10
+            ELSE
+              ;
+              IF (grWorkarea_MaxPos_Z < grPalLoadPosZ)
+                G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grWorkarea_MaxPos_Z) AX[mcAxB]=DC(grPalLoadPosB)
+                G153 Z=(grPalLoadPosZ) M90
+              ELSE
+                G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grPalLoadPosZ) AX[mcAxB]=DC(grPalLoadPosB) M90
+              ENDIF
+              ;
+              IF (bWithHead)
+                G0 D0 G40 G60 G17 G153 G500 G90 G94 X=grTcPrePosX
+              ENDIF
+              ;
+              M=iSelPos+189 M10
+            ENDIF
+          ENDIF
+        ENDIF
+        ;
+        BufNo=iSinglePal
+        ;
+        ActivatePalData
+        ;
+        IF (gbProgExist)
+          ;
+          IF (bWithMPS)AND(PAL_NEW)
+            M227
+          ENDIF
+          ;
+          ;Start machining
+          M94
+          ;
+          IF (giMPSActivProg==0)OR(NOT bMPSWithHost)
+            ;
+            ToPrepOptInit(Prog_Path,Prog_Name)
+            ;
+            ;Loadcase
+            LC_Exec
+            ;
+            ;Bearbeitungszeiterfassung Start
+            $AC_PROG_NET_TIME_TRIGGER=2
+            ;
+            ;Aufruf des Bearbeitungsprogramms
+            IF (giActDeviceNo==0)OR(gbWithEES)
+              CALL PROGNAME
+            ELSE
+              EXTCALL PROGNAME
+            ENDIF
+            ;
+            ;Bearbeitungszeiterfassung Stop
+            $AC_PROG_NET_TIME_TRIGGER=3
+            ;
+            IF (bMPSWithHost)
+              giMPSActivProg=1
+            ENDIF
+          ENDIF
+          ;
+          IF (bMPSWithHost)
+            ;
+            ;Aufruf der Bearbeitungsprogramme
+            HostData
+          ENDIF
+          ;
+          ;Reset of all Frames and Tranformations V01.04.03
+          Prog_Reset(1)
+          ;
+          M93
+          ;
+          M5
+          ;
+          IF NOT ($P_SEARCH OR $P_SIM)
+            ;
+            IF (NOT bMPSWithHost)
+              ;
+              IF (giMMC_PAL[1,BufNo]==1)
+                ;
+                ;Still released -> Interrupted
+                giMMC_PAL[1,BufNo]=3
+              ELSE
+                IF (giMMC_PAL[1,BufNo]==2)
+                  ;
+                  ;Ready -> Increment machining giCOUNTER
+                  giCOUNTER[BufNo+20]= giCOUNTER[BufNo+20]+1
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+        ELSE
+          ;
+          ;Program not available
+          ;
+          ;Wait for pallet change
+          M91
+          ;
+          Prog_Reset(1)
+          ;
+          ;Program is missing
+          giMMC_PAL[1,BufNo]=9
+        ENDIF
+        ;
+        M91
+        ;
+        ;System program is active
+        OUT_SysPrgActive=TRUE
+        ;
+        IF((giMPSActivProg==0)OR(NOT bMPSWithHost))
+          ;
+          MovePallet(BufNo)
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+    STOPRE
+  ENDWHILE
+  ;
+  M30
+ENDIF
+
+IF (bIsDirectLoadMPS) GOTOF DirectLoadMPS
+
+;********************  Multi Pallet Mode*******************
+WHILE (giMMC_PAL[0,0]==1)
+  ;
+  iActPal=giPAL_BUFNO[INA_APCPos]
+  ;
+  IF (bChainChanger)AND(INA_APCPos<>0)AND(giMMC_PAL[1,iActPal]<>1)
+    ;
+    ;Chain pallet changer -> Move ready pallet out of machine
+    ;
+    G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grPalLoadPosZ
+    STOPRE
+    ;
+    IF ((giMMC_PAL[3,iActPal] B_AND 'B10')<>0)
+      ;
+      ;Automatic unclamp
+      M[iActPal]=191 M89 M10
+    ELSE
+      ;
+      M[iActPal]=191 M10
+    ENDIF
+    ;
+    M91
+  ENDIF
+  ;
+  ;Search for next released pallet
+  WHILE (INA_APCPos==0)AND(NOT bChainChanger)
+    STOPRE
+  ENDWHILE
+  ;
+  IF (IN_TeststopReq)
+    ;
+    ;Teststop angefordert
+    Teststop
+  ENDIF
+  ;
+  IF (bChainChanger)AND(INA_APCPos==0)
+    iIndex=1
+  ELSE
+    iIndex=INA_APCPos
+  ENDIF
+  iFreePal=0 iSelPos=0
+  ;
+  WHILE (iFreePal==0)AND(iSelPos==0)
+    ;
+    iHelp=giPAL_BUFNO[iIndex]
+    IF (iHelp<>0)
+      ;
+      MSG("")
+      ;
+      IF (giMMC_PAL[1,iHelp]==1)
+        iFreePal=iHelp iSelPos=iIndex
+      ENDIF
+    ELSE
+      MSG(MSG_WaitForAPCInBasePos)
+    ENDIF
+    ;
+    iIndex=3-iIndex
+    ;
+    ;Sollposition ueber PLC-Programm vorgeben
+    bHelpPos=FALSE
+    IF (mcPalPosReqFromPLC<>0)AND(iSelPos==0)AND(iIndex==INA_APCPos)
+      ;
+      iSelPos=(mcPalPosReqFromPLC) bHelpPos=TRUE
+    ENDIF
+    ;
+    IF (giMMC_PAL[0,0]<>1)
+      ;
+      ;No more multi pallet Mode
+      M30
+    ENDIF
+    ;
+    STOPRE
+    ;
+  ENDWHILE
+  ;
+  ;Reset of all Frames and Tranformations V01.04.03
+  Prog_Reset(1)
+  ;
+  IF (bWithHead)
+    ;
+    IF (ABS($AA_IM[axHead]-rTcPosHead)>rc0x01Deg)
+      ;Kopf nicht in Grundstellung
+      SETAL(AL_HeadNotTcPos)
+    ENDIF
+  ENDIF
+  ;
+  IF (NOT IN_APCInPos)OR(INA_APCPos<>iSelPos)
+    ;
+    IF (NOT bIsAPCNC)
+      ;
+      IF (bChainChanger)
+        ;
+        G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grPalLoadPosZ
+      ELSE
+        IF (grWorkarea_MaxPos_Z < grPalLoadPosZ)
+          ;
+          G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grWorkarea_MaxPos_Z AX[mcAxB]=DC(grPalLoadPosB)
+          G153 Z=(grPalLoadPosZ) M90
+        ELSE
+          G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grPalLoadPosZ) AX[mcAxB]=DC(grPalLoadPosB) M90
+        ENDIF
+        ;
+        IF (bWithHead)
+          G0 D0 G40 G60 G17 G153 G500 G90 G94 X=grTcPrePosX
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+    iActPal=giPAL_BUFNO[INA_APCPos]
+    ;
+    IF ((giMMC_PAL[3,iActPal] B_AND 'B10')<>0)
+      ;
+      ;Automatic unclamp
+      ;
+      IF (bIsAPCNC)
+        M89 M10 M20
+        PalChg(iSelPos)
+      ELSE
+        IF (bChainChanger)
+          M[iSelPos]=190 M89 M10
+          M91
+        ELSE
+          M=iSelPos+189 M89 M10
+          IF (mcPalPosReqFromPLC<>0)
+            M91
+          ENDIF
+        ENDIF
+      ENDIF
+    ELSE
+      ;
+      IF (bIsAPCNC)
+        M10 M20
+        PalChg(iSelPos)
+      ELSE
+        IF (bChainChanger)
+          M[iSelPos]=190 M10
+          M91
+        ELSE
+          M=iSelPos+189 M10
+          IF (mcPalPosReqFromPLC<>0)
+            M91
+          ENDIF
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+    IF (bMPSWithHost)
+      Del_MPSGUD
+    ENDIF
+  ENDIF
+  ;
+  IF (NOT bHelpPos)
+    ;
+    BufNo=iFreePal
+    ;
+    ActivatePalData
+    ;
+    IF (NOT gbProgExist)
+      ;
+      ;Program not available
+      ;
+      M91
+      ;
+      Prog_Reset(1)
+      ;
+      ;Program missing
+      giMMC_PAL[1,BufNo]=9
+    ELSE
+      ;
+      IF (bWithMPS)AND(PAL_NEW)
+        M227
+      ENDIF
+      ;
+      M94
+      ;
+      IF (giMPSActivProg==0)OR(NOT bMPSWithHost)
+        ;
+        ToPrepOptInit(Prog_Path,Prog_Name)
+        ;
+        ;Load Case
+        LC_Exec
+        ;
+        ;Bearbeitungszeiterfassung Start
+        $AC_PROG_NET_TIME_TRIGGER=2
+        ;
+        ;Aufruf des Bearbeitungsprogramms
+        IF (giActDeviceNo==0)OR(gbWithEES)
+          CALL PROGNAME
+        ELSE
+          EXTCALL PROGNAME
+        ENDIF
+        ;
+        ;Bearbeitungszeiterfassung Stop
+        $AC_PROG_NET_TIME_TRIGGER=3
+        ;
+        IF (bMPSWithHost)
+          giMPSActivProg=1
+        ENDIF
+      ENDIF
+      ;
+      IF (bMPSWithHost)
+        HostData
+      ENDIF
+      ;
+      STOPRE
+      ;Reset of all Frames and Tranformations V01.04.03
+      Prog_Reset(1)
+      ;
+      M93
+      ;
+      M5
+      ;
+      ;Piece check is done
+      giPAL_CHECK=0
+      ;
+      IF NOT ($P_SEARCH OR $P_SIM)
+        ;
+        IF (NOT bMPSWithHost)
+          ;
+          IF (giMMC_PAL[1,BufNo]==1)
+            ;
+            ;Still released -> Interrupted
+            giMMC_PAL[1,BufNo]=3
+          ELSE
+            IF (giMMC_PAL[1,BufNo]==2)
+              ;
+              ;Ready -> Increment machining giCOUNTER
+              giCOUNTER[BufNo+20]= giCOUNTER[BufNo+20]+1
+            ENDIF
+          ENDIF
+        ENDIF
+      ENDIF
+      ;
+      M91
+      ;
+    ENDIF
+  ENDIF
+  ;
+  ;System program is active
+  OUT_SysPrgActive=TRUE
+  ;
+ENDWHILE
+;
+M30
+
+;=============
+DirectLoadMPS:
+;=============
+;
+;******************** Automatic mode for direct loading with Mps *******************
+;
+iPalModeOld=giMMC_PAL[0,0]
+WHILE ((giMMC_PAL[0,0]==1)OR(giMMC_PAL[0,0]==2))
+  ;
+  IF (iPalModeOld<>giMMC_PAL[0,0])
+    ;Pallet Mode changed
+    M30
+  ENDIF
+  ;
+  ;Reset of all Frames and Tranformations V01.04.03
+  Prog_Reset(1)
+  ;
+  ;Pallet in machine
+  BufNo=1
+  ;Status to PLC
+  H97=giMMC_PAL[1,BufNo]
+  ;
+  IF (bWithHead)
+    ;
+    IF (ABS($AA_IM[axHead]-rTcPosHead)>rc0x01Deg)
+      ;Head not in base position
+      SETAL(AL_HeadNotTcPos)
+    ENDIF
+  ENDIF
+  ;
+  IF (giMMC_PAL[1,BufNo]<>1)
+    ;
+    ;Pallet in machine not released
+    ;
+    M9 ; Coolant off
+    ;
+    IF (grWorkarea_MaxPos_Z < grPalLoadPosZ)
+      ;
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grWorkarea_MaxPos_Z AX[mcAxB]=DC(grPalLoadPosB)
+      G153 Z=(grPalLoadPosZ)
+    ELSE
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grPalLoadPosZ) AX[mcAxB]=DC(grPalLoadPosB)
+    ENDIF
+    ;
+    IF (bWithHead)
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 X=grTcPrePosX
+    ENDIF
+    ;
+    ;Waiting for a new pallet
+    WHILE (giMMC_PAL[1,BufNo]<>1)
+      STOPRE
+    ENDWHILE
+    ;
+    IF (bMPSWithHost)
+      DEL_MPSGUD
+    ENDIF
+  ENDIF
+  ;
+  IF (iPalModeOld<>giMMC_PAL[0,0])
+    ;Pallet Mode changed
+    M30
+  ENDIF
+  ;
+  IF (giMMC_PAL[1,BufNo]==1)
+    ;
+    ;Released pallet in machine
+    ;
+    H97=giMMC_PAL[1,BufNo]
+    ;
+    IF (IN_TeststopReq)
+      ;
+      ;Waiting for closed door
+      M91
+      ;
+      Teststop
+    ENDIF
+    ;
+    Prog_Reset(1)
+    ;
+    ActivatePalData
+    ;
+    IF (NOT gbProgExist)
+      ;
+      ;Program not available
+      ;
+      M91
+      ;
+      Prog_Reset(1)
+      ;
+      ;Program missing
+      giMMC_PAL[1,BufNo]=9
+      ;
+      H97=giMMC_PAL[1,BufNo]
+    ELSE
+      ;
+      IF (bWithMPS)AND(PAL_NEW)
+        M227
+      ENDIF
+      ;
+      ;Waiting for closed door
+      M91
+      ;
+      M94
+      ;
+      IF (giMPSActivProg==0)OR(NOT bMPSWithHost)
+        ;
+        ToPrepOptInit(Prog_Path,Prog_Name)
+        ;
+        ;Load Case
+        LC_Exec
+        ;
+        ;Bearbeitungszeiterfassung Start
+        $AC_PROG_NET_TIME_TRIGGER=2
+        ;
+        ;Aufruf des Bearbeitungsprogramms
+        IF (giActDeviceNo==0)OR(gbWithEES)
+          CALL PROGNAME
+        ELSE
+          EXTCALL PROGNAME
+        ENDIF
+        ;
+        ;Bearbeitungszeiterfassung Stop
+        $AC_PROG_NET_TIME_TRIGGER=3
+        ;
+        IF (bMPSWithHost)
+          giMPSActivProg=1
+        ENDIF
+      ENDIF
+      ;
+      IF (bMPSWithHost)
+        HostData
+      ENDIF
+      ;
+      STOPRE
+      ;Reset of all Frames and Tranformations V01.04.03
+      Prog_Reset(1)
+      ;
+      M9
+      M93
+      M5
+      ;
+      ;Piece check is done
+      giPAL_CHECK=0
+      ;
+      IF NOT ($P_SEARCH OR $P_SIM)
+        ;
+        IF (NOT bMPSWithHost)
+          ;
+          IF (giMMC_PAL[1,BufNo]==1)
+            ;
+            ;Still released -> Interrupted
+            giMMC_PAL[1,BufNo]=3
+          ELSE
+            IF (giMMC_PAL[1,BufNo]==2)
+              ;
+              ;Ready -> Increment machining giCOUNTER
+              giCOUNTER[BufNo+20]= giCOUNTER[BufNo+20]+1
+            ENDIF
+          ENDIF
+        ENDIF
+        H97=giMMC_PAL[1,BufNo]
+      ENDIF
+    ENDIF
+    ;
+    IF (grWorkarea_MaxPos_Z < grPalLoadPosZ)
+      ;
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grWorkarea_MaxPos_Z AX[mcAxB]=DC(grPalLoadPosB)
+      G153 Z=(grPalLoadPosZ)
+    ELSE
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grPalLoadPosZ) AX[mcAxB]=DC(grPalLoadPosB)
+    ENDIF
+  ENDIF
+ENDWHILE
+
+M30
+

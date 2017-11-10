@@ -1,0 +1,55 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_Lvl.SPF
+;# Task:      LoadCase Zyklen
+;# Version:   V06.00.07
+;# Date:      04.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 04.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 12.08.2016 / Simons
+; - Neuversionierung
+;
+; V01.01     - 29.10.2013 / Fengler
+; - Vorlage
+;------------------------------------
+;
+; Einstellung nach Sollwert iLevel(1..100%)
+; 
+;------------------------------------
+
+PROC LC_Lvl(INT iLevel)
+
+DEF STRING[32] sCycName="LC_LVL V06.00.07"
+;
+DEF REAL rcMaxLevel=100, rAcc, rJerk, rKV, rAccStep, rKVStep
+
+IF (giLCAxisIdent<>0)AND(gbLCCheckAxis)
+  ;
+  iLevel=MAXVAL(MINVAL(iLevel,rcMaxLevel),0)
+  ;
+  rAccStep=((grLCAccMax-grLCAccMin)/rcMaxLevel) rKVStep=((grLCKv3-grLCKv1)/rcMaxLevel)
+  rAcc=grLCAccMin+(iLevel*rAccStep) rKV=ROUND(((grLCKv1+(iLevel*rKVStep))*10)/10)
+  ;
+  $MA_MAX_AX_ACCEL[gaxLCAxName]=rAcc $MA_POSCTRL_GAIN[0,gaxLCAxName]=rKV giLCActPal=0
+  ;
+  NEWCONF
+  STOPRE
+  ;
+ENDIF
+;
+RET

@@ -1,0 +1,593 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MMAC_BS.DEF
+;# Task:      Macro Definition
+;# Version:   V06.00.08
+;# Date:      23.10.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+;Beschreibung:
+;-------------
+; Herstellerspezifische Makros
+;
+; Achtung:
+; Anzahl begrenzt durch MD 18160
+; (MM_NUM_USER_MACROS)
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 23.10.2017 / Simons
+; - Neuversionierung
+; - mcDBB_APC...,mcDBB_TlCheckCMD/Switched, MQ_CMIReady, mcDBB_ToAckn hinzu
+; - OUT_LoadAckn -> OUT_TMJobActive, OUT_DelToolsActive entfernt
+; - mcGetColLen entfernt
+;
+; V06.00.07 - 17.07.2017 / Simons
+; - mcDBB_StatCha1/2 hinzu
+;
+; V06.00.07 - 15.05.2017 / Simons
+; - Neuversionierung
+; - mcDBW_TNoUpdate,M_TNoUpdate,M_CMIReady hinzu
+;
+; V06.00.06 - 24.04.2017 / Simons
+; - Neuversionierung
+; - mcTask(Un)LoadMag, mcMagConfPLC, MQ_Hg..., MQ_TlTapeClean..., mcbDBB_HG...SW, SyncID_Test
+; - Anwahlen OEM_TlData, TlData
+; - mcDBB_ModeFromMagPanel, IN_TlInLoadPlace hinzu
+; - OUT_AcknUnLoadToMag,OUT_AcknLoadFromMag -> OUT_LoadAckn
+; - Alarme und Meldungen -> MMAC_AL.DEF
+; - MagActive->MagInactive
+; - mcbDBB_TlProbeOn hinzu
+;
+; V06.00.05 - 04.02.2017 / Simons
+; - mcSYG_ErrIncCha1/2
+;
+; V06.00.05 - 29.01.2017 / Simons
+; - mcDBB_SelMagPanel
+;
+; V06.00.05 - 22.01.2017 / Simons
+; - AL_DG12TlOverSize, AL_DGTlOverSize hinzu
+;
+; V06.00.05 - 06.12.2016 / Simons
+; - IN_ToolInHG hinzu
+;
+; V06.00.05 - 17.11.2016 / Simons
+; - mcNumExtDevices hinzu
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - mcbDBB_DrivesOK hinzu
+;
+; V06.00.05 - 12.10.2016 / Simons
+; - mcBAxVldPos entfernt
+; - mcbDBB_HG/DG... hinzu
+; - M_WriteChipFrom...
+; - mc.OEM_... entfernt
+; - mcMaxSpVeloDefault hinzu
+;
+; V06.00.04 - 15.09.2016 / Simons
+; hinzu
+; - mcDBR_Time
+; - mc(b)DBB_DGLin...
+; - mcTask..
+; - mcDBB_Drives...
+; - IN_WarmUp,INA_APCPos,IN_APCInPos
+; - mcbDBB_TlCheck...
+;
+; V06.00.04 - 24.07.2016 / Simons
+; - Neuversionierung
+; - mcDBW_WaitDiskRetract
+; - mcTaskUnloadInSp
+; - SyncID_TCLoad ersetzt SyncID_To...
+;
+; V06.00.03 - 08.06.2016 / Simons
+; - SyncID_WaMon
+; - mcDBW_MagExist/Bero
+;
+; V06.00.02 - 21.04.2016 / Simons
+; Hinzu:
+; - OUT_PrepareActive
+; - mcProgConfig
+; - SonderWz
+; - mcSysText
+; - mDBB_...StepTC
+; - MQ_CleanTl...
+; - mcOEM_....
+; - AL_TlDataChanged
+;
+; V06.00.01 - 06.09.2015 / Simons
+; Hinzu:
+; - mcActPosDGRot
+; - AL_Missing
+; - AL_CombNotAllowed
+; - mcSYG_TC,...
+;
+; Geaendert:
+; - AL_NotAvailable AS 66079
+;
+; V06.00.00 - 21.07.2015 / Simons
+; - Prototyp / Neu
+;
+; V04.00.00 - November 2014 / Hüttner
+;
+;-------------------------------------
+
+;Konstanten:
+;===========
+;
+;Vorschubgruppen
+DEFINE F_1000 AS 1000
+DEFINE F_3000 AS 3000
+DEFINE F_10000 AS 10000
+DEFINE F_40000 AS 40000
+
+;G-Funktionen für HHD-Zyklen 
+DEFINE G81 AS MCALL L81
+DEFINE G82 AS MCALL L82
+DEFINE G83 AS MCALL L83
+DEFINE G84 AS MCALL L84
+DEFINE G85 AS MCALL L85
+DEFINE G86 AS MCALL L86
+DEFINE G87 AS MCALL L87
+DEFINE G88 AS MCALL L88
+DEFINE G89 AS MCALL L89
+DEFINE G80 AS MCALL 
+
+;Allgemeines
+DEFINE DummyTName AS "!!DUMMY!!"
+DEFINE NumOfChans AS 2
+DEFINE mcSysText AS "/_N_CMA_DIR/_N_SYS_TXT_SPF"
+
+;maximale Spindeldrehzahl ohne Drehzahlvorgabe [U/min]
+DEFINE mcMaxSpVeloDefault AS 8000
+
+;Anzahl Feldelemente für Datenfeld Synchronisierbild
+DEFINE iNumSyncArray AS 7  ;0 .. 6
+
+;Anzahl der externen Datenspeicher
+DEFINE mcNumExtDevices AS 3
+
+;Max. Anzahl Werkstuecke auf einer Palette
+DEFINE mcMaxWPOnPal AS 9 ; Anzahl Werkstuecke + 1
+
+;Adressen:
+;
+;-- Synchronaktionen
+;Kanal 1
+DEFINE SyncID_TC AS 100
+DEFINE SyncID_TCLoad AS 120 ; TC_BS,ToLoad,ToUnload
+DEFINE SyncID_WAMon AS 130
+DEFINE SyncID_Test AS 180
+DEFINE SyncID_LoadCase AS 240	 ;Statische Synchronaktionen für Lastfallüberwachung Torque-Achsen
+DEFINE SyncID_LoadCaseMod AS 250 ;Synchronaktionen für Lastfallüberwachung (nicht statisch)
+;Kanal 2
+DEFINE SyncID_MovTool AS 100
+DEFINE SyncID_GetTool AS 110
+DEFINE SyncID_ToBreak AS 120
+DEFINE SyncID_ToRWChip AS 130
+
+;-- $A_DB[...]
+;Anfangsadressen in $A_DBW[..] / Datenaustausch NC->PLC fuer Quittierung FC8
+DEFINE iAcknDPRAddr AS 200  ;ToAckn
+;
+DEFINE iJobPtrPrep AS 230  ;Wz-Vorbereitung durch WzV
+DEFINE iJobPtrMove AS 260  ;Beladen/Entladen/Umsetzen durch WzV/Bedienoberflaeche
+DEFINE iJobPtrASync AS 290 ;asynchrone Umsetzauftraege
+DEFINE mcMagConfPLC AS 800 ;MagazinKonfiguration an PLC
+
+;-- SYG_...[...]:
+;TC_BS(..)
+DEFINE mcSYG_TC AS 0
+;MsgBox, TC_BS,...
+DEFINE mcSYG_WAMon AS 20 ; WAMon
+DEFINE mcSYG_XYZ AS 30   ; Set_XYZ
+DEFINE mcSYG_ErrIncCha1 AS 3
+DEFINE mcSYG_ErrIncCha2 AS 0
+;LoadCase
+DEFINE iLoadCaseSYGR AS 35 ;Anfangsadresse NC-Parameter (reserviert 5)
+DEFINE iLoadCaseSYGB AS 10 ;Anfangsadresse NC-Parameter (reserviert 1)
+
+;-- NC Programm 
+DEFINE With_Alarm AS 0
+DEFINE Without_Alarm AS 1
+;
+;-- SonderWzTypen
+DEFINE mcSpecTypeMillHead AS 1
+DEFINE mcSpecTypeFacingHead AS 2
+;DEFINE mcSpecTypeMillHeadT AS 3
+DEFINE mcSpecTypeProbe AS 4
+DEFINE mcSpecTypeBENZMillHead AS 5
+DEFINE mcSpecTypeWhRecessingHead AS 6
+;Platztypen
+DEFINE iBBTlType AS 10    ;PlatzTyp-Nr Sonderwerkzeug Scheibenfraeser Beinbauer
+                          ;Aenderung zieht auch PLC-Aenderung nach sich !!
+DEFINE iTlTypeXXL1 AS 101 ;PlatzTyp-Nr Sonderwz. TataMotors: ueberlang -> nur ueber Spindel in Mag1 ladbar
+                          ;Aenderung zieht auch PLC-Aenderung nach sich !!
+;
+;-- OEM_TlData
+DEFINE mcSetMeasured AS 1     ;<Wz ist vermessen> Setzen
+DEFINE mcSetMeasured_Val AS 2 ;<Wz ist vermessen> und SollWert (rMeasVal) Setzen
+DEFINE mcResMeasured_Tested AS 3 ;<Wz ist vermessen> Zuruecksetzen (alle Scneiden) und <Wz ist getestet> Zuruecksetzen
+DEFINE mcResMeasured AS 4 ;<Wz ist vermessen> und <Wz ist getestet> Zuruecksetzen
+DEFINE mcGetMeasProp AS 5 ;Kennungen <Pruefen/Vermessen> fuer Schneide bereitstellen
+DEFINE mcSetMeasVal AS 6  ;SollWert (rMeasVal) Setzen
+DEFINE mcSetTested AS 8   ;<Wz ist getestet> Setzen
+DEFINE mcResTested AS 9   ;<Wz ist getestet> ZurueckSetzen
+DEFINE mcGetMeasCut AS 10 ;Zu vermessende Schneide suchen
+DEFINE mcGetTiltTorque AS 22 ;Wz Kippmoment Lesen
+DEFINE mcSetChipSel AS 30 ;Anwahl mit BALLUFF-Codetraeger setzen und Codetraegerfehler Loeschen (TM HHD)
+DEFINE mcResChipErr AS 31 ;Codetraegerfehler Loeschen
+DEFINE mcSetChipErr AS 32 ;Codetraegerfehler Setzen
+;
+;-- Anwahlen TlData
+DEFINE mcSetLockTl AS 1       ;<Gesperrt> Setzen
+DEFINE mcResLockTl AS 2       ;<Gesperrt> zuruecksetzen
+DEFINE mcSetFixPlaceTl AS 4   ;<FestplatzWz> Setzen
+DEFINE mcResFixPlaceTl AS 8   ;<FestplatzWz> Setzen
+DEFINE mcResLoadUnloadTl AS 16 ;<Entladen> und <Beladen> zuruecksetzen
+DEFINE mcResActiveTl AS 32    ;<Aktiv> und <War im Einsatz> zuruecksetzen
+DEFINE mcSetRelTl AS 64       ;<Freigabe> setzen und <Gesperrt> zuruecksetzen
+DEFINE mcResRelTl AS 128      ;<Gesperrt> setzen und <Freigabe> zuruecksetzen
+DEFINE mcSetManTl AS 256      ;<HandWz> setzen
+
+DEFINE mcResMonData AS (-1) ;Standzeiten / Standmenge zuruecksetzen
+DEFINE mcResWear AS    (-2) ;Verschleissistwert loeschen
+
+;-- Ortskennungen
+DEFINE mcLocCa AS 0
+DEFINE mcLocSP AS 1  
+DEFINE mcLocDG2 AS 2
+DEFINE mcLocDG1 AS 3
+DEFINE mcLocHG AS 4
+DEFINE mcLocCheckIn AS 9  ;Auftrag eingetragen, aber noch nicht begonnen
+
+;-- Kennungen fuer Tasks
+;Synchrone Auftraege
+DEFINE mcTaskLoad  AS 110      ;Beladen über Spindel
+DEFINE mcTaskUnload AS 111     ;Entladen über Spindel
+DEFINE mcTask_Displace AS 112  ;Umsetzen
+DEFINE mcTaskUnloadInSp AS 113 ;Entladen in Spindel
+DEFINE mcTask_ToLoadPos AS 121 ;Entladen auf Beladeposition
+DEFINE mcTaskLoadMag AS 130    ;Beladen ueber Beladestelle 3
+DEFINE mcTaskUnLoadMag AS 131  ;Entladen ueber Beladestelle 3
+DEFINE mcTaskPrep  AS 211      ;Wzw-Standard
+DEFINE mcTaskPrep2 AS 212      ;Wzw-Standard Kanal 2
+;Asynchrone Auftraege
+DEFINE mcTaskASync AS 500 
+DEFINE mcTaskAS_Displace AS 500 ;Umsetzen
+DEFINE mcTaskAS_T0 AS 501       ;Spindel leerfahren
+DEFINE mcTaskAS_Meas AS 511     ;Wz in Spindel bringen + Spindel in Messposition fahren
+DEFINE mcTaskAS_TC AS 512       ;Wz in Spindel bringen + Spindel in WzW-Position belassen
+DEFINE mcTaskAS_Load  AS 520    ;Beladen Magazin
+DEFINE mcTaskAS_Unload AS 521   ;Entladen Magazin
+DEFINE mcTaskAS_BBK AS 600      ;Wz zur BBK
+DEFINE mcTaskAS_Drop AS 900     ;Wz am aktuelle Magazinplatz ablegen
+
+;-- Werkzeugwechselpositionen Umdefinition auf NBH170ff
+DEFINE ToolChPosX AS grTcPosX
+DEFINE ToolChPosY AS grTcPosY
+DEFINE ToolChPosZ AS grTcPosZ
+
+;-- Status $A_DB.[...]
+;Sp Klemmung
+DEFINE mcbDBB_SpClamped     AS (($A_DBB[0] B_AND 7)==1)
+DEFINE mcbDBB_SpClampedNoTl AS (($A_DBB[0] B_AND 3)>1)
+DEFINE mcbDBB_SpUnClamped   AS (($A_DBB[0] B_AND 7)==4)
+;
+;WzW Tuer
+DEFINE mcbDBB_TCDoorOpen   AS (($A_DBB[2] B_AND 3)==1)
+DEFINE mcbDBB_TCDoorClosed AS (($A_DBB[2] B_AND 3)==2)
+;
+;DG
+DEFINE mcbDBB_DGRetracted  AS (($A_DBB[4] B_AND 3)==1)
+DEFINE mcbDBB_DGAdvanced   AS (($A_DBB[4] B_AND 3)==2)
+DEFINE mcbDBB_DGVertical   AS (($A_DBB[4] B_AND 3)==2)
+DEFINE mcbDBB_DGHorizontal AS (($A_DBB[4] B_AND 4)==4)
+;
+;Miksch Linearachse
+DEFINE mcDBB_DGLinStat     AS ($A_DBB[14] B_AND 240)
+DEFINE mcbDBB_DGLinInTCPos AS (($A_DBB[14] B_AND 240)==16)
+DEFINE mcbDBB_DGLinInChain AS (($A_DBB[14] B_AND 240)==32)
+;
+;HG
+DEFINE mcbDBB_HGLifted    AS (($A_DBB[1] B_AND 3)==1)
+DEFINE mcbDBB_HGLowered   AS (($A_DBB[1] B_AND 3)==2)
+DEFINE mcbDBB_HGUnClamped AS (($A_DBB[1] B_AND 12)==4)
+DEFINE mcbDBB_HGClamped   AS (($A_DBB[1] B_AND 12)==8)
+DEFINE mcbDBB_HGHorizontal AS (($A_DBB[1] B_AND 16)==16)
+DEFINE mcbDBB_HGVertical  AS (($A_DBB[1] B_AND 32)==32)
+DEFINE mcbDBB_HGRetracted AS (($A_DBB[1] B_AND 3)==1)
+DEFINE mcbDBB_HGAdvanced  AS (($A_DBB[1] B_AND 3)==2)
+DEFINE mcbDBB_HGRetSW     AS (($A_DBB[68] B_AND 48)==32)
+DEFINE mcbDBB_HGAdvSW     AS (($A_DBB[68] B_AND 48)==16)
+DEFINE mcbDBB_HGClampedSW AS (($A_DBB[68] B_AND 3)==1)
+DEFINE mcbDBB_HGUnclampedSW AS (($A_DBB[68] B_AND 3)==2)
+;
+;Scheibe
+DEFINE mcbDBB_DiskRetracted  AS (($A_DBB[1] B_AND 3)==1)
+DEFINE mcbDBB_DiskAdvanced   AS (($A_DBB[1] B_AND 3)==2)
+DEFINE mcbDBB_DiskInPos      AS (($A_DBB[11] B_AND 7)==4)
+DEFINE mcDBW_WaitDiskRetract AS $A_DBW[478]
+;
+;Doppelscheibe
+DEFINE mcbDBB_Disk1InPassage  AS (($A_DBB[11] B_AND 15)==12)  ;in Durchfahrpos.1
+DEFINE mcbDBB_Disk2InPassage  AS (($A_DBB[12] B_AND 15)==12)  ;in Durchfahrpos.2
+;
+;Kette
+DEFINE mcbDBB_ChInPos      AS (($A_DBB[11] B_AND 7)==4)
+DEFINE mcbDBB_ChUnClamped  AS (($A_DBB[1] B_AND 12)==4)
+DEFINE mcbDBB_ChClamped    AS (($A_DBB[1] B_AND 12)==8)
+;
+;Magazine allgemein
+DEFINE mcDBW_MagExist AS $A_DBW[32]
+DEFINE mcDBW_MagBero  AS $A_DBW[34]
+DEFINE mcbDBB_MagResetAllowed AS $A_DBB[599]
+;
+;Aktueller Istwert DG (Modulowert von $VA...)
+DEFINE mcActPosDGRot AS $A_DBR[128]
+;
+;BBK
+DEFINE mcDBB_TlCheckCMD AS $A_DBB[31]
+DEFINE mcbDBB_TlCheckSwitched AS (($A_DBB[30] B_AND 2)==0)
+DEFINE mcbDBB_TlCheckMagOn  AS (($A_DBB[30] B_AND 1)<>0);Angewaehlt und eingeschaltet - im Magazin
+DEFINE mcbDBB_TlCheckOn     AS (($A_DBB[3] B_AND 32)<>0);Angewaehlt und eingeschaltet - MSC
+DEFINE mcbDBB_TlProbeOn     AS (($A_DBB[3] B_AND 16)<>0);Angewaehlt und eingeschaltet - Messeinrichtung
+DEFINE mcbDBB_WithTlChipFix AS (($A_DBB[40] B_AND 1)<>0)
+DEFINE mcbDBB_WithTlChipHG  AS (($A_DBB[41] B_AND 1)<>0)
+;
+;SonderWz
+DEFINE mcDBW_StaRecHead AS $A_DBW[94]
+DEFINE mcDBB_SpecToType AS $A_DBB[99]
+DEFINE mcbDBB_ReqRecHeadRescue AS (($A_DBB[94] B_AND 1)<>0)
+;
+;-- Sonstiges:
+;Konfiguration von Systemfunktionen (z.B. WzW)
+DEFINE mcDBB_ProgConfig AS $A_DBB[69]
+;
+;Kanalstatus
+DEFINE mcDBB_StatCha1 AS $A_DBB[48]
+DEFINE mcDBB_StatCha2 AS $A_DBB[47]
+;
+;Zeitmessung Start (Testprogramme)
+DEFINE mcbDBB_TCTime AS $A_DBB[119]
+;
+;Kanaluebergreifende Programmlaufzeit aus Kanal1
+DEFINE mcDBR_Time AS $A_DBR[480]
+
+;interne T-Nr des Wz, das den Ort gewechselt hat
+DEFINE mcDBD_TInfo1 AS $A_DBD[484]
+DEFINE mcDBD_TInfo2 AS $A_DBD[488]
+DEFINE mcDBB_ToAckn AS $A_DBB[492]
+
+;Schrittzaehler TC
+DEFINE mcDBB_StepTC AS $A_DBB[111]
+DEFINE mcDBB_PlcStepTC AS $A_DBB[111]
+
+;Beladeplatz Magazin
+DEFINE mcDBW_FromMagPanelReq AS $A_DBW[120]
+DEFINE mcDBB_ModeFromMagPanel AS $A_DBB[122]
+DEFINE mcDBB_ToMagPanel AS $A_DBB[123]
+DEFINE mcDBW_FromMagPanelPotNo AS $A_DBW[124]
+DEFINE mcDBB_SelMagPanel AS $A_DBB[126]
+
+;LoadCase
+DEFINE mcDBB_LoadCaseMeas AS $A_DBB[168]
+
+;Antriebe Betriebsbereit
+DEFINE mcbDBB_DrivesOK AS (($A_DBB[19] B_AND 128)<>0)
+
+;CYPE_MA
+DEFINE mcDBB_InProgEvent AS $A_DBB[80]
+DEFINE mcDBB_InProg AS $A_DBB[81]
+;SpTlData an PLC: D-Nr erlaubt
+DEFINE mcDBB_DNoAllowed AS $A_DBB[97]
+;Palettenwechsler mit NC Hubachse
+DEFINE mcbDBB_APCActive AS $A_DBB[115]
+DEFINE mcDBB_APCReqPos AS $A_DBB[56]
+DEFINE mcbDBB_APCActPos AS $A_DBB[58]
+
+;-- Austauschsignale
+;PLC->NC
+;Analog
+DEFINE INA_APCPos AS $A_INA[2]
+;
+;Bool
+DEFINE IN_ReqStopAtCycleEnd AS $A_IN[9]
+DEFINE IN_WarmUp AS $A_IN[15]
+DEFINE IN_APCInPos AS $A_IN[16]
+DEFINE IN_HgHome AS $A_IN[17]
+DEFINE IN_ManModeWoLock AS $A_IN[18]
+DEFINE IN_TeststopReq AS $A_IN[23]
+DEFINE IN_StopAtTc AS $A_IN[30]
+DEFINE IN_LoadFromMag AS $A_IN[31]
+DEFINE IN_UnloadToMag AS $A_IN[32]
+DEFINE IN_DelTools AS $A_IN[33]
+DEFINE IN_TlInLoadPlace AS $A_IN[36]
+DEFINE IN_StopOnMiddleX AS $A_IN[38]
+DEFINE IN_StopOnMiddleZ AS $A_IN[39]
+DEFINE IN_ToolInHG AS $A_IN[40]
+;
+;NC<->PLC
+DEFINE OUTA_ActPosV1 AS $A_OUTA[5] ;aktuelle Position Doppelscheibe 1 (Nr. Magazinplatz an der  WzW-Stelle)
+DEFINE OUTA_ActPosV2 AS $A_OUTA[6] ;aktuelle Position Doppelscheibe 2 (Nr. Magazinplatz an der  WzW-Stelle)
+DEFINE OUT_PrepareActive AS $A_OUT[7]
+DEFINE OUT_TcActive AS $A_OUT[8]
+DEFINE OUT_ToolInSp AS $A_OUT[9]
+DEFINE OUT_ForceCoolant AS $A_OUT[10]
+DEFINE OUT_LoadUnloadActive AS $A_OUT[11]
+DEFINE OUT_ReqLockSpTool AS $A_OUT[12]
+DEFINE OUT_StartUpFinished1 AS $A_OUT[13]
+DEFINE OUT_UsrAcknAxisXYZ AS $A_OUT[14]
+DEFINE OUT_ReqLoopEndChan2 AS $A_OUT[15]
+DEFINE OUT_StartUpFinished2 AS $A_OUT[16]
+DEFINE OUT_SysPrgActive AS $A_OUT[19]
+DEFINE OUT_SysCha2Active AS $A_OUT[20]
+DEFINE OUT_TlCollPalChg AS $A_OUT[21]
+DEFINE OUT_DGRotInHomeArea AS $A_OUT[22]
+DEFINE OUT_LockReset AS $A_OUT[23]
+DEFINE OUT_ForceTMSync AS $A_OUT[24]
+DEFINE OUT_TMSyncActive AS $A_OUT[25]
+;
+;Beladen/Entladen, angestossen ueber Magazinbedienfeld
+DEFINE OUT_LoadReset AS $A_OUT[26]
+DEFINE OUT_LoadActiv AS $A_OUT[27];laeuft
+DEFINE OUT_LoadDone AS $A_OUT[28] ;erledigt, warte auf Bedienerhandlung
+DEFINE OUT_LoadEnd AS $A_OUT[29]  ;erledigt und Wz in WzW übernommen
+DEFINE OUT_TMJobActive AS $A_OUT[31]   ;Quittierung Funktion erkannt
+
+DEFINE OUT_DGRotInBasePos AS $A_OUT[30]
+DEFINE OUT_DGRotInTcPos AS $A_OUT[34]
+DEFINE OUT_RevCha1Active AS $A_OUT[35]
+DEFINE OUT_HgInTcPos AS $A_OUT[36]
+DEFINE OUT_ComeInTC AS $A_OUT[37]
+DEFINE OUT_OnMiddleX AS $A_OUT[38]
+DEFINE OUT_OnMiddleZ AS $A_OUT[39]    ;Fläche, Kassette
+DEFINE OUT_OnPosX AS $A_OUT[39]       ;Doppelscheibe
+DEFINE OUT_RevCha2Active AS $A_OUT[40]
+
+;-- M-Funktionen
+;
+;M_xyz0 ohne, M_xyz1 mit Einlesesperre
+;
+DEFINE M_CoolantOFF AS M9
+DEFINE M_WaitPalChgFinished AS M91 ;Kanal 1
+DEFINE M_CycleEnd AS M93  ;Kanal 1
+DEFINE M_NoCycleEnd AS M94  ;Kanal 1
+;
+DEFINE M_WaitDueStopAtTC1 AS M95 ;Kanal 1
+DEFINE M_WaitDgFinished1 AS M167 ;Warten bis DG gedreht hat
+;
+DEFINE M_StartBreakCtrl0 AS M176  ;Kanal 1
+DEFINE M_ProbeCycBackw0 AS M177
+DEFINE M_ProbeCycForw0 AS M178  
+;
+DEFINE M_SpClampNoTool0 AS M180
+DEFINE M_SpClampNoTool1 AS M80
+DEFINE M_SpUnClamp0 AS M181
+DEFINE M_SpUnclamp1 AS M81
+DEFINE M_SpClampWithTool0 AS M182
+DEFINE M_SpClampWithTool1 AS M82
+;
+DEFINE M_TcDoorOpen0 AS M185
+DEFINE M_TcDoorOpen1 AS M85
+DEFINE M_TcDoorClose0 AS M186
+DEFINE M_TcDoorClose1 AS M86
+DEFINE M_TcDiskAdv0 AS M187
+DEFINE M_TcDiskAdv1 AS M87
+DEFINE M_TcDiskRet0 AS M188
+DEFINE M_TcDiskRet1 AS M88
+;
+DEFINE M_WaitPrepFinished1 AS M260
+DEFINE M_HgSp AS M261
+DEFINE M_SpHg AS M262
+DEFINE M_HgSpHg AS M263
+DEFINE M_TurnFast AS M264
+DEFINE M_TurnSlow AS M265
+DEFINE M_WaitTcFinished1 AS M266
+DEFINE M_ResetPLCTCCount AS M267
+DEFINE M_ToFromSpFixedPlace AS M268  ;festplatzcodierter WzW
+;
+DEFINE M_HgUnclamp0 AS M271
+DEFINE M_HgUnclamp1 AS M71
+DEFINE M_HgClamp0 AS M272
+DEFINE M_HgClamp1 AS M72
+;
+DEFINE M_HgRet0 AS M273
+DEFINE M_HgRet1 AS M73
+DEFINE M_HgAdv0 AS M274
+DEFINE M_HgAdv1 AS M74
+;
+DEFINE M_HgSwivelSlow AS M269
+DEFINE M_HgSwivelFast AS M270
+DEFINE M_HgLift0 AS M273
+DEFINE M_HgLift1 AS M73
+DEFINE M_HgLower0 AS M274
+DEFINE M_HgLower1 AS M74
+DEFINE M_HgHorizontal0 AS M275
+DEFINE M_HgHorizontal1 AS M75
+DEFINE M_HgVertical0 AS M276
+DEFINE M_HgVertical1 AS M76
+DEFINE M_HgGuideSwiv0 AS M289
+DEFINE M_HgGuideSwiv1 AS M89
+DEFINE M_HgGuideLift0 AS M290
+DEFINE M_HgGuideLift1 AS M90
+;
+DEFINE M_DgRet0 AS M273 ;ohne ELSP
+DEFINE M_DgRet1 AS M73 ;mit ELSP
+DEFINE M_DgAdv0 AS M274 ;ohne ELSP
+DEFINE M_DgAdv1 AS M74 ;mit ELSP
+;
+DEFINE M_TlTapeCleanOn0 AS M277
+DEFINE M_TlTapeCleanOn1 AS M77
+DEFINE M_TlTapeCleanOff0 AS M278
+DEFINE M_TlTapeCleanOff1 AS M78
+;
+;M-Funktionen zur Quittierung WzV->PLC-FC8: Kanal 1 und 2:
+DEFINE M_AcknLoad AS M280
+DEFINE M_AcknChange AS M281
+DEFINE M_AcknASync AS M282
+;
+DEFINE M_HgHomeFinished0 AS M95
+DEFINE M_ReadChipToHg0 AS M252
+DEFINE M_ReadChipComp0 AS M253
+DEFINE M_WriteChipFromHg0 AS M256
+DEFINE M_WriteChipFromHgWoChk0 AS M257
+DEFINE M_WaitReadChip1 AS M258 ;ELSP
+DEFINE M_WaitWriteChip1 AS M259 ;ELSP
+;
+DEFINE M_OpenDoorPutToolIntoSp AS M286
+DEFINE M_OpenDoorGetToolFromSp AS M288
+;
+;DEFINE M_TNoUpdate AS M291
+DEFINE M_CMIReady AS M292
+;
+DEFINE M_OpenDoorPutToolIntoHg AS M293
+DEFINE M_OpenDoorGetToolFromHg AS M294
+DEFINE M_OpenDoorLoadToolInMag AS M293
+DEFINE M_OpenDoorUnldToolOfMag AS M294
+;
+;SonderWz'e
+DEFINE M_MillHeadClamp AS M297   ; Drehmomentstütze klemmen
+DEFINE M_MillHeadUnclamp AS M298 ; Winkelkopf lösen
+DEFINE M_RecHeadOn AS M130       ; Einstechkopf Ein
+
+;M_xyz ohne, M_xyzWt mit Einlesesperre
+;
+DEFINE M_DgPos1Wt AS M41
+DEFINE M_DgPos1 AS M241
+DEFINE M_DgPos2Wt AS M42
+DEFINE M_DgPos2 AS M242
+
+;-- Quick M-Funktionen
+;
+DEFINE MQ_SpClmpTl AS 182
+DEFINE MQ_SpClmpNoTl AS 180
+DEFINE MQ_SpUnClmpTl AS 181
+;
+DEFINE MQ_TCDoorOpen AS 185
+DEFINE MQ_TCDoorClose AS 186
+;
+DEFINE MQ_HGClmpTl AS 272
+DEFINE MQ_HGUnClmpTl AS 271
+DEFINE MQ_HgAdv AS 274
+DEFINE MQ_HgRet AS 273
+;
+DEFINE MQ_DiskAdv AS 187
+DEFINE MQ_DiskRet AS 188
+;
+DEFINE MQ_ResetTCCount AS 267
+DEFINE MQ_CleanTlOn AS 146
+DEFINE MQ_CleanTlOff AS 145
+;
+DEFINE MQ_TlTapeCleanOn AS 277
+DEFINE MQ_TlTapeCleanOff AS 278
+;
+DEFINE MQ_TNoUpdate AS 291
+M30

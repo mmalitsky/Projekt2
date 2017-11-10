@@ -1,0 +1,202 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkTlLoc.SPF
+;# Task:      Platzpruefung Wz
+;# Version:   V06.00.07
+;# Date:      03.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+; - bOptSearch -> Suche im gesamten Magazin durch GetFreeLoc
+; - formale Aenderungen
+;
+; V06.00.05 - 21.09.2015 / Simons
+; - Neuversionierung
+; - Korrektur (iCountMag>=1)
+; - iSearchOptions hinzu
+;
+; V06.00.03 - 10.05.2015 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 10.04.2015 / Simons
+; - Uebernahme Logik HHD TM / Balles
+; - giNumPlacesInMag,giNumRealMag,giMagNoLoadList
+;
+; V04.00.00 - 07.04.2016 / Balles
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Pruefen, ob der Platz fuer das geforderte
+; Werkzeug geeignet ist, bzw. Leerplatzsuche
+;
+; Eingangsparameter:
+; ------------------
+; iMode:
+; 1 = Leerpl.-Suche gesperrt,
+;     sofern bei (vollstaendig) vorgegebenem
+;     Platz dieser nicht geeignet sein sollte
+;
+; iTNo: interne T-Nr (>0) des Werkzeuges,
+;       fuer welches die Platzpruefung
+;       erfolgen soll
+;
+; iMagNo/iLocNo: Magazin-/Platznummer
+;
+; Bei bOptSearch:
+; Leerplatzsuche (GetFreeLoc) startet im gewaehlten Magazin mit der Suche nach einem Platz
+; mit dem passenden PlatzTyp
+; nicht gefunden -> Gleiche Suche in den anderen Magazinen
+; nicht gefunden -> Wiederholung der Suche in allen Magazinen ab dem gewaehlten Magazin unter
+; Beruecksichtigung der Platzhierarchie
+;
+; Ausgangsparameter:
+; ------------------
+; iResMagNo, iResLocNo:
+; (gefundene bzw. bestaetigte) Magazin- bzw. Platznummer
+; 0/0: kein Platz gefunden oder sonst. Fehler
+;
+; iAlarmNo:    Alarmnummer (im Fehlerfalle >0)
+; sAlarmParam: Zusatztext zum Alarm
+;
+; Achtung: Zyklus setzt keinen Alarm ab,
+; muss vom aufrufenden Zyklus uebernommen werden
+;
+;------------------------------------
+
+PROC ChkTlLoc(INT iMode, INT iTNo, INT iMagNo, INT iLocNo, VAR INT iResMagNo, VAR INT iResLocNo, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam)
+
+DEF STRING[32] sCycName="ChkTlLoc V06.00.07"
+;
+DEF BOOL bMagIsCas, bOptSearch, bCheckMag=FALSE, bCheckMagPlace=FALSE
+;
+DEF INT iCountMag=0, iSearchOptions=0, iStartMag=-1, iLastMag, iTmpMag, iTmpLoc
+
+iResMagNo=0 iResLocNo=0 iAlarmNo=0 sAlarmParam="" bMagIsCas=((giMagType B_AND 'B1000000')<>0) bOptSearch=(($TC_MAMP2 B_AND 'H4000')<>0)
+;
+STOPRE
+;
+;Plausibilitaetsueberpruefungen
+;------------------------------
+IF (iTNo>0)
+  ;
+  IF (NOT $P_TOOLEXIST[iTNo])
+    iAlarmNo=AL_TNoNotAllowed67 sAlarmParam=<<iTNo
+    GOTOF ENDE
+  ENDIF
+ELSE
+  iAlarmNo=AL_TNoNotAllowed67 sAlarmParam=<<iTNo
+  GOTOF ENDE
+ENDIF
+
+;Auftrag
+;-------
+;
+iLastMag=giNumRealMag
+;
+IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+  ;
+  ;gueltige Magazinangabe...
+  ;
+  IF (iLocNo>=1)AND(iLocNo<=giNumPlacesInMag[iMagNo])
+    ;
+    ;... und gueltige Platzangabe -> Platz Pruefen
+    ;
+    ;iMode=0 und Platz belegt oder passt nicht -> Leerplatz im gesamten Magazin ab Teilmagazin 1 suchen
+    ;
+    iStartMag=iMagNo iTmpMag=iMagNo iTmpLoc=iLocNo bCheckMagPlace=(iMode==1)
+    ;
+    IF (gbTMIsHHD)AND(bMagIsCas)AND(giMagState==92)
+      ;
+      ;HG geklemmt vertikal und gesenkt an Zielmagazinplatz 
+      ;
+      ;ignoriere BERO
+      iSearchOptions='B1'
+    ENDIF
+  ELSE
+    ;
+    ;gueltige Magazinvorgabe, fehlende/ungueltige Platzangabe -> Leerplatz im vorgegeben Teilmagazin suchen
+    ;
+    bCheckMag=TRUE iTmpLoc=0
+  ENDIF
+ELSE
+  ;
+  ;fehlende und ungueltige Magazin- und Platzangabe -> Leerplatz im gesamten Magazin ab Teilmagazin 1 suchen
+  ;
+  iCountMag=1 iTmpMag=0 iTmpLoc=0
+ENDIF
+
+
+;Pruefung und oder Leerplatzsuche
+;--------------------------------
+REPEAT
+  ;
+  IF (NOT bCheckMag)AND(iCountMag>=1)
+    ;
+    IF (bOptSearch)
+      ;
+      ;Einmaliger Durchlauf
+      iTmpMag=0 iLastMag=iCountMag
+    ELSE
+      ;
+      ;Wenn sie noch nicht geprueft worden sind, ...
+      IF (iCountMag==iStartMag) GOTOF NEXTMAG
+      ;
+      ;...werden alle Magazine nacheinander ab Teilmagazin 1 durchsucht.
+      iTmpMag=iCountMag iTmpLoc=0
+    ENDIF
+  ENDIF
+  ;
+  GetFreeLocHHD(iTmpMag,iTmpLoc,iTNo,,,iSearchOptions)
+  ;
+  ;=======
+  NEXTMAG:
+  ;=======
+  ;  
+  iCountMag=iCountMag+1
+  ;
+  ;Suche Beenden wenn
+  ;- Gueltiges Ergebnis
+  ;- Nur Pruefung des angegebenen Platzes und Leerplatzsuche abgewaehlt
+  ;- Suche im letzten Magazin erfolgte
+  ;
+UNTIL (bCheckMagPlace)OR(bCheckMag)OR((iTmpMag>0)AND(iTmpLoc>0))OR(iCountMag>iLastMag)
+
+;Auswertung
+IF (iTmpMag>0)AND(iTmpLoc>0)
+  ;
+  ;Gueltiges Ergebnis
+  iResMagNo=iTmpMag iResLocNo=iTmpLoc
+ELSE
+  ;
+  IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)AND(iLocNo>=1)
+    ;vorgegebener Platz als Zielplatz nicht geeignet oder nicht frei
+    iAlarmNo=AL_TLocIsNotFree sAlarmParam=<<iMagNo<<"/"<<iLocNo
+  ELSE
+    ;kein Platz vorgegeben oder Leerplatzsuche im gesamten Magazin gescheitert
+    MakeAlarmParam(sAlarmParam,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+    iAlarmNo=AL_NoFreeLocFound
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET

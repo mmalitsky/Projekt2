@@ -1,0 +1,89 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Prog_Reset.SPF
+;# Task:      WzDaten Pruefen
+;# Version:   V06.00.07
+;# Date:      29.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+; Verlauf:
+; --------
+;
+; V06.00.07 - 29.10.2017 / Simons
+; - DISPLOF
+;
+; V06.00.07 - 08.08.2017 / Simons
+; - Neuversionierung
+; - MCALL hinzu
+; - Abwahl der Transformationen vorgezogen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Hinzu
+;   Abloeschen von giResult, gsResult,
+;   gsReqTlData, gsProtMissTl
+;   Cycle 832
+;
+; V04.00.01 - 07.08.2014 / Fengler
+; - Vorlage
+
+; -----------------------------------
+;
+; Beschreibung:
+; -------------
+; Eingangsparameter:
+; iMode: 1=Aufruf aus ProgCall heraus
+;        2=Wenn Aufruf im WzW-Zyklus
+; ------------------------------------
+
+PROC Prog_Reset(INT iMode) DISPLOF
+
+DEF BOOL bInTC
+;
+DEF INT iTmp
+
+bInTC=(iMode==2)
+;
+MCALL
+;
+;Reset all tranformations/frames
+DRFOF
+TRANS
+ROT
+SCALE
+MIRROR
+TRAFOOF
+OFFN=0
+;
+IF (gbCyc800Act)
+  ;
+  CYCLE800()
+  gbCyc800Act=FALSE
+ENDIF
+;
+IF (bInTC)
+  ;ohne M5
+  G0 D0 G40 G60 G17 G90 G94 G500
+  iTmp=2
+ELSE
+  G0 D0 G40 G60 G17 G90 G94 G500 M=QU(5)
+  iTmp=0 giResult=0 gsResult="" gsReqTlData="" gsProtMissTl=""
+ENDIF
+
+IF (gbCyc832Act)
+  CYCLE832(0,0,1)
+  gbCyc832Act=FALSE
+ENDIF
+
+IF (gbIpoTurnActive)
+  IPOTURN(iTmp)
+ENDIF
+
+RET

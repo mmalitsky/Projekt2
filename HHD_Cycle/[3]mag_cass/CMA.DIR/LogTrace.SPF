@@ -1,0 +1,72 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LogTrace.SPF
+;# Task:      Protokollieren
+;# Version:   V06.00.08
+;# Date:      15.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: All
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 / 15.08.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.06 / 21.04.2017 / Simons
+; - ProtoTyp
+;
+;-------------------------------------
+
+PROC LogTrace(STRING[32] sSourceCycName, STRING[200] sTrace, INT iTraceAlarm)
+
+DEF STRING[32] sCycName="LogTrace V06.00.07"
+;
+DEF STRING[128] sFName="/_N_MPF_DIR/_N_LogDebug_MPF"
+DEF STRING[250] sTxt="  "
+DEF INT iAlarmNo=0, iFError, iFSize, iFMaxSize, iCount
+
+IF NOT ($P_SUBPAR[3])
+  iTraceAlarm=0
+ENDIF
+;
+IF (ISFILE(sFName))
+  FileSize(iFError, sFName, iFSize)
+  iFMaxSize=($MN_LEN_PROTOCOL_FILE*1024)-1000
+  IF (iFSize > iFMaxSize)
+    ;max. Laenge durch MD11420 beschraenkt !!
+    DELETE(iFError,sFName)
+  ENDIF
+ENDIF
+;
+WRITE(iFError,sFName,"------------ Report from cycle "<<sSourceCycName<<" ----------------")
+WRITE(iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+WRITE(iFError,sFName,"Channel: "<<$P_CHANNO)
+WRITE(iFError,sFName,"Program stack: ")
+;
+FOR iCount=0 TO ($P_STACK-19)
+  ;ohne diesen NC-Zyklus selbst
+  WRITE(iFError,sFName,sTxt<<$P_PROG[iCount])
+  IF iCount==0
+    sTxt=sTxt<<"+-- "
+  ENDIF
+  sTxt="  "<<sTxt
+ENDFOR
+;
+WRITE(iFError,sFName," ")
+WRITE(iFError,sFName,"Status:")
+IF (iTraceAlarm>0)
+  WRITE(iFError,sFName,"Alarm reported by " << sSourceCycName << ": " << iTraceAlarm)
+ENDIF
+;
+WRITE(iFError,sFName," ")
+WRITE(iFError,sFName,"Trace:")
+WRITE(iFError,sFName,sTrace)
+WRITE(iFError,sFName,"------------ End of report from "<<sSourceCycName<<" ----------------")
+WRITE(iFError,sFName," ")
+;
+RET

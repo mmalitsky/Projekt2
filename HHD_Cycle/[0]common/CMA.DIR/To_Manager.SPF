@@ -1,0 +1,193 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     To_Manager.SPF
+;# Task:      ASUP Manager
+;# Version:   V06.00.07
+;# Date:      29.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 29.10.2017 / Simons
+; - Neue Versionierung
+; - DISPLOF
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neue Versionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 29.09.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.04 - 08.08.2016 / Simons
+; - Neue Versionierung
+; - Einfuehren Wz-Umsetzen bei PickUpscheibe
+;   oder WM307 Kette
+; - Warten auf Sys_Cha2
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Neue Versionierung
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Aufruf erfolgt durch PLC mit Parameter
+; in $A_INA[1]
+;
+; $A_INA[1]:
+; 1   Werkzeug von Beladestelle_Hand beladen
+; 2   Werkzeug auf Beladestelle_Hand entladen
+; 3   Werkzeug umsetzen
+; 4   Magazin positionieren (nur bei Kettenmagazin sinnvoll)
+; ..
+; 100 Werkzeug messen
+; 101 Werkzeug pruefen
+; 102 Werkzeug referenzieren
+; 103 Werkzeug pruefen MSC
+; 104 Werkzeug Lernen MSC
+; 105 Teachlauf (Setup_MSC)
+; ..
+; 250 Bild <WzV synchronisieren> aktualisieren
+; 251 Werkzeugverwaltung synchronisieren
+;------------------------------------
+
+PROC TO_Manager DISPLOF
+
+DEF STRING[32] sCycName="To_Manager V06.00.06", sAlarmParam="", sMNType
+;
+DEF INT iAlarmNo=0, iChoice, iMode
+
+iChoice=$A_INA[1]
+
+IF (iChoice==250)
+  ;
+  ;HHD-Synchronisierbild aktualisieren
+  ;
+  UpdSync
+  ;
+  GOTOF STOP_CHA2
+ENDIF
+
+IF (iChoice==251)
+  ;
+  ;WzV synchronisieren
+  ;
+  TMSync(iAlarmNo,sAlarmParam)
+  ;
+  GOTOF STOP_CHA2
+ENDIF
+
+WHILE (NOT OUT_SysCha2Active)
+  G04 F0.1
+ENDWHILE
+
+IF (iChoice==1)OR(iChoice==2)
+  ;
+  ;Wz Beladen oder Entladen in Beladestelle_Hand
+  ;
+  IF (iChoice==1)
+    ;
+    ;Beladen
+    ;
+    ToLoad
+  ELSE
+    ;
+    ;Entladen
+    ;
+    ToUnload
+  ENDIF
+  ;
+  GOTOF STOP_CHA2
+ENDIF
+
+IF (iChoice==3)
+  ;
+  ;Wz im Magazin umsetzen
+  ;
+  CFG_MAN("MN",sMNType)
+  IF (sMNType<>"D")AND(sMNType<>"CH_WM307")
+    RET
+  ENDIF
+  ;
+  ToDisplace
+  ;
+  GOTOF STOP_CHA2
+ENDIF
+
+IF (iChoice==4)
+  ;
+  ;Magazin Positionieren (nicht bei Flaechenmagazin)
+  ;
+  ;Abbruch an WzV
+  ToAckn(FALSE,1,1,0,0,0,0,0,0,3)
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (iChoice>=100)AND(iChoice<=104)
+  ;
+  iMode=iChoice-99
+  ;
+  ; 1 Werkzeug messen
+  ; 2 Werkzeug pruefen
+  ; 3 Werkzeug referenzieren
+  ; 4 Werkzeug pruefen MSC
+  ; 5 Werkzeug Teach MSC
+  ;
+  IF (iMode==4)
+    iMode=1
+  ENDIF
+  ;
+  IF (iMode==5)
+    iMode=2
+  ENDIF
+  ;
+  ;GUD's wurden vom Messen-Bild vorbelegt
+  ;
+  ToMeas(iMode,gsMMC_TName,giMMC_DuploNo)
+  ;
+  GOTOF STOP_CHA2
+ENDIF
+
+IF (iChoice==105)
+  ;
+  ;Setup MSC
+  ;
+  ToCheck_SETUP
+  ;
+  GOTOF STOP_CHA2
+ENDIF
+
+;
+;====
+ENDE:
+;====
+;
+M17
+
+;=========
+STOP_CHA2:
+;=========
+;
+IF (OUT_SysCha2Active)
+  ;
+  ;Abbruch Sys_Cha2 an Kanal 2
+  gbQuitSysCha2=TRUE
+ENDIF
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+M17

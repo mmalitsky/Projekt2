@@ -1,0 +1,592 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     RWChip.SPF
+;# Task:      Chip Lesen/Schreiben
+;# Version:   V06.00.07
+;# Date:      19.09.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: Flat,Cassette,DDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 19.09.2017 / Simons
+; - ReserveMagPl, giRWError hinzu
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - variabler Schreib/Leseplatz
+; - formale Aenderungen
+;
+; V06.00.05 - 06.12.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+; - Korrektur IF (iMode==1)...
+;
+; V06.00.02 - 14.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumRealMag
+;
+; V04.00.01 / 26.10.2015 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; SK-/ANSI/HSK-Werkzeuge mit Codetraeger
+; Fuer Werkzeug auf Schreib/Leseplatz:
+; - Lesen anstossen, auf Ergebnis warten, Ergebnis auswerten
+; - Schreiben oder Vergleichen anstossen
+;
+; Kanal 2:
+;
+; Eingangsparameter:
+; ------------------
+; iMode: Werkzeugdaten
+; 0,1 - vom Codetraeger lesen
+; 2 - auf den Codetraeger schreiben
+; 3 - Werkzeugname und -DuploNr vom
+;     Codetraeger lesen, mit WzV vergleichen
+; 4 - Werkzeugdaten auf den Codetraeger
+;     schreiben, vorher Werkzeugname
+;     und -DuploNr vom Codetraeger lesen,
+;     mit WzV vergleichen
+;
+; iTNo: Interne T-Nummer: adressiert das Werkzeug
+; iErrReact:
+; 0 - keine Alarme absetzen
+;     (z.B. bei Batchbetrieb)
+;     (Auswertung durch aufrufendes Programm)
+; 1 - bei Fehler NC-Alarm ausloesen
+;
+; Rueckgabeparameter:
+; -------------------
+; iAlarmNo:    Alarmnummer
+; sAlarmParam: Zusatztext
+; iTNoRead:
+; Interne T-Nummer des Wz,
+; dessen Daten vom Chip gelesen/auf
+; den Chip geschrieben wurden
+; Kann u.U. 0 sein !!
+;
+; DBB[660..691]: WzName
+; DBB[692]: Semaphor (Wz Name)
+; DBB[693]: Frei
+; DBB[694]: Bit0: Wz loeschen
+;           Bit1: keine Duplonummer auf Chip
+;           Bit2: Chip wurde konvertiert
+;           Bit3: WzName bereitgestellt
+;           Bit4: Chip erkannt
+; DBB[695]: Frei
+; DBW[696]: Duplomummer fuer PLC
+; DBW[698]: Duplomummer von PLC(Chip)
+;
+;------------------------------------
+
+PROC RWChip (INT iMode, INT iTNo, INT iErrReact, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam, VAR INT iTNoRead) SAVE DISPLOF SBLOF
+
+DEF STRING[32] sCycName="RWChip V06.00.07", sTName, sChipN, sOption, sTmp
+;
+DEF BOOL bHGIsRWPlace=FALSE, bOk, bRead, bWrite, bComp, bWriteChk, bTMSyncOld, bSourceUsable, bMagIsCas, bTlClamped, bWithChip
+;
+DEF INT iTNoGot=0, iOldMagNo=0, iOldLocNo=0, iRWUnitError=0, iAlarmNoShown=0, iCount=0, iTNoRWPlace, iMagNoRWPlace, iLocNoRWPlace, iTNoBefore, iTDuploNo, iTmpMagNo, iTmpLocNo, iTMSyncOld, iWaitChipExist, iOldMagPl, iLen
+;
+DEF REAL rWaitShort
+
+iAlarmNo=0 sAlarmParam="" iTNoRead=0 bMagIsCas=((giMagType B_AND 'H40')<>0) rWaitShort=(3*$MN_IPO_CYCLE_TIME) iWaitChipExist=RTOI(2/(rWaitShort+$MN_IPO_CYCLE_TIME))
+;
+IF (gbWithHG)
+  ;
+  bWithChip=(mcbDBB_WithTlChipHG) bTlClamped=(mcbDBB_HGClamped) iMagNoRWPlace=9998 iLocNoRWPlace=mcLocHG bHGIsRWPlace=TRUE
+  ;
+  IF (NOT bTlClamped)
+    iAlarmNo=AL_HgWithTlNotClamped
+    GOTOF ENDE
+  ENDIF
+ELSE
+  ;unbekannter Schreib-/Leseplatz
+ENDIF
+
+IF (NOT bWithChip)
+  ;Codetraegersystem nicht vorhanden/nicht angewaehlt
+  iAlarmNo=AL_RWUnitDisabled67
+  GOTOF ENDE
+ENDIF
+
+iTNoRWPlace=$TC_MPP6[iMagNoRWPlace,iLocNoRWPlace] iTNoBefore=iTNo bRead=(iMode<=1) bWrite=(iMode==2) bComp=(iMode==3) bWriteChk=(iMode==4)
+
+IF (iTNo>0)
+  ;
+  ;Das Wz ist vorgegeben...
+  ;
+  IF (iTNo<>iTNoRWPlace)
+    ;
+    ;...aber nicht auf Schreib-/Leseplatz
+    ;
+    iAlarmNo=AL_TNoNotAllowed67 sAlarmParam=<<iTNo
+    GOTOF ENDE
+  ENDIF
+  ;
+  ;QuellMagazin/Platz des Wz's auf dem Schreib/Leseplatz auslesen
+  GetTlLoc(1,iTNo, iOldMagNo, iOldLocNo)
+  iOldMagPl=iOldMagNo*1000+iOldLocNo
+ELSE
+  ;
+  IF (bWrite)OR(bComp)OR(bWriteChk)
+    ;
+    ;Schreiben bzw. Vergleich Chip<->WzV, jedoch keine Wz-Daten auf dem Platz
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=mcState2ErrNoDataToWriteToChip
+    ENDIF
+    ;
+    iAlarmNo=AL_NoWriteData
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+WHILE (($A_DBB[694] B_AND 'B10000')==0)
+  ;
+  ;Warten bis Chip erkannt worden ist
+  ;
+  iCount=iCount+1
+  IF (iCount>iWaitChipExist) GOTOF ENDE
+  ;
+  G4 F=rWaitShort
+ENDWHILE
+
+;Status:
+;-------
+; - Vorgegebenes Wz auf Schreib/Leseplatz
+; - keine Wz Vorgabe beim Lesen
+
+IF (giWaitRWChip>0)
+  ;
+  ;Schreib/Lesevorgang laeuft schon
+  ;
+  IF (bRead)
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=iOldMagPl*1000+mcState2WaitReadingChip
+    ENDIF
+    ;
+    ;ELSP, bis Chip gelesen
+    M_WaitReadChip1
+  ENDIF
+  ;
+  IF (bComp)
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=iOldMagPl*1000+mcState2WaitComparingChip
+    ENDIF
+    ;
+    ;ELSP, bis Vergleich beendet
+    M_WaitReadChip1
+  ENDIF
+  ;
+  IF (bWrite)
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=iOldMagPl*1000+mcState2WaitWritingChip
+    ENDIF
+    ;
+    ;ELSP, bis Chip beschrieben
+    M_WaitWriteChip1
+  ENDIF
+  STOPRE
+  ;
+  IF (gbTMIsHHD)
+    giStateToMMC[1]=0
+  ENDIF
+  ;
+  giWaitRWChip=0
+  GOTOF EVALUATE
+ENDIF
+
+IF (bRead)
+  ;
+  ;Chip lesen
+  M_ReadChipToHg0
+  STOPRE
+  ;
+  IF (gbTMIsHHD)
+    giStateToMMC[1]=iOldMagPl*1000+mcState2ReadChipRunning
+  ENDIF
+  MSG(MSG_ReadChipRunning)
+  ;
+  ;Duplonummer des Wz's auf dem Schreib/Leseplatz ermitteln
+  GetDuplo(iTNoRWPlace)
+  ;
+  ;ELSP, bis Chip gelesen
+  M_WaitReadChip1
+  STOPRE
+  ;
+  GOTOF EVALUATE
+ENDIF
+;
+IF (bComp)
+  ;
+  ;Option DuploNr(ST)-Verwaltung durch NC -> WzName mit Chip vergleichen
+  CFG_MAN("ST_FROM_NC",sOption)
+  IF (sOption<>"ST_FROM_NC") GOTOF STDCMP
+  ;
+  IF ((giOptCodeCarrier B_AND 'H20')<>0) GOTOF STDCMP
+  ;
+  ;Vorpruefung angewaehlt
+  ;
+  sTName=$TC_TP2[iTNo] iLen=STRLEN(sTName)
+  ;
+  ;gelesen wurden bis hierher 2+28 Bytes
+  IF (iLen>28)OR(iLen<1)
+    ;
+    ;WzName ist noch nicht komplett oder ungueltig
+    ;
+    ;Komplett neu Lesen
+    GOTOF STDCMP 
+  ENDIF
+  ;
+  ;passender Name
+  ;
+  ;Chip WzName holen
+  GetChipName(sChipN,bOk)
+  ;
+  IF (NOT bOk) GOTOF STDCMP
+  ;
+  ;WzName konnte gelesen werden
+  ;
+  IF (sTName<>sChipN)
+    ;
+    ;Fehler beim Datenvergleich
+    iRWUnitError = 64
+    GOTOF CHECK_ERR
+  ENDIF
+  ;
+  ;======
+  STDCMP:
+  ;======
+  ;
+  ;Noch vor dem Vergleichen
+  giWaitRWChip=iMode
+  ;
+  ;Vergleich Chip<->WzV
+  M_ReadChipComp0
+  STOPRE
+  ;
+  IF (gbTMIsHHD)
+    giStateToMMC[1]=mcState2CompChipRunning
+  ENDIF
+  MSG(MSG_CompChipRunning)
+  ;
+  IF ((giOptCodeCarrier B_AND 'B1000')<>0)
+    ;
+    ;ELSP, bis Vergleich beendet
+    M_WaitReadChip1
+    STOPRE
+    ;
+    giWaitRWChip=0
+    GOTOF EVALUATE
+  ELSE
+    ;
+    ;waehrend Schreiben/Vergleichen soll Wz umgesetzt werden
+    ;
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (bWrite)OR(bWriteChk)
+  ;
+  ;nur Schreiben oder Schreiben nach vorangegangenem, fehlerfreien Vergleich
+  ;
+  ;Noch vor dem Schreiben
+  giWaitRWChip=iMode
+  ;
+  ;Codetraegerfehler Loeschen / eventuell Wz entsperren
+  OEM_TlData(iTNo,mcResChipErr)
+  ;
+  IF ((giOptCodeCarrier B_AND 'B1')<>0)
+    $TC_TPC9[iTNo]=0
+  ELSE
+    ;
+    IF (NOT bMagIsCas)OR(iOldMagNo>1)
+      ;Immer, wenn nicht nicht Entladecassette
+      $TC_TPC9[iTNo]=iOldMagNo*1000+iOldLocNo
+    ENDIF
+  ENDIF
+  ;
+  ;Chip mit Daten des HG Wz beschreiben
+  IF (bWriteChk)
+    ;mit Pruefen
+    M_WriteChipFromHg0
+  ELSE
+    ;ohne Pruefen
+    M_WriteChipFromHgWoChk0
+  ENDIF
+  STOPRE
+  ;
+  IF (gbTMIsHHD)
+    giStateToMMC[1]=iOldMagPl*1000 + mcState2WriteChipRunning
+  ENDIF
+  MSG(MSG_WriteChipRunning)
+  ;
+  IF ((giOptCodeCarrier B_AND 'B1000')<>0)
+    ;
+    ;ELSP, bis Chip beschrieben
+    M_WaitWriteChip1
+    STOPRE
+    ;
+    giWaitRWChip=0
+    GOTOF EVALUATE
+  ELSE
+    ;
+    ;waehrend Schreiben/Vergleichen soll Wz umgesetzt werden
+    ;
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+;========
+EVALUATE:
+;========
+;
+iRWUnitError=$A_DBB[42] iTNoRWPlace=$TC_MPP6[iMagNoRWPlace,iLocNoRWPlace]
+;
+IF (gbTMIsHHD)
+  giStateToMMC[1]=0
+ENDIF
+MSG("")
+;
+IF (iRWUnitError<>0)
+  ;
+  ;Schreib/Lesefehler
+  ;
+  iTNoGot=0
+ELSE
+  ;
+  IF (bRead)
+    ;T-Nr des eingelesenen Wz's
+    iTNoGot=$A_DBW[44]
+  ELSE
+    iTNoGot=iTNoRWPlace
+  ENDIF
+ENDIF
+
+IF (iTNoRWPlace>0)
+  ;
+  ;lt WzV ist ein Wz auf dem Schreib/Leseplatz
+  ;
+  iTNo=iTNoRWPlace
+ELSE
+  ;
+  ;lt. WzV ist kein Wz auf Schreib/Leseplatz...
+  ;
+  IF (bRead)AND(iTNoGot>0)
+    ;
+    ;...es wurde aber ein Wz erkannt
+    ;
+    ;Wz auf den Schreib/Leseplatz umspeichern
+    $TC_MPP6[iMagNoRWPlace,iLocNoRWPlace]=iTNoGot iTNoRWPlace=iTNoGot iTNo=iTNoGot
+    STOPRE
+  ELSE
+    ;    
+    iTNo=0 iTNoRWPlace=0
+    IF ((iRWUnitError B_AND 'B1')<>0)
+      ;kein Codetraeger vorhanden
+      iAlarmNo=AL_NoChipOrNoTool67
+    ELSE
+      iAlarmNo=AL_ToTMTransfErr67
+    ENDIF
+    ;
+    SETAL(iAlarmNo,sAlarmParam)
+    ;
+    iAlarmNoShown=iAlarmNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (iTNoRWPlace<>iTNoGot)AND(iTNoRWPlace>0)AND(iTNoGot>0)
+  ;
+  ;Das Wz auf dem Schreib/Leseplatz hat lt. WzV nicht die von der PLC uebergebene T-Nr
+  ;
+  iTmpMagNo=$A_TOOLMN[iTNoGot] iTmpLocNo=$A_TOOLMLN[iTNoGot]
+  IF (iTmpMagNo<=0)AND(iTmpLocNo<=0)
+    ;
+    ;Wz von PLC nicht im Magazin aber in der Wz-Liste
+    ;
+    bTMSyncOld=OUT_ForceTMSync OUT_ForceTMSync=TRUE iTMSyncOld=giForceTMSync giForceTMSync=1
+    ;
+    ;bisheriges Wz in WzV von Schreib/Leseplatz loeschen
+    $TC_MPP6[iMagNoRWPlace,iLocNoRWPlace]=0 iTNoRWPlace=0 iTNo=0
+    STOPRE
+    ;
+    IF (iOldMagNo>0)AND(iOldLocNo>0)
+      ;
+      ;Das geforderte Wz kam aus Magazin
+      ;
+      ;Zielplatz-Reservierung fuer Quellplatz aufheben
+      ReserveMagPl(FALSE,iTNoGot,iOldMagNo,iOldLocNo)
+    ENDIF
+    ;
+    ;In WzV eingelesenes Wz auf den Schreib/Leseplatz umspeichern
+    $TC_MPP6[iMagNoRWPlace,iLocNoRWPlace]=iTNoGot iTNoRWPlace=iTNoGot iTNo=iTNoGot
+    ;
+    OUT_ForceTMSync=bTMSyncOld giForceTMSync=iTMSyncOld
+  ELSE
+    ;
+    ;gelesenes Wz lt. WzV nicht auf dem Schreib/Leseplatz -> keine Zuweisung zum Schreib/Leseplatz
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=mcState2ErrToolInMagDGSP
+    ENDIF
+    ;
+    MakeAlarmParam(sAlarmParam,$TC_TP2[iTNoGot],<<$TC_TP1[iTNoGot])
+    iAlarmNo=AL_ReadToolInMagDGSP67
+    ;
+    SETAL(iAlarmNo,sAlarmParam)
+    iAlarmNoShown=iAlarmNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+sTName=$TC_TP2[iTNo] iTDuploNo=$TC_TP1[iTNo]
+
+IF (iTNo<>iTNoBefore)AND(iTNoBefore>0)
+  ;
+  ;Nach Lesen/Schreiben/Vergleichen anderes Wz auf dem Schreib/Leseplatz als zuvor
+  ;
+  IF ($P_TOOLEXIST[iTNoBefore])
+    ;
+    iTmpMagNo=$A_TOOLMN[iTNoBefore] iTmpLocNo=$A_TOOLMLN[iTNoBefore]
+    IF (iTmpMagNo>0)AND(iTmpLocNo>0)
+      ;
+      ;aus Magazin loeschen
+      ;
+      $TC_MPP6[iTmpMagNo,iTmpLocNo]=0
+      ;
+      IF (gbTMIsHHD)
+        ;
+        ;Warten bis SIEMENS-WzV das "Verschwinden" von Platz iTmpMagNo/iTmpLocNo an  HHD-WzV (slQCap) gemeldet hat
+        G4 F0.2
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF (bWrite)OR(bWriteChk)OR(bComp)
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=iOldMagPl*1000 + mcState2ErrTlIdChangedAfterRW
+    ENDIF
+    ;
+    iAlarmNo=AL_TlIdChangedAfterRW67 sAlarmParam=<<iOldMagNo<<"/"<<iOldLocNo
+    ;
+    SETAL(iAlarmNo,sAlarmParam)
+    iAlarmNoShown=iAlarmNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (bRead)
+  ;
+  IF (iOldMagNo>=1)AND(iOldMagNo<=giNumRealMag)
+    ;
+    ;Quelle eintragen/Ziel loeschen
+    $TC_TPC10[iTNo]=ITOR(iOldMagNo*1000+iOldLocNo)*100000 
+  ELSE
+    $TC_TPC10[iTNo]=0
+  ENDIF
+ENDIF
+
+;Zentrale Auswertung moeglicher Fehler:
+;a) aus WzIdentSystem (iRWUnitError)
+;b) aus Ablauf/Plausibilitaet
+
+;=========
+CHECK_ERR:
+;=========
+;
+STOPRE
+;
+IF (iRWUnitError==0)AND(iAlarmNo==0)
+  ;
+  ;Kein CodetraegerFehler aufgetreten
+  ;
+  ;<Mit Codetraeger> setzen (gegebenenfalls CodetraegerFehler zuruecksetzen)
+  OEM_TLData(iTNo,mcSetChipSel)
+ELSE
+  ;
+  ;Chip/Zyklus meldet Fehler
+  ;
+  IF (iRWUnitError)
+    ;
+    RWError(TRUE,iRWUnitError,iTNo,iAlarmNo,sAlarmParam)
+    iAlarmNoShown=iAlarmNo
+  ELSE
+    ;
+    IF (TOUPPER(sTName)<>TOUPPER(DummyTName))
+      MakeAlarmparam(sTmp,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+      SETAL(AL_TlLockedDueRWError67,sTmp)
+    ENDIF
+  ENDIF
+  ;
+  IF (iTNo>0)
+    ;
+    IF ((TOUPPER($TC_TP2[iTNo])<>TOUPPER(DummyTName))AND(iAlarmNo>0))OR((iRWUnitError)AND(iAlarmNo==AL_TlWithoutChip67))
+      ;
+      ;Codetraegerfehler Setzen und Wz Sperren
+      OEM_TLData(iTNo,mcSetChipErr)
+      ;
+      IF (gbTMIsHHD)
+        giStateToMMC[1]=mcState2ErrTlLockedDueRWError
+      ENDIF
+      ;
+      IF (iAlarmNo>0)
+        MakeAlarmparam(sTmp,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+        SETAL(AL_TlLockedDueRWError67,sTmp)
+      ENDIF
+    ENDIF
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (iTNoRWPlace>0)
+  ;
+  ;Wz auf Schreib/Leseplatz
+  ;
+  IF (bHGIsRWPlace)
+    ;
+    OEM_TlData(iTNoRWPlace)
+    giTNoHG=iTNoRWPlace gbHGBigTl=OEM_bBigTlHG gbHGHeavyTl=OEM_bHeavyTlHG gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+  ENDIF
+  giMMC_TNo=iTNoRWPlace gsMMC_TName=$TC_TP2[iTNoRWPlace] giMMC_DuploNo=$TC_TP1[iTNoRWPlace] giToDuplo=$TC_TP1[iTNoRWPlace]
+ELSE
+  ;
+  ;kein Wz auf Schreib/Leseplatz
+  ;
+  IF (bHGIsRWPlace)
+    gbHGBigTl=FALSE gbHGHeavyTl=FALSE gbHGNoTapeCl=FALSE
+  ENDIF
+  giMMC_TNO=0 gsMMC_TName="" giMMC_DuploNo=0 giToDuplo=0
+ENDIF
+;
+iTNoRead=MAXVAL(iTNo,0)
+;
+MSG("")
+;
+giRWError=iAlarmNo
+IF (iAlarmNo>0)AND(iAlarmNo<>iAlarmNoShown)AND(iErrReact>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

@@ -1,0 +1,388 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkDim.SPF
+;# Task:      Plausibilitaetpruefung
+;#            Wz/Platzdaten
+;# Version:   V06.00.07
+;# Date:      18.07.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 18.07.2017 / Simons
+; - Fehlermeldungen bei Laenge korrigiert
+;
+; V06.00.07 - 19.06.2017 / Simons
+; - Neue Versionierung
+; - Einfuehrung Typ 11..15
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neue Versionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - Neue Versionierung
+; - Neue Magazintypen
+; - PruefModus
+;
+; V04.01.00 - 16.09.2016 / Schaaf
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Pruefen, ob Werkzeugdimensionen zum Werkzeugtyp passen
+; Anpassung von Kollisionslaenge, Kollisionsradius und Nachbarplatzbelegung
+;
+; Achtung: Nicht bei HHD TM
+;
+; Eingangsparameter:
+; ------------------
+; iMode:
+; 0 : Nur Pruefen
+; 1 : Anpassung der Werkzeugdaten
+; iTNo: Werkzeugnr. des zu pruefenden Werkzeug
+;
+; Ausgangsparameter:
+; ------------------
+; iChkRes: Pruefergebnis
+; -4 : Kein Werkzeug vorhanden
+; -3 : Falsche Werkzeug Daten
+; -2 : Keine Werkzeugdaten
+; -1 : Falscher Werkzeugtyp
+;  0 : Pruefung o.K. ohne Anpassung
+;  1 : Kollisionsdaten angepasst
+;
+;Gueltig fuer folgende Magazinvarianten
+;
+;NBH 5   / Direktbeladung   / Scheibe 40  / Lmax=450 / Dmax=150 : AD.xxxx.xxxx
+;NBH 5   / Palettenwechsler / Scheibe 40  / Lmax=350 / Dmax=150 : AD.0150.3985
+;NBH 500 / ---------------- / Scheibe 40  / Lmax=550 / Dmax=210 : AD.0080.1784
+;
+;------------------------------------
+
+PROC ChkDim(INT iMode, INT iTNo, VAR INT iChkRes)
+
+DEF STRING[32] sCycName="ChkDim V06.00.07", sAlarmParam=""
+
+DEF BOOL bChgSize=FALSE, bChgCol=FALSE
+;
+DEF INT iAlarmNo=0, iToolType, iSizeL, iSizeR, iSizeDef, iMagNo, iPotNo, iCount
+;
+DEF REAL rToTol=0.200, rMaxToLen=0, rMaxToRad=0, rColLen, rColRad, rToLen, rToRad
+
+iChkRes=0
+
+;-------------------------
+;Auswerten Magazinvariante
+;-------------------------
+;
+IF (gbTMIsHHD)
+  iAlarmNo=AL_CombNotAllowed sAlarmParam="TM HHD + giMagIdent="<<giMagIdent
+  GOTOF HandleAlarm
+ENDIF
+;
+CASE giMagIdent OF 1503985 GOTOF _AD01503985 801784 GOTOF _AD00801784
+;
+;-------------------------------
+;--Keine oder falsche giMagIdent
+;
+iAlarmNo=AL_CycleInvalid sAlarmParam=sCycName
+GOTOF HandleAlarm
+
+;===========
+_AD01503985:
+;===========
+; NBH 5 / Palettenwechsler / Scheibe 40
+; Lmax=350 / Dmax=150
+rMaxToLen = 350.000 rMaxToRad = 150.000
+GOTOF _CHECK
+
+;===========
+_AD00801784:
+;===========
+; NBH 500 / Scheibe 40
+; Lmax=550 / Dmax=210
+rMaxToLen = 550.000 rMaxToRad = 210.000
+
+;======
+_CHECK:
+;======
+;
+;Pruefmodus
+;----------
+IF (NOT $P_SUBPAR[1])AND(NOT $P_SUBPAR[2]) GOTOF _END
+;
+;------------------------------
+;Plausibilitaetsueberpruefungen
+;------------------------------
+IF (iTNo>0)
+  ;
+  IF $P_TOOLEXIST[iTNo]
+    ;
+    ;--------------------------
+    ;-- Magazinplatztyp pruefen
+    iToolType=$TC_TP7[iTNo]
+    IF (iToolType<=0)
+      ;---------------------------------
+      ;-- Kein Magazinplatztyp angegeben
+      iChkRes=-1
+      GOTOF _END
+    ENDIF
+    ;
+    iMagNo=$A_TOOLMN[iTNo]
+    iPotNo=$A_TOOLMLN[iTNo]
+    iSizeL=$TC_TP3[iTNo]
+    iSizeR=$TC_TP4[iTNo]
+    ;
+    ;-----------------------------------------------
+    ;-- Kollisionslaenge und Werkeuglaenge ermitteln
+    rColLen=$TC_TPC7[iTNo] / grInchMetr
+    rColRad=$TC_TPC8[iTNo] / grInchMetr
+    rToLen=$TC_DP3[iTNo,1]+$TC_DP12[iTNo,1]
+    rToRad=$TC_DP6[iTNo,1]+$TC_DP15[iTNo,1]
+    ;
+    ;-- Maximale Werkzeuggeometrie aus den einzelnen Schneidenndaten
+    IF ($P_TOOLND[iTNo] > 1)
+      ;
+      FOR iCount=2 TO $P_TOOLND[iTNo]
+        IF (($TC_DP3[iTNo,iCount]+$TC_DP12[iTNo,iCount]) > rToLen)
+          rToLen=$TC_DP3[iTNo,iCount]+$TC_DP12[iTNo,iCount]
+        ENDIF
+        IF (($TC_DP6[iTNo,iCount]+$TC_DP15[iTNo,iCount]) > rToRad)
+          rToRad=$TC_DP6[iTNo,iCount]+$TC_DP15[iTNo,iCount]
+        ENDIF
+      ENDFOR
+    ENDIF
+    rToLen = rToLen / grInchMetr
+    rToRad = rToRad / grInchMetr
+  ELSE
+    ;----------------------------------
+    ;-- Werkzeug existiert nicht (iTNo)
+    iChkRes=-4
+    GOTOF _END
+  ENDIF
+ELSE
+  ;------------------------------
+  ;-- Keine Werkzeug-Id angegeben
+  iChkRes=-4
+  GOTOF _END
+ENDIF
+
+;---------------------------
+;-- Kollisionslaenge pruefen
+;
+IF (rColLen<=0)
+  ;
+  IF (rToLen>0)
+    ;-- Kollisionslaenge aus max. Werkzeuglaenge
+    rColLen=((TRUNC(rToLen*10)+1)/10)
+    bChgCol=TRUE
+  ELSE
+    ;-- Keine Werkzeuglaenge vorhanden
+    iChkRes=-2
+    GOTOF _END
+  ENDIF
+ELSE
+  ;
+  IF ((rColLen+rToTol)<rToLen)
+    ;-- Kollisionslaenge < max. Werkzeuglaenge
+    iChkRes=-2
+    GOTOF _END
+  ENDIF
+  ;
+  IF (rColLen<rToLen)
+    rColLen=((TRUNC(rToLen*10)+1)/10)
+    bChgCol=TRUE
+  ENDIF
+ENDIF
+
+;---------------------------
+;-- Kollisionsradius pruefen
+;
+IF (rColRad<=0)
+  ;
+  IF (rToRad>0)
+    ;-- Kollisionsradius aus max. Werkzeugradius
+    rColRad=((TRUNC(rToRad*10)+1)/10)
+  ELSE
+    ;-- Kollisionsradius spaeter ermitteln
+    rColRad=-1
+  ENDIF
+  bChgCol=TRUE
+ELSE
+  ;
+  IF ((rColRad+rToTol)<rToRad)
+    ;-- Kollisionsradius < max. Werkzeugradius
+    iChkRes=-3
+    GOTOF _END
+  ENDIF
+  ;
+  IF (rColRad<rToRad)
+    rColRad=((TRUNC(rToRad*10)+1)/10)
+    bChgCol=TRUE
+  ENDIF
+ENDIF
+
+;---------------------------------
+;-- Maximale Werkzeugdaten pruefen
+;
+IF (rColLen>(rMaxToLen+rToTol))
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+IF (rColRad>(rMaxToRad+rToTol))
+  iChkRes=-3
+  GOTOF _END
+ENDIF
+
+;------------------------
+;-- Werkzeugtypen pruefen
+;------------------------
+
+CASE iToolType OF 1 GOTOF _TYPE1 5 GOTOF _TYPE5 11 GOTOF _TYPE1 15 GOTOF _TYPE5
+;
+;------------------------------
+;Kein Magazinplatztyp angegeben
+iChkRes=-1
+GOTOF _END
+
+;======
+_TYPE1:
+;======
+;
+;----------------------------
+;-- L>MaxToLen -> Unzulaessig
+IF (rColLen > (rMaxToLen+rToTol))
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+;
+;---------------------------------
+;-- L<MaxToLen , Dmax=80 , Rmax=40
+IF (rColRad < 0)
+  rColRad=40
+ENDIF
+IF (rColRad > (40+rToTol))
+  iChkRes=-3
+  GOTOF _END
+ENDIF
+;
+;-------------------------
+;-- Nachbarplaetze pruefen
+IF (iSizeL<>1)
+  iSizeL=1
+  bChgSize=TRUE
+ENDIF
+IF (iSizeR<>1)
+  iSizeR=1
+  bChgSize=TRUE
+ENDIF
+;
+GOTOF _SAVE
+
+;======
+_TYPE5:
+;======
+;
+;----------------------------
+;-- L>MaxToLen -> Unzulaessig
+IF (rColLen > (rMaxToLen+rToTol))
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+;
+;--------------------------------------
+;--5a) L<MaxToLen , Dmax=150 , Rmax=75
+;--5b) L<MaxToLen , Dmax=210 , Rmax=105
+IF (rColRad < 0)
+  rColRad=105.0
+ENDIF
+;
+IF (rColRad > (rMaxToRad+rToTol))
+  iChkRes=-3
+  GOTOF _END
+ENDIF
+;
+;-------------------------
+;-- Nachbarplaetze pruefen
+IF (rColRad > (75.0+rToTol))
+  IF (iSizeL<>3)
+    iSizeL=3 bChgSize=TRUE
+  ENDIF
+  IF (iSizeR<>3)
+    iSizeR=3 bChgSize=TRUE
+  ENDIF
+ELSE
+  IF (iSizeL<>2)
+    iSizeL=2 bChgSize=TRUE
+  ENDIF
+  IF (iSizeR<>2)
+    iSizeR=2 bChgSize=TRUE
+  ENDIF
+ENDIF
+
+;=====
+_SAVE:
+;=====
+;
+;------------------------------------------
+;-- Daten in der Werkzeugverwaltung sichern
+;
+IF (iMode>0)
+  ;
+  IF (bChgCol)
+    ;----------------------------
+    ;-- Kollisionsdaten geaendert
+    $TC_TPC7[iTNo]=rColLen * grInchMetr
+    $TC_TPC8[iTNo]=rColRad * grInchMetr
+  ENDIF
+  ;
+  IF (bChgSize)
+    ;---------------------------
+    ;-- Nachbarplaetze geaendert
+    IF (iMagNo>0) AND (iPotNo>0)
+      IF ($TC_MPP6[iMagNo,iPotNo]==iTNo)
+        $TC_MPP6[iMagNo,iPotNo]=0
+        $TC_TP3[iTNo]=iSizeL
+        $TC_TP4[iTNo]=iSizeR
+        $TC_MPP6[iMagNo,iPotNo]=iTNo
+        iChkRes=1
+      ELSE
+        ;
+        GOTOF _END
+      ENDIF
+    ELSE
+      $TC_TP3[iTNo]=iSizeL
+      $TC_TP4[iTNo]=iSizeR
+      iChkRes=1
+    ENDIF
+  ENDIF
+ENDIF
+
+;====
+_END:
+;====
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+
+RET
+
+

@@ -1,0 +1,283 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     POS_MN.SPF
+;# Task:      Einrichtwerte Magazin
+;# Version:   V06.00.08
+;# Date:      18.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;# -----------------------------------
+;# Beschreibung:
+;#
+;# - das Programm beinhaltet magazin-
+;#   typspezifische Vorgabewerte.
+;# - nur die passenden Programmteile
+;#   werden in das maschinenspezifische
+;#   PosProgramm uebernommen
+;# - Das Programm ist nicht ausfuehrbar
+;#
+;# AuswahlOption:
+;#   [Magazintypen+Maschinentypen]
+;# ------------------------------------
+;#
+;# Verlauf:
+;#
+;# V06.00.08 - 18.08.2017 / Simons
+;# - Neuversionierung
+;# - TuerOeffnungszeiten aktualiesrt
+;# - IB Cas
+;#
+;# V06.00.07 - 12.06.2017 / Simons
+;# - Neuversionierung
+;# - D60NC giMaxPrepTime=14
+;#
+;# V06.00.06 - 03.04.2017 / Simons
+;# - Neuversionierung
+;# - Cas nur noch mit HHDTM
+;#
+;# V06.00.05 - 13.02.2017 / Simons
+;#  - grDoorOpenTime=0.4 NBH5S mit Scheibe
+;#
+;# V06.00.05 - 12.01.2017 / Simons
+;#  - SwivHead eigene Zeit
+;#  - giMaxPrepTime fuer DDS
+;#
+;# V06.00.05 - 30.11.2016 / Simons
+;#  - WzWTuer NBH1000
+;#  - giMaxPrepTime fuer DDS
+;#
+;# V06.00.05 - 19.10.2016 / Simons
+;# - Neuversionierung
+;# - CH: giMaxPrepTime=20
+;# - [Optionen] hinzu
+;#
+;# V06.00.04 - 30.08.2016 / Simons
+;# - Integration D60NC / D120 / HTC042
+;# - D60, FL entfernt
+;# - CH hinzu
+;#
+;# V06.00.03 - 09.06.2016 / Simons
+;# - Integration Einfachscheibe
+;#
+;# V06.00.02 - 20.05.2016 / Simons
+;# - giPrepMaxTime hinzu
+;# - giOptToolMgmt fuer alle Magazine
+;# - HHD TM hinzu
+;#
+;# V06.00.00 - 15.07.2015 / Simons
+;# - ProtoTyp / Neu
+;#
+;# V04.00.00 - 30.01.2015 / Schaaf
+;# - Neues POS-Programm
+;#   Bestehendes POS-Programm wurde in
+;#   mehrere Einzelprogramme aufgeteilt
+;#-------------------------------------
+;#
+;-[CAS_NEW]-
+;Wechselpositionen Handhabegeraet
+grHgTcPosX=grInchMetr*80.45
+grHgTcPosZ=grInchMetr*3127.70
+
+;Horizontale Bereitstellung zulaessig
+gbMovTlHor=TRUE
+
+;mech. Bohrerbruchkontrolle im Magazin
+grToBreakPosX=grInchMetr*475.0
+grToBreakPosZ=grInchMetr*4739.30
+grToBreakPrePosZ=grToBreakPosZ-grInchMetr*50.0
+;
+RET
+;-[END]-
+;-[CAS_OLD]-
+;Wechselpositionen Handhabegeraet
+grHgTcPosZ=grInchMetr*74.4
+
+;Horizontale Bereitstellung zulaessig
+gbMovTlHor=FALSE
+
+; Kulisse Handhabegeraet (nur feste Kulisse)
+grHGInGuideX=grInchMetr*5.0
+grHGFreeGuideX=grInchMetr*1305.0
+
+;mech. Bohrerbruchkontrolle im Magazin
+grToBreakPosX=grInchMetr*475.0
+grToBreakPosZ=grInchMetr*(-59.0)
+grToBreakPrePosZ=grToBreakPosZ+grInchMetr*50.0
+;
+RET
+;-[END]-
+;-[]-
+
+; Werkzeugwechseltuer
+; Zeit zum Oeffnen [s]
+;---------------------
+;-[D60NC,D120+NBH6]-
+grDoorOpenTime=0.6
+;-[D60NC,D120+NBH6P,NBH630]-
+[SWIVHEAD] grDoorOpenTime=1.4
+[MC4X] grDoorOpenTime=0.75
+;-[CAS+NBH630]-
+[SWIVHEAD] grDoorOpenTime=1.4
+[MC4X] grDoorOpenTime=0.9
+;-[D60NC,D120,CAS+NBH800,NBH1000]-
+[TILTHEAD] grDoorOpenTime=1.3
+[SWIVHEAD] grDoorOpenTime=1.4
+[MC4X] grDoorOpenTime=0.9
+;-[CH+NBH500]-
+grDoorOpenTime=0.75
+;-[CAS+NBH500]-
+grDoorOpenTime=0.9
+;-[D,CH+NBH5,NBH5S]-
+grDoorOpenTime=0.4
+;-[CH_WM307+NBH5S]-
+grDoorOpenTime=0.3
+;-[]-
+
+; Werkzeug/Magazinoptionen
+;-------------------------
+; .0 = Pruefen, ob Wz getestet
+; .1 = Beim Entladen wird der Platz fuer das Wz reserviert
+; .2 = Wz Kennungen werden beim Entladen Schublade zurueckgesetzt
+; .3 = Wz Kennungen werden beim Beladen auf Schublade zurueckgesetzt
+;
+giOptToolMgmt=0
+
+; Prepare Optimierung
+;--------------------
+; giMaxPrepTime = max. Vorbereitungszeit [s]
+;
+;-[CH_WM307]-
+giMaxPrepTime=7
+;
+RET
+;-[END]-
+;-[CH]-
+giMaxPrepTime=20
+;
+RET
+;-[END]-
+;-[D]-
+giMaxPrepTime=5
+;
+RET
+;-[END]-
+;-[D60NC]-
+giMaxPrepTime=14
+;
+;-[D120]-
+giMaxPrepTime=20
+;
+;-[D60NC,D120]-
+;
+; WzW Positionen HG
+;------------------
+;
+; grDiskPassage = Durchfahrposition VT-Achsen
+;
+; XT-Achse
+; --------
+; grHgTcPosX  = WzW
+; grHGPosX[2] = Scheibe1
+; grHGPosX[3] = Scheibe2
+; grHGPosX[4] = Mittelgasse / Manuelles Beladen bei DS
+; grHGPosX[5] = Scheibe3
+; grHGPosX[6] = Scheibe4
+; grHGPosX[7] = Manuelles Beladen DDS
+;
+; additive Cassetten-Feinkorrekturen X1 (+/-5 mm)
+; grCassCorrX[n] = Scheibe n
+;
+grDiskPassage=339.5
+;
+[MTC050]    grHgTcPosX=grInchMetr*(-285.0)
+[NO_MTC050] grHgTcPosX=grInchMetr*(-235.0)
+;
+grHGPosX[1]=grHGTcPosX
+;-[D60NC]-
+grHGPosX[2]=grInchMetr*(-0.2)
+grHGPosX[3]=grInchMetr*295.2
+grHGPosX[4]=grInchMetr*630.0
+grHGPosX[5]=grInchMetr*0.0
+grHGPosX[6]=grInchMetr*0.0
+grHGPosX[7]=grInchMetr*0.0
+;
+grCassCorrX[1]=grInchMetr*0.0
+grCassCorrX[2]=grInchMetr*0.0
+;
+RET
+;-[END]-
+;-[D120]-
+grHGPosX[2]=grInchMetr*(-0.2)
+grHGPosX[3]=grInchMetr*295.2
+grHGPosX[4]=grInchMetr*630.0
+grHGPosX[5]=grInchMetr*864.8
+grHGPosX[6]=grInchMetr*1160.2
+grHGPosX[7]=grInchMetr*1495.0
+;
+grCassCorrX[1]=grInchMetr*0.0
+grCassCorrX[2]=grInchMetr*0.0
+grCassCorrX[3]=grInchMetr*0.0
+grCassCorrX[4]=grInchMetr*0.0
+;
+RET
+;-[END]-
+;-[CAS]-
+giMaxPrepTime=12
+;
+;additive Cassetten-Feinkorrekturen (gleich halten mit nbh.ini)
+;Einheit: mm     Wertebereich: +/-5 mm (X1), +/-5 mm (Z1)
+;fuer Cassette [n]
+;
+grLaneCorrX[1]=grInchMetr*0.0
+grLaneCorrX[2]=grInchMetr*0.0
+grLaneCorrX[3]=grInchMetr*0.0
+grLaneCorrX[4]=grInchMetr*0.0
+grLaneCorrX[5]=grInchMetr*0.0
+grLaneCorrX[6]=grInchMetr*0.0
+grLaneCorrX[7]=grInchMetr*0.0
+grLaneCorrX[8]=grInchMetr*0.0
+;
+grLaneCorrZ[1]=grInchMetr*0.0
+grLaneCorrZ[2]=grInchMetr*0.0
+grLaneCorrZ[3]=grInchMetr*0.0
+grLaneCorrZ[4]=grInchMetr*0.0
+grLaneCorrZ[5]=grInchMetr*0.0
+grLaneCorrZ[6]=grInchMetr*0.0
+;
+grCassCorrX[1]=grInchMetr*0.0
+grCassCorrX[2]=grInchMetr*0.0
+grCassCorrX[3]=grInchMetr*0.0
+grCassCorrX[4]=grInchMetr*0.0
+grCassCorrX[5]=grInchMetr*0.0
+grCassCorrX[6]=grInchMetr*0.0
+grCassCorrX[7]=grInchMetr*0.0
+grCassCorrX[8]=grInchMetr*0.0
+grCassCorrX[9]=grInchMetr*0.0
+grCassCorrX[10]=grInchMetr*0.0
+grCassCorrX[11]=grInchMetr*0.0
+grCassCorrX[12]=grInchMetr*0.0
+grCassCorrX[13]=grInchMetr*0.0
+grCassCorrX[14]=grInchMetr*0.0
+grCassCorrX[15]=grInchMetr*0.0
+grCassCorrX[16]=grInchMetr*0.0
+;
+grCassCorrZ[1]=grInchMetr*0.0
+grCassCorrZ[2]=grInchMetr*0.0
+grCassCorrZ[3]=grInchMetr*0.0
+grCassCorrZ[4]=grInchMetr*0.0
+grCassCorrZ[5]=grInchMetr*0.0
+grCassCorrZ[6]=grInchMetr*0.0
+grCassCorrZ[7]=grInchMetr*0.0
+grCassCorrZ[8]=grInchMetr*0.0
+grCassCorrZ[9]=grInchMetr*0.0
+grCassCorrZ[10]=grInchMetr*0.0
+grCassCorrZ[11]=grInchMetr*0.0
+grCassCorrZ[12]=grInchMetr*0.0
+grCassCorrZ[13]=grInchMetr*0.0
+grCassCorrZ[14]=grInchMetr*0.0
+grCassCorrZ[15]=grInchMetr*0.0
+grCassCorrZ[16]=grInchMetr*0.0
+;-[END]-

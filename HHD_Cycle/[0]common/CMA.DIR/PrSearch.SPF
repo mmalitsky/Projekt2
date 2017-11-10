@@ -1,0 +1,103 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     PrSearch.SPF
+;# Task:      Satzsuchlauf
+;# Version:   V06.00.06
+;# Date:      11.04.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; Verlauf:
+; --------
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Prototyp
+;
+; V04.00.02 - 14.12.2016 / Simons
+; - Vorlage
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; HHD-eigener ASUP fuer Satzsuchlauf
+;
+; Wird aufgerufen im CYPE_MA
+;-------------------------------------
+
+PROC PrSearch
+
+DEF STRING[32] sCycName"PrSearch V06.00.06"
+;
+DEF INT iTNoActive, iDNoActive,  iTNoSel, iMFct, iSpNum, iGearStep
+;
+DEF REAL rSWord
+
+STOPRE
+;
+giTNoSp=$TC_MPP6[9998,mcLocSp]  ; koerperlich in der Spindel
+GETSELT(iTNoSel)          ; vorgewaehlt lt. Satzsuchlauf
+GETEXET(iTNoActive)       ; aktive lt. Satzsuchlauf
+iDNoActive=$P_TOOL        ; aktive D-Nummer
+
+;sichern der aufgesammelten Daten aus Satzsuche
+iSpNum=$P_MSNUM                   ; aktive Spindel
+iGearStep=$P_SEARCH_SGEAR[iSpNum] ; Getriebestufe
+rSWord=$P_SEARCH_S[iSpNum]        ; Drehzahl
+iMFct=$P_SEARCH_SDIR[iSpNum]      ; Drehrichtung
+
+;Richtiges Werkzeug einwechseln
+IF (iTNoActive>0)
+  ;
+  ;das lt. Satzsuchlauf aktive Wz ist nicht identisch mit dem Spindel-Wz
+  ;bewusst auf 2 Zeilen aufteilen: explizit vorbereiten, dann einwechseln
+  ;
+  T=$TC_TP2[iTNoActive]
+  M6
+ELSE
+  IF (iTNoActive==0)
+    T0
+    M6
+  ENDIF
+ENDIF
+;
+STOPRE
+;
+IF (iTNoSel<>iTNoActive)
+  ;
+  ;Wz-Vorbereitung, wenn vorgewaehltes Wz nicht mit dem aktiven uebereinstimmt
+  ;
+  IF (iTNoSel>0)
+    T=$TC_TP2[iTNoSel]
+  ELSE
+    IF (iTNoSel==0)
+      T0
+    ENDIF
+  ENDIF
+ENDIF
+
+IF (iTNoActive>0)
+  ;
+  ;Wz in Sp
+  ;
+  D=iDNoActive
+  ;
+  ;Getriebestufe
+  M=iGearStep
+  ;
+  ;Spindeldrehzahl und -richtung
+  S[iSpNum]=rSWord M[iSpNum]=iMFct
+ELSE
+  ;
+  D0
+  ;
+  ;Getriebestufe
+  M=iGearStep
+ENDIF
+
+RET

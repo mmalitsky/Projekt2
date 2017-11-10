@@ -1,0 +1,67 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MGUD_HHDTM.DEF
+;# Task:      HHD-Werkzeugverwaltung
+;# Version:   V06.00.08
+;# Date:      14.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: NBH500-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Variante Cassettenmagazin mit
+; HHD-Werkzeugverwaltung unter Operate
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 14.08.2017 / Simons
+; - Neuversionierung
+; - giNumReal... entfernt, ist schon in MMAC_BS
+; - grLane.FromTM hinzu
+;
+; V01.01.00 - Juni 2016 / Balles
+; - Vorlage
+;
+;-------------------------------------
+
+APR 11 APW 11
+
+DEF CHAN INT giTelOffset=0
+DEF CHAN INT giReqToMMC=0     ;Befehlsregister NC -> MMC
+DEF CHAN INT giAcknFromMMC=0  ;Quittungsregister MMC -> NC
+
+DEF CHAN STRING[200] gsMBoxToMMC[2]  ;allg. Mailbox NC -> MMC, Datentyp STRING
+;DEF CHAN INT giMBoxToMMC[2]         ;allg. Mailbox NC -> MMC, Datentyp INTEGER
+;DEF CHAN REAL grMBoxToMMC[2]        ;allg. Mailbox NC -> MMC, Datentyp REAL
+
+;DEF CHAN STRING[200] gsMBoxFromMMC[2] ;allg. Mailbox MMC -> NC, Datentyp STRING
+DEF CHAN INT giMBoxFromMMC[4]          ;allg. Mailbox MMC -> NC, Datentyp INTEGER
+;DEF CHAN REAL grMBoxFromMMC[2]        ;allg. Mailbox MMC -> NC, Datentyp REAL
+
+DEF NCK INT giStateToMMC[2]   ;[0..1] Statusbits NC -> MMC
+DEF NCK INT giStateFromMMC[2] ;[0..1] Statusbits MMC -> NC
+
+DEF NCK INT giTMVersion=0
+
+DEF NCK INT giMagVersion=0
+DEF NCK INT giMagTypeFromDB=0
+
+;GassenWerte direkt von WzV
+DEF NCK REAL grLaneXFromTM[9]
+DEF NCK REAL grLaneZFromTM[7]
+
+DEF NCK INT giMagNoAutoUnloadDefSpTl=0  ;>0: Nr. Teilmagazin, in welches defekte SpindelWz automatisch entladen werden sollen 
+DEF NCK INT giMagNoUnload=1  ;Nummer Entlademagazin
+
+DEF NCK INT giParaMovBlock[5]  ;Zusatzparameter fuer Zyklus MovBlock: Magazin- und Platz-Nummer Quellplatz 
+
+M30
+

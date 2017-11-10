@@ -1,0 +1,178 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Write_SysProg.SPF
+;# Task:      Systemprogramm Schreiben
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 12.11.2016 / Simons
+; - Neuversionierung
+; - EES hinzu
+;
+; V06.00.03 - 09.05.2015 / Simons
+; - ProtoTyp
+;
+; V04.00.01 - 10.07.2014 / Simons
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Erstellung eines aktualisierten
+; Organisationsprogramms
+;
+; Beispiel:
+; ---------
+;
+; CREATED (dd.mm.yy - hh:mm) : 21.09.2015 - 17:47
+; gsMPSProgName[1] = "/_N_WKS_DIR/_N_WP1DIR_WPD/_N_WP1_MPF"
+; gsMPSProgName[2] = "/_N_WKS_DIR/_N_WP2DIR_WPD/_N_WP2_MPF"
+
+; ...
+; Programm liegt auf externem Device
+; gsMPSProgName[8] = "//XYZ:/WKS.DIR/WP8DIR.WPD/WP8.MPF"
+; M17
+;
+;------------------------------------
+
+PROC Write_SysProg DISPLOF SBLOF
+
+DEF STRING[64] sCycName="Write_SysProg V06.00.06", sName
+;
+DEF STRING[4] sTag, sMonat, sJahr, sStunde, sMinute
+DEF STRING[255] sPrgName, sCmdLine
+;
+DEF CHAR HOCHKOMMA
+;
+DEF INT iError, iCount
+
+;Programmdaten werden gesichert! Bitte nicht abbrechen! Reset gesperrt!
+MSG(MSG_SavingData)
+;
+;Name des Organisationsprogramms
+IF (giActDeviceNo>0)AND(giActDeviceNo<=mcNumExtDevices)
+  ;
+  ;EES Device
+  ;
+  sPrgName=gsDeviceName[giActDeviceNo]<<"/WKS.DIR/" << gsMMC_PATH[iBuf] << ".WPD/" << gsMMC_PROG[iBuf] << ".SPF"
+ELSE
+  ;
+  ;NC
+  ;
+  sPrgName="/_N_WKS_DIR/_N_" << gsMMC_PATH[BufNo] << "_WPD/_N_" << gsMMC_PROG[BufNo] << "_MPF"
+ENDIF
+;
+IF ISFILE(sPrgName)
+  ;
+  iError=0 HOCHKOMMA=34
+  ;
+  ;Reset sperren
+  OUT_LockReset=TRUE
+  ;
+  ;Loeschen des alten Organisationsprogramms
+  DELETE(iError, sPrgName)
+ELSE
+  ;
+  ;Organisationsprogramm ist nicht verfuegbar -> es wird kein aktuelles erstellt
+  SETAL(AL_Missing,<<gsMMC_PROG[BufNo]<<".MPF")
+  ;
+  RET
+  ;
+ENDIF
+
+;Erstellungsdatum
+sTag = << $A_DAY
+IF (STRLEN(sTag)==1)
+  sTag = "0" << sTag
+ENDIF
+sMonat = << $A_MONTH
+IF (STRLEN(sMonat)==1)
+  sMonat = "0" << sMonat
+ENDIF
+sJahr = << $A_YEAR
+IF (STRLEN(sJahr)==1)
+  sJahr = "200" << sJahr
+ELSE
+  sJahr = "20" << sJahr
+ENDIF
+sStunde = << $A_HOUR
+IF (STRLEN(sStunde)==1)
+  sStunde = "0" << sStunde
+ENDIF
+sMinute = << $A_sMinute
+IF (STRLEN(sMinute)==1)
+  sMinute = "0" << sMinute
+ENDIF
+;Kopf
+sCmdLine=";CREATED (dd.mm.yy - hh:mm) : " << sTag << "." << sMonat << "." << sJahr <<  " - " << sStunde << ":" << sMinute
+WRITE(iError, sPrgName, sCmdLine)
+IF (iError<>0) GOTOF FEHLER
+
+;Programmnamen Speichern
+iCount=1
+WHILE (iCount<mcMaxWPonPal)
+  sCmdLine="gsMPSProgName[" << iCount << "] = " << HOCHKOMMA << gsMPSProgName[iCount] << HOCHKOMMA
+  WRITE(iError, sPrgName, sCmdLine)
+  IF (iError<>0) GOTOF FEHLER
+  iCount=iCount+1
+  STOPRE
+ENDWHILE
+
+;Programmstatus Speichern
+iCount=1
+WHILE (iCount<mcMaxWPonPal)
+  sCmdLine="giMPSWorkState[" << iCount << "] = " << giMPSWorkState[iCount]
+  WRITE(iError, sPrgName, sCmdLine)
+  IF (iError<>0) GOTOF FEHLER
+  iCount=iCount+1
+  STOPRE
+ENDWHILE
+
+;Bearbeitungsfortschritt Speichern
+iCount=1
+WHILE (iCount<mcMaxWPonPal)
+  sCmdLine="giMPSWorkStep[" << iCount << "] = " << giMPSWorkStep[iCount]
+  WRITE(iError, sPrgName, sCmdLine)
+  IF (iError<>0) GOTOF FEHLER
+  iCount=iCount+1
+  STOPRE
+ENDWHILE
+
+;Betriebsart Speichern
+sCmdLine="giMPSRunMode =" << giMPSRUNMODE
+WRITE(iError, sPrgName, sCmdLine)
+IF (iError<>0) GOTOF FEHLER
+;
+sCmdLine="M17"
+WRITE(iError, sPrgName, sCmdLine)
+;
+;======
+FEHLER:
+;======
+;
+;Reset freigeben
+OUT_LockReset=FALSE
+;
+MSG("")
+;
+IF (iError<>0)
+  SETAL(AL_WriteError,gsMMC_PROG[BufNo] << ".MPF")
+ENDIF
+;
+RET
+

@@ -1,0 +1,155 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     DelBlock.SPF
+;# Task:      Wz Async. aus Magazin
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 27.09.2015 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.02 - 06.05.2015 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 14.04.2015 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag
+;
+; V04.00.02 / 20.02.2015 / Huettner
+; - Falls Platz endschalterueberwacht
+;   ist, nur loeschen wenn Platz auch
+;   physikalisch leer ist
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Wz asynchron aus dem Magazin
+; (oder Teilbereich davon) entfernen
+;
+; Wird nach Betaetigen der Taster
+; "Wz aus Schublade entnommen" am
+; Nebenbedienpult aufgerufen
+;
+; Eingangsparameter:
+; ------------------
+; iMode:
+; 0 - Aus Magazin loeschen
+; 1 - Aus Magazin und aus Wz-Liste loeschen
+;
+; iMagNo : Nr. Magazin
+; iPl1   : Startadresse Platz
+;          (0 -> Platz mit kleinster Nummer)
+; iPl2   : Endadresse Platz
+;          (0 -> Platz mit hoechster Nummer)
+; iState : 0= Anfang
+;          1= laeuft
+;          2= abgebrochen oder beendet
+;
+;------------------------------------
+
+PROC DelBlock(INT iMode, INT iMagNo, INT iPl1, INT iPl2, VAR INT iState)
+
+DEF STRING[32] sCycName="DelBlock V06.00.06"
+;
+DEF BOOL bTmp
+;
+DEF INT iTNo=0, iTmp1=0, iCount=0, iChkRes
+
+;Falsche Anwahl oder kein reales Magazin
+IF ((iMode<>0)AND(iMode<>1))OR(iMagNo<1)OR(iMagNo>giNumRealMag) GOTOF ENDE
+
+;laeuft
+iState=1
+
+;Bereichsdefinition
+;
+;Erster Platz
+IF (iPl1<=0)
+  iPl1=1
+ENDIF
+IF (iPl1>giNumPlacesInMag[iMagNo])
+  iPl1=giNumPlacesInMag[iMagNo]
+ENDIF
+;
+;Letzter Platz
+IF (iPl2<=0)
+  iPl2=giNumPlacesInMag[iMagNo]
+ENDIF
+IF (iPl2>giNumPlacesInMag[iMagNo])
+  iPl2=giNumPlacesInMag
+ENDIF
+;
+;Plausibilitaetspruefung:
+IF (iPl1>iPl2)
+  iTmp1=iPl1 iPl1=iPl2 iPl2=iTmp1
+ENDIF
+
+;Bereich Loeschen
+;
+FOR iCount=iPl1 TO iPl2
+  ;
+  STOPRE
+  iTNo=$TC_MPP6[iMagNo,iCount]
+  IF (iTNo>0)
+    ;
+    GetPlDat(iMagNo,iCount,0,0)
+    ;
+    ChkSwitch(4,iMagNo,iCount,0,iChkRes)
+    IF (iChkRes<>2)
+      ;
+      ;aus Magazin loeschen
+      ;
+      $TC_MPP6[iMagNo,iCount]=0
+      IF (iTNo==giToNoProb)
+        ;
+        ;Wz sollte geprueft werden
+        ;
+        gbPrevToolBroken=FALSE gbLastToBroken=FALSE giToBreakCtrlState=0 giToNoProb=0
+      ENDIF
+      ;
+      IF (iMode==0)
+        ;
+        OEM_TlData(iTNo)
+        ;
+        gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+        ;
+        IF (OEM_bSelChip)
+          ;
+          ;Balluff Wz auch aus WZ-liste loeschen
+          ;
+          $TC_DP1[iTNo,0]=0
+        ENDIF
+      ELSE
+        ;
+        IF (iMode==1)
+          ;
+          $TC_DP1[iTNo,0]=0
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+ENDFOR
+
+;====
+ENDE:
+;====
+;
+;Auftrag beendet
+iState=2
+;
+RET
+

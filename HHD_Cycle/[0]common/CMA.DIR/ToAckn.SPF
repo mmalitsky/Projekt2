@@ -1,0 +1,344 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToAckn.SPF
+;# Task:      Support FC18
+;# Version:   V06.00.08
+;# Date:      23.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 23.10.2017 / Simons
+; - Neuversionierung
+; - mcDBB_ToAckn, MQ_TNoUpdate hinzu
+;
+; V06.00.07 - 26.07.2017 / Simons
+; - Auswertung iAlarmNo
+;
+; V06.00.07 - 23.05.2017 / Simons
+; - Neuversionierung
+; - mcDBD_TInfo1/2 hinzu
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.04 - 30.08.2016 / Simons
+; - Neuversionierung
+; - STOPRE, wenn nicht gewartet werden soll
+; - giForceToAckn entfernt
+; - ...AND(iState==1) hizu
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Neuversionierung
+; - TM HHD
+;
+; V06.00.02 - 14.04.2016 / Simons
+; - OUT_PrepareActive hinzu
+;
+; V06.00.00 - 17.06.2015 / Simons
+; - Neuversionierung
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; Quittierung der WzV an die PLC (FC8)
+;   - ueber Dual-Port-RAM $A_DBW[..]
+;   - mit Semaphorbyte (wg. Datenkonsistenz)
+;
+; Wird aufgerufen durch NC-Zyklen ...
+;   .. nach jeder Ortsaenderung eines Werkzeuges
+;   .. zur negativen Quittierung an WzV/PLC
+;
+; Besonderheiten (wg. PLC-FB FC8)
+;   a),c),d) Beladen/Umsetzen/Positionieren (iTaskId=1)   : iOldToolMag=iOldToolLoc=0
+;   b)       Entladen                       (iTaskId=1)   : iNewToolMag=iNewToolLoc=0
+;   Wird im PLC-Programm "hingebogen"
+;-------------------------------------
+
+PROC ToAckn(BOOL bWait, INT iTaskId, INT iTaskIdNo, INT iNewTNo, INT iOldTNo,  INT iNewToolMag, INT iNewToolLoc, INT iOldToolMag, INT iOldToolLoc, INT iState) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="ToAckn V06.00.07", sAlarmParam="", LogFile="/_N_MPF_DIR/_N_LogToAckn_MPF"
+;
+DEF BOOL bNoMFunction=FALSE, bLogOn=FALSE, bReady, bEnabled, bWithUpDate
+;
+DEF INT iErrCount=0, iTNoUpdateCase=0, iAlarmNo=0, iTNo1=0, iMag1=0, iLoc1=0, iTNo2=0, iMag2=0, iLoc2=0, iFError=0, iErrTime, iTrigger, iChanMask
+;
+DEF REAL rWaitShort, rIPO
+
+rIPO=$MN_IPO_CYCLE_TIME rWaitShort=2*rIPO iErrTime=RTOI(1/(rWaitShort+rIPO)) iChanMask=RTOI(EXP(($P_CHANNO-1)*LN(2)))
+
+IF (iTaskID==5)OR(iTaskID==50)
+  ;<mit Reservierung> angewaehlt
+  IF NOT ((iNewToolMag>=9998)AND(iOldToolMag<9998))
+    ;Kein Wechsel: <reales Magazin> nach <Zwischenspeichermagazin>
+    IF (iTaskID==5)
+      iTaskID=4
+    ELSE
+      iTaskID=40
+    ENDIF
+  ENDIF
+ENDIF
+
+IF ((giTNoUpdateMode B_AND 'B11')=='B10')
+  ;
+  ;Warten bis Ortswechseltelegramme quittiert worden sind
+  M_CMIReady
+ENDIF
+
+REPEAT
+  ;
+  ;Verriegelung gegen andere Kanaele, Lesen durch PLC beendet(Semaphorbyte=0)
+  mcDBB_ToAckn=(mcDBB_ToAckn OR iChanMask) iTrigger=$A_DBW[iAcknDPRAddr+14] bEnabled=(((mcDBB_ToAckn B_AND (B_NOT iChanMask))==0)AND($A_DBB[iAcknDPRAddr+18]==0))
+  IF (NOT bEnabled)
+    iErrCount=iErrCount+1
+    IF (iErrCount>iErrTime)
+      iAlarmNo=AL_WaitFor sAlarmParam= "NCReady - ToAckn {1}"
+      GOTOF ENDE
+    ENDIF
+    G4 F=rWaitShort
+  ENDIF
+UNTIL (bEnabled)
+;
+IF (iTaskID==50)OR(iTaskID==40)
+  ;
+  ;ToAckn aus TmReset heraus aufgerufen (im RESET-Zustand)
+  ;
+  ;Da anscheinend Durchkommen der M-Funktion im RESET-Zustand nicht zuverlaessig
+  ;wird FC8-Quittierung ueber Aenderung von $A_DBW[iAcknDPRAddr+14] ausgeloest
+  ;
+  iTrigger=iTrigger+1 iTaskId=(iTaskID DIV 10) bNoMFunction=true
+  IF (iTrigger<=0)OR(iTrigger>1000)
+    iTrigger=1
+  ENDIF
+ELSE
+  iTrigger=0
+ENDIF
+
+;Anstoss Uebertragung (Semaphorbyte 0->1)
+$A_DBW[iAcknDPRAddr]=iTaskId $A_DBW[iAcknDPRAddr+2]=iTaskIdNo $A_DBW[iAcknDPRAddr+4]=iNewToolMag $A_DBW[iAcknDPRAddr+6]=iNewToolLoc $A_DBW[iAcknDPRAddr+8]=iOldToolMag $A_DBW[iAcknDPRAddr+10]=iOldToolLoc $A_DBW[iAcknDPRAddr+12]=iState $A_DBW[iAcknDPRAddr+14]=iTrigger $A_DBB[iAcknDPRAddr+18]=1
+;
+;PLC quittiert Uebertragung durch Ruecksetzen des Semaphorbytes
+iErrCount=0
+WHILE ($A_DBB[iAcknDPRAddr+18]==1)
+  iErrCount=iErrCount+1
+  IF (iErrCount>iErrTime)
+    iAlarmNo=AL_WaitFor sAlarmParam= "NCReady - ToAckn {2}"
+    GOTOF ENDE
+  ENDIF
+  G4 F=rWaitShort
+ENDWHILE
+
+;PLC hat Daten gelesen
+
+IF (iTaskId==2)
+  ;
+  ;Wz-Bereitstellung/WzW
+  M_AcknChange
+  ;
+  IF (iOldTNo>0)AND(iOldToolMag>0)AND(iOldToolMag<>9998)
+    ;
+    ;Wz nicht mehr im HG/DG/SP
+    $TC_TPC10[iOldTNo]=0
+  ENDIF
+  GOTOF ClearSourceDest
+ENDIF
+
+IF (iTaskId==1)
+  ;
+  ;Beladen/Entladen/Umsetzen Beladestelle_Spindel
+  M_AcknLoad
+  GOTOF ClearSourceDest
+ENDIF
+
+IF (iTaskId==4)OR(iTaskId==5)
+  ;
+  ;Asynchrone Auftraege
+  ;
+  IF (NOT bNoMFunction)
+    M_AcknASync
+  ENDIF
+  GOTOF ClearSourceDest
+ENDIF
+
+;unerlaubte Faelle
+iAlarmNo=AL_TaskIDInvalid
+GOTOF ENDE
+
+;===============
+ClearSourceDest:
+;===============
+
+IF (iNewTNo>0)AND(iNewToolMag>0)AND(iNewToolMag<>9998)
+  ;
+  ;Wz nicht mehr im HG/DG/SP
+  $TC_TPC10[iNewTNo]=0
+ENDIF
+
+IF (bWait)AND((iState==1)OR(iState==105))
+  ;
+  iErrCount=0
+  REPEAT
+    ;
+    STOPRE
+    ;
+    bReady=true
+    IF (iTaskID==2)
+      ;
+      ;Wz-Bereitstellung/-wechsel
+      ;
+      IF (iNewToolMag>0)AND(iNewToolLoc>0)AND(iOldToolMag>0)AND(iOldToolLoc>0)AND(iNewTNo>0)AND(iOldTNo>0)
+        ;
+        ;Alt und NeuWz wechselt...
+        bReady=($TC_MPP6[iNewToolMag,iNewToolLoc]==iNewTNo)AND($TC_MPP6[iOldToolMag,iOldToolLoc]==iOldTNo) iTNoUpdateCase=3
+      ELSE
+        ;
+        IF (iNewToolMag>0)AND(iNewToolLoc>0)AND(iNewTNo>0)
+          ;
+          ;Nur NeuWz wechselt ...
+          ;
+          bReady=($TC_MPP6[iNewToolMag,iNewToolLoc]==iNewTNo) iTNoUpdateCase=1
+        ELSE
+          ;
+          IF (iOldToolMag>0)AND(iOldToolLoc>0)AND(iOldTNo>0)
+            ;
+            ;Nur AltWz wechselt ...
+            ;
+            IF (iOldToolMag==9999)AND(iOldToolLoc==1)
+              ;
+              ;Wz aus Sp Entladen
+              ;
+              bReady=($TC_MPP6[9998,mcLocSp]==0) iTNoUpdateCase=2
+            ELSE
+              bReady=($TC_MPP6[iOldToolMag,iOldToolLoc]==iOldTNo) iTNoUpdateCase=2
+            ENDIF
+          ELSE
+            IF (iNewToolMag>0)AND(iNewToolMag==iOldToolMag)
+              ;kein Wechsel
+              iTNoUpdateCase=4
+            ENDIF
+          ENDIF
+        ENDIF
+      ENDIF
+    ELSE
+      ;
+      ;Beladen/Entladen/Umsetzen sowie asynchrones Umspeichern
+      ;
+      IF (iNewTNo>0)AND(iNewToolMag>0)AND(iNewToolLoc>0)
+        ;
+        IF (iNewToolMag==9999)
+          ;
+          ;Entladen
+          ;
+          IF (iOldToolMag>0)AND(iOldToolLoc>0)
+            bReady=($TC_MPP6[iOldToolMag,iOldToolLoc]==0) iTNoUpdateCase=1
+          ENDIF
+        ELSE
+          bReady=($TC_MPP6[iNewToolMag,iNewToolLoc]==iNewTNo) iTNoUpdateCase=1
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+    IF (NOT bReady)
+      iErrCount=(iErrCount+1)
+      IF (iErrCount>iErrTime)
+        iAlarmNo=AL_WaitFor sAlarmParam= "NCReady - ToAckn {3}"
+        GOTOF ENDE
+      ENDIF
+      G4 F=rWaitShort
+    ENDIF
+  UNTIL (bReady)
+  ;
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF ((giTNoUpdateMode B_AND 'B11')<>0)AND(iTNoUpdateCase>0)
+  ;
+  CASE iTNoUpdateCase OF 1 GOTOF _NEW  2 GOTOF _OLD 3 GOTOF _NEWOLD 4 GOTOF _NEW DEFAULT GOTOF _UpdateEnd
+  ; 
+  ;====
+  _NEW:
+  ;====
+  ; 
+  iTNo1=iNewTNo iMag1=iNewToolMag iLoc1=iNewToolLoc
+  GOTOF _Update
+  ;
+  ;====
+  _OLD:
+  ;====
+  ; 
+  iTNo1=iOldTNo iMag1=iOldToolMag iLoc1=iOldToolLoc
+  GOTOF _Update
+  ;
+  ;=======
+  _NEWOLD:
+  ;=======
+  ; 
+  iTNo1=iNewTNo iMag1=iNewToolMag iLoc1=iNewToolLoc iTNo2=iOldTNo iMag2=iOldToolMag iLoc2=iOldToolLoc
+  ;
+  ;=======
+  _Update:
+  ;=======
+  ;
+  ;MagazinNummer an PLC: 9998/9999 = 128/129
+  ;
+  IF (iMag1>=9998)
+    iMag1=iMag1-9998+128
+  ENDIF
+  ;
+  IF (iMag2>=9998)
+    iMag2=iMag2-9998+128
+  ENDIF
+  ;
+  mcDBD_TInfo1=(iTNo1*65536 + iMag1*256 + iLoc1) mcDBD_TInfo2=(iTNo2*65536 + iMag2*256 + iLoc2)
+  ;
+  M=QU(MQ_TNoUpdate)
+  ;
+  LOG(bLogOn,iFError,LogFile,"Case 1/"<<iTNoUpdateCase<<" - TNo: " << iTNo1 << " Mag: " << iMag1 << " Loc: " << iLoc1)
+  IF (iTNo2>0)
+    LOG(bLogOn,iFError,LogFile,"Case 2/"<<iTNoUpdateCase<<" - TNo: " << iTNo2 << " Mag: " << iMag2 << " Loc: " << iLoc2)
+  ENDIF
+  ;
+  ;==========
+  _UpdateEnd:
+  ;==========
+  ; 
+ENDIF
+;
+IF (iTaskId==2)AND(iState==1)
+  ;
+  ;<Vorbereitung laeuft> aus IDS=1 Quittieren
+  OUT_PrepareActive=FALSE mcDBB_ToAckn=0
+ELSE
+  mcDBB_ToAckn=0
+ENDIF
+;
+IF (gbTMIsHHD)
+  ;
+  IF (bWait)AND(bReady)AND(iTaskID<>2)AND(iState==1)AND(iNewToolMag>=1)AND(iNewToolMag<=giNumRealMag)AND(iNewToolLoc>0)AND(iNewTNo>0)
+    ;
+    ;Warten bis Wz-Datenhaushalt (in NC) und das zugehoerige Abbild (im HMI) synchronisiert (gleichgezogen) sind
+    G4 F.2
+    STOPRE
+  ENDIF
+ENDIF
+;
+IF (iAlarmNo>0)
+  ;Diagnosezeile
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+RET
+

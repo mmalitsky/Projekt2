@@ -1,0 +1,73 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Piece_Count.SPF
+;# Task:      Werkstuecke Zaehlen
+;# Version:   V06.00.04
+;# Date:      06.09.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.04 - 07.09.2016 / Simons
+; - iCount
+;
+; V06.00.04 - 26.08.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+
+PROC Piece_Count(INT iCount)
+
+DEF INT iBuf, iActPosAPC
+;
+DEF BOOL bAPCinBasePos
+
+If (NOT $P_SUBPAR[1])
+  iCount=1
+ENDIF
+
+IF ($P_SEARCH)OR($P_SIM)OR(iCount<=0)
+  M17
+ENDIF
+
+IF (BufNo>0)AND(BufNo<18)AND(OUT_SysPrgActive)
+  iBuf=BufNo
+ELSE
+  ;
+  M91
+  ;
+  bAPCinBasePos=(IN_APCInPos) iActPosAPC=(INA_APCPos)
+  ;
+  IF (NOT bAPCinBasePos)OR(iActPosAPC==0)
+    ;Palettenwechsel laeuft noch
+    SETAL(AL_APCNotInBasePos)
+  ELSE
+    iBuf=giPal_BufNo[iActPosAPC]
+  ENDIF
+ENDIF
+
+IF (iBuf==1)OR(iBuf==2)
+  ;
+  ; Zeiger in GUD-Feld berechnen
+  iBuf=(iBuf-1)*4
+  ;
+  ; Werkstueck/Stueckzaehler hochzaehlen
+  giCounter[iBuf+2]=giCounter[iBuf+2]+iCount
+  giCounter[iBuf+5]=giCounter[iBuf+5]+iCount
+  ;
+  ; Loszaehler hochzaehlen
+  IF giCounter[iBuf+3]>0
+    giCounter[iBuf+4]=giCounter[iBuf+4]+iCount
+  ENDIF
+ENDIF
+
+RET

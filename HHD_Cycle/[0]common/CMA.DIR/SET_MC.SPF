@@ -1,0 +1,341 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_MC.SPF
+;# Task:      Hochlaufprogramm Kanal 1
+;# Version:   V06.00.07
+;# Date:      19.07.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-----------------------------
+; Beschreibung:
+;
+; Laden Maschinenspezifische
+; Einstellungen fuer alle
+; Maschinentypen
+;
+;
+; AuswahlOption:
+; [Magazintypen+Maschinentypen]
+;
+; Aufgerufen im NC_INIT1.SPF
+;
+;------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 19.07.2017 / Simons
+; - Neuversionierung
+; - giLCAxisIdent entfernt
+;   kommt aus CFG.SPF -> Pos....
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 24.01.2017 / Simons
+; - Temperaturkompensation -> SET_TEMP
+;
+; V06.00.05 - 02.12.2016 / Simons
+; - NBH1000 mit Vorsteuerung grTCJerk... = 0.7
+;
+; V06.00.05 - 21.10.2016 / Simons
+; - grTCJerk... im Standard mit Faktor 0.45
+;   Bei Maschinen mit Vorsteuerung kwird ein
+;   hoeher Wert angenommen, da der erreichte
+;   Jerk naeher an den Vorgabewerten (MD)liegt.
+;
+; V06.00.05 - 18.09.2016 / Simons
+; - Neuversionierung
+; - Globale Variable gbSwiv...Exist
+; - grExit...fuer NBH5 mit CH
+;
+; V06.00.03 - 21.04.2016 / Simons
+; - grTCCoolOn
+;
+; V06.00.02 - 24.03.2016 / Simons
+; Hinzu
+; - "OR(grAccValLow<1)"
+; - grExit... ueberarbeitet
+; - gTCJerk...
+; - Vorgabe Kuemi M-Funktionen
+;
+; V06.00.01 - 18.08.2015 / Simons
+; - Hinzu: grExit...
+;
+; V06.00.00 - 18.06.2015 / Simons
+; - Prototyp
+;
+; V04.00.00 - 30.01.2015 / Schaaf
+; - Neues POS-Programm
+;   Bestehendes POS-Programm wurde in mehrere Einzel-
+;   programme aufgeteilt.
+;----------------------------------------------------
+
+DEF STRING[32] sCycName="SET_MC V06.00.06", sMCType, sMNType, sResult
+
+; Kuehlmittel M Funktionen
+;-------------------------
+$MCS_M_CODE_COOLANT_1_ON=8
+$MCS_M_CODE_COOLANT_2_ON=7
+$MCS_M_CODE_COOLANT_1_AND_2_ON=27
+$MCS_M_CODE_ALL_COOLANTS_OFF=9
+
+; FASTEMS (Option):
+; Palettenwechselprogramm
+;------------------------
+PALCHGPROG="9999"
+
+; Verminderte Werte Begrenzen:
+;
+; grSpiPosVeloLow = Spindelrichtdrehzahl [U/Min],
+; grSpiPosAccLow  = Spindelbeschleunigung [U/s²]
+; grACCValLow     = Achsbeschleunigung [m/s²] 
+; ----------------------------------------------
+grSpiPosVeloLow= MINVAL(MAXVAL(grSpiPosVeloLow,$MA_REFP_VELO_SEARCH_MARKER[0,mcAxSp1]),500)
+grSpiPosAccLow = MINVAL(MAXVAL(grSpiPosAccLow,10),$MA_MAX_AX_ACCEL[mcAxSp1])
+grACCValLow    = MINVAL(MAXVAL(grACCValLow,50),100)
+
+; Werkzeugwechsel Achsen
+; ----------------------
+; grFreePosZ    = Z-Achsposition fuer Freifahren
+; grTcPosZ      = Z-Achse
+;
+;-----------------------------------------------
+grFreePosZ=grPalLoadPosZ-(grInchMetr*0.2)
+IF (grTcPosZ==99999999)
+  ; wurden im Posprogramm nicht ueberschrieben
+  grTcPosZ=grFreePosZ
+ENDIF
+
+CFG_MAN("MC",sMCType)
+;
+CFG_MAN("MN",sMNType)
+
+; max. zulaessiger Werkzeugabmessungen
+;-------------------------------------
+; grToMaxRad      = maximal zulaessiger Werkzeugradius
+; grToMaxRadDoor  = maximaler Werkzeugradius, um bei
+;                   geschlossener Tuer in
+;                   Werkzeugwechselposition zu fahren
+; grTcLenOversize = max. Wz - Kollisionslaenge, bei der ein
+;                   WzW in beide Richtungen moeglich ist
+; grTCCoolOn      = ab dieser X Position darf das Kuehlmittel
+;                   eingeschaltet werden
+;
+grToMaxRad=grInchMetr*0.0
+grTcLenOversize=grInchMetr*0.0
+grToMaxRadDoor=grInchMetr*0.0
+grTCCoolOn=grInchMetr*0.0
+
+;--Einstellungen---------------------------------
+; grTcRelSpDist = Abstand vor grTCPosX bis zu dem
+;                 die Sp gerichtet sein muss,
+;                 bevor sie in grTCPosX faehrt
+; grExitStartX  = Y muss ab hier beim Einfahren
+;                 in grTCPosY sein
+; grExitRadXY   = Radius der "Kreisbahn" auf
+;                 der X,Y aus dem Magazin
+;                 fahren koennen
+; grExitDoorHeight = Abstand (+/-) von grTCPosY
+;                    zur Verkleidung bzw. WzWTuer
+; grTCPrepTimeMin = min. Vorbereitungszeit ohne
+;                   vorheriges T/Prepare
+;------------------------------------------------
+grExitStartX=grInchMetr*0.0
+grExitRadXY=grInchMetr*0.0
+grExitDoorHeight=grInchMetr*0.0
+grTCPrepTimeMin=0.9
+;
+IF (sMCType=="NBH5")OR(sMCType=="NBH5S")
+  ;
+  grTCRelSpDist=grInchMetr*100.0
+  ;
+  IF (sMNType=="CH")
+    grToMaxRad=grInchMetr*82.5
+    grExitStartX=grTCPosX-grInchMetr*100.0
+    grExitRadXY=grInchMetr*170.0
+    grExitDoorHeight=grInchMetr*115.0
+    grTCCoolOn=grInchMetr*(-30.0)
+  ENDIF
+  ;
+  IF (sMNType=="CH_WM307")
+    grToMaxRad=grInchMetr*82.5
+    grExitStartX=grTCPosX-grInchMetr*30.0
+    grExitRadXY=grInchMetr*170.0
+    grExitDoorHeight=grInchMetr*115.0
+    grTCCoolOn=grInchMetr*(-30.0)
+  ENDIF
+ENDIF
+;
+IF (sMCType=="NBH6")OR(sMCType=="NBH6P")
+  grTCRelSpDist=grInchMetr*150.0
+ENDIF
+;
+IF (sMCType=="NBH500")
+  ;
+  IF (sMNType=="D")
+    ; max Wz Durchmesser + ..
+    grTCRelSpDist=grInchMetr*160.0
+  ELSE
+    grTCRelSpDist=grInchMetr*100.0
+  ENDIF
+ENDIF
+;
+IF (sMCType=="NBH630")
+  ;
+  grTCRelSpDist=grInchMetr*150.0
+  ;
+  IF (gbSwivHeadExist)
+    grToMaxRad=grInchMetr*200.0
+    grTcLenOversize=grInchMetr*600.0
+    grToMaxRadDoor=grInchMetr*25.0
+  ENDIF
+ENDIF
+;
+IF (sMCType=="NBH800")
+  grTCRelSpDist=grInchMetr*150.0
+ENDIF
+;
+IF (sMCType=="NBH1000")
+  grTCRelSpDist=grInchMetr*150.0
+ENDIF
+;
+IF (sMCType=="NBH1200")
+  grTCRelSpDist=grInchMetr*0.0
+ENDIF
+
+; Max. zulaessige Werkzeuglaenge
+;
+; beim Werkzeugwechsel ohne Kollison
+; mit der Vorrichtung.
+;-----------------------------------
+gbEnaTcMaxToolLen=FALSE
+;
+IF (sMCType=="NBH5")OR(sMCType=="NBH5S")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+IF (sMCType=="NBH6")OR(sMCType=="NBH6P")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+IF (sMCType=="NBH500")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+IF (sMCType=="NBH630")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+IF (sMCType=="NBH800")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+IF (sMCType=="NBH1000")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+IF (sMCType=="NBH1200")
+  grTcMaxToolLen=grInchMetr*9999
+ENDIF
+
+;--------------------------------
+; TC Rechenmodel - Naeherung Ruck
+;--------------------------------
+;
+grTCJerkRedExp=2 giItCount=3
+;
+grTCJerkX=$MA_MAX_AX_JERK[mcAxX]*0.45
+grTCJerkY=$MA_MAX_AX_JERK[mcAxY]*0.45
+grTCJerkZ=$MA_MAX_AX_JERK[mcAxZ]*0.45
+;
+IF (sMCType=="NBH5S")OR((sMCType=="NBH1000")AND(gbTiltheadExist))
+  ;Vorsteuerung aktiv
+  grTCJerkX=$MA_MAX_AX_JERK[mcAxX]*0.7
+  grTCJerkY=$MA_MAX_AX_JERK[mcAxY]*0.7
+  grTCJerkZ=$MA_MAX_AX_JERK[mcAxZ]*0.7
+ENDIF
+
+;--------
+; IPOTURN
+;--------
+;
+IF (sMCType=="NBH5")
+  grIPOTurnJerkX=150
+  grIPOTurnJerkY=150
+  grIPOTurnJerkZ=150
+  grIPOTurnJerkA_C=0
+  grIPOTurnJerkB=70
+ENDIF
+;
+IF (sMCType=="NBH5S")
+  grIPOTurnJerkX=150
+  grIPOTurnJerkY=150
+  grIPOTurnJerkZ=150
+  grIPOTurnJerkA_C=0
+  grIPOTurnJerkB=70
+ENDIF
+;
+IF (sMCType=="NBH6")OR(sMCType=="NBH6P")
+  grIPOTurnJerkX=20
+  grIPOTurnJerkY=70
+  grIPOTurnJerkZ=50
+  grIPOTurnJerkA_C=30
+  grIPOTurnJerkB=70
+ENDIF
+;
+IF (sMCType=="NBH500")
+  grIPOTurnJerkX=180
+  grIPOTurnJerkY=150
+  grIPOTurnJerkZ=300
+  grIPOTurnJerkA_C=0
+  grIPOTurnJerkB=100
+ENDIF
+;
+IF (sMCType=="NBH630")
+  grIPOTurnJerkX=20
+  grIPOTurnJerkY=100
+  grIPOTurnJerkZ=25
+  grIPOTurnJerkA_C=30
+  grIPOTurnJerkB=5
+ENDIF
+;
+IF (sMCType=="NBH800")
+  grIPOTurnJerkX=20
+  grIPOTurnJerkY=100
+  grIPOTurnJerkZ=25
+  grIPOTurnJerkB=5
+  ;
+  IF (gbSwivHeadExist)
+    grIPOTurnJerkA_C=30
+  ENDIF
+  ;
+  IF (gbBAExist)
+    grIPOTurnJerkA_C=30
+  ENDIF
+  ;
+ENDIF
+;
+IF (sMCType=="NBH1000")
+  grIPOTurnJerkX=20
+  grIPOTurnJerkY=100
+  grIPOTurnJerkZ=25
+  grIPOTurnJerkB=5
+  ;
+  IF (gbTiltHeadExist)
+    grIPOTurnJerkA_C=30
+  ENDIF
+  ;
+  IF (gbBAExist)
+    grIPOTurnJerkA_C=30
+  ENDIF
+  ;
+ENDIF
+;
+IF (sMCType=="NBH1200")
+  grIPOTurnJerkX=0
+  grIPOTurnJerkY=0
+  grIPOTurnJerkZ=0
+  grIPOTurnJerkA_C=0
+  grIPOTurnJerkB=0
+ENDIF
+;
+RET

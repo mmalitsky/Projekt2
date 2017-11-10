@@ -1,0 +1,210 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SpTlData.SPF
+;# Task:      Spindeldaten aktualisiern
+;# Version:   V06.00.07
+;# Date:      01.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+; Verlauf:
+; --------
+;
+; V06.00.07 - 01.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 09.10.2016 / Simons
+; - Neuversionierung
+; - grBckData, grSpiPosACCLow hinzu
+;   grIBN... entfernt
+;
+; V06.00.04 - 23.07.2016 / Simons
+; - Neuversionierung
+; - zusaetzliche STOPRE's
+;
+; V06.00.03 - 07.05.2016 / Simons
+; Hinzu
+; - HHD TM
+; - $TC_TP_MAX_VELO/ACC
+; - Schneidenlaenge Pruefen
+; - Aenderung SonderWz
+;
+; V06.00.01 - 14.09.2015 / Simons
+; - Korrektur
+;
+; V06.00.00 - 31.08.2015 / Simons
+; - Prototyp
+;
+; V04.00.01 - 04.09.2014 / Fengler
+; - Vorlage
+; -----------------------------------
+;
+; Beschreibung:
+; -------------
+; SpWz Aktivieren
+;
+; Fuer das Spindelwerkzeug ..
+; - Schnittstelle "Wz in Spindel" aktualisieren
+;   Schnittstelle "Kuehlmittel erforderlich"
+;   aktualisieren (Bit 0).
+; - Soll-Kuehlmitteldruck
+; - max. Spindeldrehzahl
+; - Wz Schutz
+; - Geodaten Ueberpruefen
+;
+;   Sonderfunktionen in SpecTlMan
+;   -----------------------------
+; - Fraeskopfklemmvorrichtung (gbWithMillHead)
+; - Wohlhaupter-Einstechkopf  (gbWithRecHead)
+; - Plandrehkopf              (gbWithFacingHead)
+; -----------------------------------
+
+PROC SpTlData (INT iMode, INT iTNoSp) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="SpTlData V06.00.06", sTName=""
+;
+DEF BOOL bDoNewConf=FALSE, bSlowMode=FALSE, bProtectMode=FALSE, bIsProbe=FALSE
+;
+DEF INT iSpecTlType=0, iCount=0, iValidDNo=0, iDuplo, iCoolant
+;
+DEF REAL rMaxSpeedSp, rActAccSp
+
+IF (NOT $P_SUBPAR[1])
+  RET
+ENDIF
+;
+IF (NOT $P_SUBPAR[2])
+  ;
+  ;Wz in Sp -> SpWz
+  STOPRE
+  giTNoSp=$TC_MPP6[9998,mcLocSp]
+ELSE
+  ;
+  ;iTNoSp aus Parameter
+  IF (iTNoSp<0)
+    giTNoSp=0
+  ELSE
+    giTNoSp=iTNoSp
+  ENDIF
+ENDIF
+;
+IF (giTNoSp>0)
+  ;
+  ;Wz in Sp
+  ;
+  IF (NOT $P_TOOLEXIST[giTNoSp])
+    ;Wz soll in Sp sein, wurde aber geloescht
+    SETAL(AL_TNoNotAllowed67,"??="<<giTNoSp)
+    RET
+  ENDIF
+  ;
+  sTName=$TC_TP2[giTNoSp] iDuplo=$TC_TP1[giTNoSp]
+  ;
+  ;Alle Schneiden muessen ein L1 > grTCMinL1 haben
+  WHILE (iCount<$P_TOOLND[giTNoSp])
+    iCount=iCount+1
+    IF (ABS($TC_DP3[giTNoSp,iCount]+$TC_DP12[giTNoSp,iCount]+$TC_DP21[giTNoSp,iCount])>=grTCMinL1)
+      iValidDNo=iValidDNo B_OR RTOI(EXP((iCount-1)*LN(2)))
+    ENDIF
+  ENDWHILE
+ENDIF
+;
+IF (giTNoSp>0)AND(sTName<>"0")AND(sTName<>"")AND(iDuplo>0)
+  ;
+  ;mit SpWz
+  ;
+  rMaxSpeedSp=$TC_TP_MAX_VELO[giTNoSp] rActAccSp=$TC_TP_MAX_ACC[giTNoSp] bIsProbe=(($TC_DP1[giTNoSp,1] DIV 100)==7) bProtectMode=((RTOI($TC_TPC1[giTNoSp]) B_AND 'H400')<>0)AND(NOT gbTMIsHHD)
+  ;
+  ;Achtung: Fuer $TC_TP_MAX_VELO, $TC_TP_MAX_ACC die automatische Aktivierung per MD nicht freigeben
+  ;
+  IF (rActAccSp==0)
+    rActAccSp=grSpiPosAccLow
+  ELSE
+    bProtectMode=TRUE
+  ENDIF
+  ;
+  IF ($P_TOOLND[giTNoSp]>0)AND((bIsProbe)OR(bProtectMode))
+    ;
+    ;Bei Messtaster oder Wz-Schutz, wenn mind. 1 Schneide vorhanden
+    bSlowMode=TRUE
+  ENDIF
+  ;
+  ;Spindeldrehzahlbegrenzung
+  IF (rMaxSpeedSp==0)
+    rMaxSpeedSp=$TC_TPC5[giTNoSp]
+  ENDIF
+  ;
+  IF (rMaxSpeedSp>0)
+    $SA_SPIND_MAX_VELO_G26[mcAxSP1]=MAXVAL(rMaxSpeedSp,$MA_REFP_VELO_SEARCH_MARKER[0,mcAxSP1])
+  ELSE
+    $SA_SPIND_MAX_VELO_G26[mcAxSP1]=MAXVAL(giMaxDefaultSpindleVelo,$MA_REFP_VELO_SEARCH_MARKER[0,mcAxSP1])
+  ENDIF
+  ;
+  ;SonderWzTyp / Kuehlmittel
+  IF (gbTMIsHHD)
+    iSpecTlType=RTOI($TC_TPC21[giTNoSp]) iCoolant=RTOI($TC_TPC4[giTNoSp]) OUT_ForceCoolant=((RTOI($TC_TPC1[giTNoSp]) B_AND 'H60')<>0) OUT_ToolInSp=TRUE OUT_TlCollPalChg=(($TC_TPC11[giTNoSp]+$TC_TPC16[giTNoSp])>grToLenPalChgColl)AND(grToLenPalChgColl>0) mcDBB_SpecToType=iSpecTlType mcDBB_DNoAllowed=iValidDNo gbSpecTlInSp=(iSpecTlType>0)
+  ELSE
+    iSpecTlType=RTOI($TC_TPC11[giTNoSp]) iCoolant=RTOI($TC_TPC6[giTNoSp]) OUT_ForceCoolant=((RTOI($TC_TPC1[giTNoSp]) B_AND 'H10')<>0) OUT_ToolInSp=TRUE OUT_TlCollPalChg=($TC_TPC7[giTNoSp]>grToLenPalChgColl)AND(grToLenPalChgColl>0) mcDBB_SpecToType=iSpecTlType mcDBB_DNoAllowed=iValidDNo gbSpecTlInSp=(iSpecTlType>0)
+  ENDIF
+  ;
+  IF (iCoolant>0)
+    ;
+    ;Druckstufe Kuehlmittel
+    H70=iCoolant
+  ENDIF
+ELSE
+  ;
+  ;kein SpWz
+  ;
+  OUT_ToolInSp=FALSE OUT_ForceCoolant=FALSE OUT_TlCollPalChg=FALSE mcDBB_SpecToType=0 mcDBB_DNoAllowed=0 gbSpecTlInSp=FALSE
+  ;
+  ;Spindeldrehzahlbegrenzung
+  $SA_SPIND_MAX_VELO_G26[mcAxSP1]=MAXVAL($MA_SPIND_VELO_LIMIT[mcAxSP1],$MA_REFP_VELO_SEARCH_MARKER[0,mcAxSP1])
+ENDIF
+;
+;Werkzeugschutz: -> Begrenzung der Dynamik Spindel, Richtdrehzahl und Beschleunigung der Hauptachsen reduzieren
+IF (bSlowMode)
+  ;
+  ;Sp Beschleunigung Wz-spezifisch begrenzen
+  ACC[X]=grAccValLow ACC[Y]=grAccValLow
+  ;
+  IF (NOT gbTCSlowMode)
+    ;
+    ;Ausgeschaltet -> Einschalten
+    ;
+    ;bewusst in einen Satz,damit eine Unterbrechung nicht zum Vertauschen der Daten fuehrt)
+    grBckData[0]=$MA_SPIND_POSCTRL_VELO[0,mcAxSP1] grBckData[1]=$MA_SPIND_POSCTRL_VELO[1,mcAxSP1] grBckData[2]=$MA_SPIND_POSCTRL_VELO[2,mcAxSP1] grBckData[3]=$MA_GEAR_STEP_POSCTRL_ACCEL[0,mcAxSP1] grBckData[4]=$MA_GEAR_STEP_POSCTRL_ACCEL[1,mcAxSP1] grBckData[5]=$MA_GEAR_STEP_POSCTRL_ACCEL[2,mcAxSP1]
+    $MA_SPIND_POSCTRL_VELO[0,mcAxSP1]=grSpiPosVeloLow $MA_SPIND_POSCTRL_VELO[1,mcAxSP1]=grSpiPosVeloLow $MA_SPIND_POSCTRL_VELO[2,mcAxSP1]=grSpiPosVeloLow $MA_GEAR_STEP_POSCTRL_ACCEL[0,mcAxSP1]=rActAccSp $MA_GEAR_STEP_POSCTRL_ACCEL[1,mcAxSP1]=rActAccSp $MA_GEAR_STEP_POSCTRL_ACCEL[2,mcAxSP1]=rActAccSp gbTCSlowMode=TRUE bDoNewConf=TRUE
+  ENDIF
+ELSE
+  ;
+  IF (gbTCSlowMode)
+    ;
+    ;Eingeschaltet -> Ausschalten
+    ;
+    ACC[X]=100 ACC[Y]=100
+    $MA_SPIND_POSCTRL_VELO[0,mcAxSP1]=grBckData[0] $MA_SPIND_POSCTRL_VELO[1,mcAxSP1]=grBckData[1] $MA_SPIND_POSCTRL_VELO[2,mcAxSP1]=grBckData[2] $MA_GEAR_STEP_POSCTRL_ACCEL[0,mcAxSP1]=grBckData[3] $MA_GEAR_STEP_POSCTRL_ACCEL[1,mcAxSP1]=grBckData[4] $MA_GEAR_STEP_POSCTRL_ACCEL[2,mcAxSP1]=grBckData[5] gbTCSlowMode=FALSE bDoNewConf=TRUE
+  ENDIF
+ENDIF
+;
+IF (gbWithMillHead)OR(gbWithFacingHead)OR(gbWithRecHead)
+  ;
+  ;Funktionen der Sonderwerkzeuge
+  SpecTlMan(3,,bDoNewConf)
+ELSE
+  ;
+  IF (bDoNewConf)
+    ;
+    ;Richtdrehzahl aktivieren
+    ;
+    NEWCONF
+  ENDIF
+  ;
+  STOPRE
+ENDIF
+;
+RET

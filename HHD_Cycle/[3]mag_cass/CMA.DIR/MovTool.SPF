@@ -1,0 +1,1165 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MovTool.SPF
+;# Task:      Wz Bewegen
+;# Version:   V06.00.07
+;# Date:      05.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 28.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickUpDrop->grSyncPickUpDrop
+; - formale Aenderungen
+;
+; V06.00.05 - 01.03.2017 / Simons
+; - bFast hinzu
+;
+; V06.00.05 - 09.10.2016 / Simons
+; - TM HHD (V04.02.02 / Sept. 2016, Balles)
+;
+; V06.00.05 - 24.09.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag
+; - OEM_...
+;
+; V04.00.00 - 06.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Werkzeug bewegen in den Faellen:
+;
+; a) Werkzeug in Vorbereitungsposition bringen
+;    iMagNo==9998 iPotNo==1
+; b) Werkzeug ins Magazin zurueckbringen und ablegen
+;    iMagNo<9998 iMagNo<>giMagNoLoadList iPotNo>0
+; c) Werkzeug zur Handbeladung bringen
+;    iMagNo=9999 iPotNo>0
+; d) Werkzeug zur Bruchkontrolle bringen
+;    iMagNo=9998 iPotNo=4
+;
+; Eingangsparameter:
+; ------------------
+; iToDo: Kennung fuer den Auftrag in der Form xyz
+;        bei FC8 TaskId=
+; 1=   Beladen/Entladen/Umsetzen
+; 2=   Wz vorbereiten/wechseln
+; 4,5= asynchron umspeichern
+;
+; y : TaskIdNo bei FC8 TaskId=
+; 1:   Nr. Beladestelle
+; 2:   Nr. Spindel
+; 4,5: Kanal-Nr
+;
+; z: Modus bei FC8 TaskId=
+; 1: BitNr fuer Beladen - Entladen - Umsetzen
+; 2: BitNr fuer Vorbereiten
+; 4,5:
+;
+; 110: Beladen ueber Beladestelle_Hand
+; 111: Entladen ueber Beladestelle_Hand
+; 112: Umsetzen allgemein (= immer Beladestelle_Hand)
+; 113: Positionieren (hier nicht verwendet
+;
+; 120: Beladen ueber Beladestelle Magazin
+; 121: Entladen ueber Beladestelle Magazin
+;
+; 211: Wz-Wechsel
+; mcTaskPrep2: Bereitstellung
+;
+; 5xx: asynchrone Umspeichervorgaenge
+; 500: Wz asynchron umsetzen (im Magazin)
+; 501: Leeres HG asynchron bereitstellen (zum Ausschleusen eines SpindelWz)
+;      und SpWz ins Magazin zurueckbringen
+; 51i: Wz in die Spindel bringen (asynchron)
+;      i=0: keine zusaetzliche Aktionen
+;      i=1: Sp-Wz in Mess-/Pruefposition bringen
+;      i=2: Spindel in WzW-Position belassen
+;
+; 600: Wz zur Bruchkontrolle bringen
+; 900: Wz ablegen und ggf. freifahren (iTNo=0)
+;
+; iTNo: WzV-interne T-Nummer des zu bewegenden Wz
+; iMagNo:   Magazin-Nummer Ziel
+; iPotNo:   Platz-Nummer Ziel
+;
+; Rueckgabeparameter:
+;
+; iAlarmNo:     Alarmnummer
+; sAlarmParam:  Zusatztext
+;
+; Achtung: das HG enthaelt bereits
+; das zu bewegende (mittels iTNo angesprochene) Wz
+;
+;------------------------------------
+
+PROC MovTool(INT iToDo, INT iTNo, INT iMagNo, INT iPotNo, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam, BOOL bFast)
+
+DEF STRING[32] sCycName="MovTool V06.00.07"
+
+DEF BOOL bToTC, bToMag, bToBrk, bWithChip, bHGLowered, bHGLifted, bHGVertical, bHGHorizontal, bHgInTcPos, bOnMiddleX, bOnMiddleZ
+;
+DEF INT iSrcG1X, iSrcG2X, iSrcG1Z, iSrcG2Z, iDstG1X, iDstG2X, iDstG1Z, iDstG2Z, iTNoChip, iTmpFLog, iSrcFLog, iDstFLog, iActFLog, iChkRes
+;
+DEF REAL rSrcPosX, rSrcPosZ, rDstPosX, rDstPosZ, rActPosX, rActPosZ, rTmpPosZ, rVeloX, rVeloZ, rc2x0mm, rc800x0mm
+
+iAlarmNo=0 sAlarmParam="" rVeloX=$MA_POS_AX_VELO[mcAxX1] rVeloZ=$MA_POS_AX_VELO[mcAxZ1] rc2x0mm=(2.0 * grInchMetr) rc800x0mm=(800 * grInchMetr)
+
+IF (iToDo==mcTaskAS_Drop)AND(iTNo==0) GOTOF _DropTool
+
+IF (iTNo<=0)
+  iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iMagNo<1)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998))
+  ;
+  IF (iMagNo==giMagNoLoadList)
+    iAlarmNo=AL_LoadListNotTarget sAlarmParam=<<iMagNo
+  ELSE
+    iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iMagNo
+  ENDIF
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+  ;
+  IF (iPotNo<1)OR(iPotNo>giNumPlacesInMag[iMagNo])
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iPotNo
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+;
+;Status Magazin
+;--------------
+rActPosX=$AA_IM[mcAxX1] rActPosZ=$AA_IM[mcAxZ1] bWithChip=(mcbDBB_WithTlChipHG) bHGLowered=(mcbDBB_HGLowered) bHGVertical=(mcbDBB_HGVertical) bHGHorizontal=(mcbDBB_HGHorizontal) bHGLifted=(mcbDBB_HGLifted) bHgInTcPos=(OUT_HgInTcPos) bOnMiddleX=(OUT_OnMiddleX) bOnMiddleZ=(OUT_OnMiddleZ)
+
+IF ((giMagState MOD 10)==0)
+  iAlarmNo=AL_NoTlInHG
+  GOTOF HandleAlarm
+ENDIF
+
+;Plausibilitaetspruefungen
+;-------------------------
+IF (bHGLowered)AND(bHGVertical)
+  ;
+  IF NOT ((giMagState==31)OR(giMagState==82)OR(giMagState==83)OR(giMagState==92)OR(giMagState==93))
+    ;HG steht in ungueltiger Position
+    iAlarmNo=AL_HGNotInValidPos
+    GOTOF HandleAlarm
+  ENDIF
+ELSE
+  ;
+  IF (bHGHorizontal)AND(bHGLifted)
+    IF NOT ((giMagState==11)OR(giMagState==12)OR(giMagState==21)OR(giMagState==22)OR(giMagState==32)OR(giMagState==33)OR(giMagState==34))
+      iAlarmNo=AL_HGNotInValidPos
+      GOTOF HandleAlarm
+    ENDIF
+  ELSE
+    iAlarmNo=AL_HGNotInValidPos
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+;
+IF (giTNoHg>0)AND(giTNoHg<>iTNo)
+  ;im HG ist ein Wz, aber nicht das gewuenschte
+  MakeAlarmParam(sAlarmParam,$TC_TP2[giTNoHg],<<$TC_TP1[giTNoHg])
+  iAlarmNo=AL_WrongTlInHG
+  GOTOF HandleAlarm
+ENDIF
+
+;Vorwahl Schwenkgeschwindigkeit HG
+IF (gbHGHeavyTl)
+  M_HgSwivelSlow
+ELSE
+  M_HgSwivelFast
+ENDIF
+
+;Aufgabe erkennen
+bToMag=((iMagNo>=1)AND(iMagNo<=giNumRealMag))
+bToTC=((iMagNo==9998)AND(iPotNo==1))
+bToBrk=((iMagNo==9998)AND(iPotNo==mcLocHG)AND(iToDo==mcTaskAS_BBK))
+
+;Zu bewegendes Wz ist im HG
+
+IF NOT ((iToDo==mcTaskPrep2)AND(bHgInTcPos))
+  M_HgClamp1
+ELSE
+  ;bereitgestelltes Wz unveraendert belassen
+ENDIF
+
+OEM_TlData(iTNo)
+iSrcFLog=giPlDatFLog[0] iDstFLog=giPlDatFLog[1] iActFlog=0 bWithChip=(bWithChip)AND(OEM_bSelChip)
+;
+IF (iSrcFLog>0)
+  rSrcPosX=grPlDatPosX[0] rSrcPosZ=grPlDatPosZ[0] iSrcG1X=giPlDatLane1X[0] iSrcG2X=giPlDatLane2X[0] iSrcG1Z=giPlDatLane1Z[0] iSrcG2Z=giPlDatLane2Z[0]
+ENDIF
+;
+IF (iDstFLog>0)
+  rDstPosX=grPlDatPosX[1] rDstPosZ=grPlDatPosZ[1] iDstG1X=giPlDatLane1X[1] iDstG2X=giPlDatLane2X[1] iDstG1Z=giPlDatLane1Z[1] iDstG2Z=giPlDatLane2Z[1]
+ENDIF
+;
+IF (bToMag)AND(iDstFLog==0)AND(iSrcFLog>0)
+  rDstPosX=rSrcPosX rDstPosZ=rSrcPosZ iDstG1X=iSrcG1X iDstG2X=iSrcG2X iDstG1Z=iSrcG1Z iDstG2Z=iSrcG2Z iDstFLog=iSrcFLog iSrcFlog=0
+ENDIF
+;
+IF (giMagState==82)OR(giMagState==83)
+  ;
+  ;HG geklemmt vertikal gesenkt zwischen Quellmagazinplatz und Fahrgasse
+  giMagState=83
+  ;
+  iTmpFLog=(iSrcFLog MOD 100)
+  IF (iTmpFLog==5)AND(ABS(rActPosZ-rSrcPosZ)<=grRange)
+    ;
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iSrcG2X]
+    ;
+    STOPRE
+    ;HG mit Wkz vertikal gesenkt in Fahrgasse
+    giMagState=31 iActFLog=5 giActLaneX=iSrcG2X rActPosX=grLaneX[iSrcG2X]
+    ;
+  ENDIF
+  ;
+  IF (iTmpFLog==4)AND(ABS(rActPosX-rSrcPosX)<=grRange)
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG2Z]
+    ;
+    STOPRE
+    giMagState=31 iActFLog=4 giActLaneZ=iSrcG2Z rActPosZ=grLaneZ[iSrcG2Z]
+    ;
+  ENDIF
+  ;
+  IF (iTmpFLog==3)AND(ABS(rActPosZ-rSrcPosZ)<=grRange)
+    ;
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iSrcG1X]
+    ;
+    STOPRE
+    giMagState=31 iActFLog=3 giActLaneX=iSrcG1X rActPosX=grLaneX[iSrcG1X]
+    ;
+  ENDIF
+  ;
+  IF (iTmpFLog==2)AND(ABS(rActPosX-rSrcPosX)<=grRange)
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG1Z]
+    ;
+    STOPRE
+    giMagState=31 iActFLog=2 giActLaneZ=iSrcG1Z rActPosZ=grLaneZ[iSrcG1Z]
+    ;
+  ENDIF
+  ;
+  IF (iTmpFLog==1)AND(ABS(rActPosZ-rSrcPosZ)<=grRange)
+    ;
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+    ;
+    STOPRE
+    giMagState=31 iActFLog=1 giActLaneX=1 rActPosX=grLaneX[1]
+    ;
+  ENDIF
+  ;
+  ;HG vertikal gesenkt in Fahrgasse am Quellplatz
+  GOTOF _MOVE
+ENDIF
+
+IF (giMagState==31)
+  ;
+  ;HG vertikal gesenkt in Fahrgasse
+  ;
+  iActFlog=0
+  IF (iDstFLog>0)AND(giActLaneX==1)
+    iActFlog=1
+    GOTOF _MOVE
+  ENDIF
+  ;
+  IF (bToMag)
+    ;
+    ;Pruefen, ob schon auf gueltiger Zielfahrgasse
+    ;
+    iTmpFLog=(iDstFLog MOD 100)
+    LOOP
+      IF (iTmpFLog>=2)AND(giActLaneZ==iDstG1Z)
+        iActFlog=52
+      ENDIF
+      ;
+      IF (iTmpFLog>=3)AND(giActLaneX==iDstG1X)
+        iActFlog=53
+      ENDIF
+      ;
+      IF (iTmpFLog>=4)AND(giActLaneZ==iDstG2Z)
+        iActFlog=54
+      ENDIF
+      ;
+      IF (iTmpFLog>=5)AND(giActLaneX==iDstG2X)
+        iActFlog=55
+      ENDIF
+      ;
+      IF (iActFlog>0)
+        GOTOF _MOVE
+      ELSE
+        ;
+        ;Falls auf Gasse, eine Gasse zurueck
+        ;
+        IF (bOnMiddleX) AND(giActLaneX>0)
+          ;auf Fahrgasse X1
+          COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[giSeniorLaneX[giActLaneX]]
+          giActLaneZ=giSeniorLaneX[giActLaneX] rActPosZ=grLaneZ[giSeniorLaneX[giActLaneX]] giActLaneX=0
+        ELSE
+          IF (bOnMiddleZ)AND(giActLaneZ>0)
+            ;auf Fahrgasse Z1
+            COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[giSeniorLaneZ[giActLaneZ]]
+            giActLaneX=giSeniorLaneZ[giActLaneZ] rActPosX=grLaneX[giSeniorLaneZ[giActLaneZ]] giActLaneZ=0
+          ELSE
+            ;HG steht in ungueltiger Position
+            iAlarmNo=AL_HGNotInValidPos
+            GOTOF HandleAlarm
+          ENDIF
+        ENDIF
+      ENDIF
+      ;
+      IF (giActLaneX==1)
+        iActFlog=1
+        GOTOF _MOVE
+      ENDIF
+    ENDLOOP
+  ENDIF
+  ;
+  iTmpFLog=(iSrcFLog MOD 100)
+  IF (iTmpFLog>=5) AND (giActLaneX==iSrcG2X)
+    iActFlog=5
+  ENDIF
+  ;
+  IF (iTmpFLog>=4) AND (giActLaneZ==iSrcG2Z)
+    iActFlog=4
+  ENDIF
+  ;
+  IF (iTmpFLog>=3) AND (giActLaneX==iSrcG1X)
+    iActFlog=3
+  ENDIF
+  ;
+  IF (iTmpFLog>=2) AND (giActLaneZ==iSrcG1Z)
+    iActFlog=2
+  ENDIF
+  ;
+  IF (iActFlog==0)
+    ;HG steht in ungueltiger Position
+    iAlarmNo=AL_HGNotInValidPos
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  GOTOF _MOVE
+ENDIF
+
+;=====
+_MOVE:
+;=====
+;
+STOPRE
+;
+IF (bToTC)
+  ;
+  ;Ziel ist der Doppelgreifer
+  ;
+  IF (giMagState==31)
+    ;
+    ;HG vertikal gesenkt in Fahrgasse
+    ;
+    IF (NOT gbHGNoTapeCl)
+      ;Kegelreiniger EIN
+      WHEN (TRUE) DO M_TlTapeCleanOn0
+    ENDIF
+    GOTOF "_START"<<iActFlog
+
+    ;=======
+    _START5:
+    ;=======
+    IF (gbMovTlHor)AND(NOT gbHGBigTl)AND(iSrcFLog>200) GOTOF _HORIZ
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG2Z]
+    STOPRE
+    giActLaneX=0 giActLaneZ=iSrcG2Z rActPosZ=grLaneZ[iSrcG2Z]
+
+    ;=======
+    _START4:
+    ;=======
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iSrcG1X]
+    STOPRE
+    giActLaneX=iSrcG1X giActLaneZ=0 rActPosX=grLaneX[iSrcG1X]
+
+    ;=======
+    _START3:
+    ;=======
+    IF (gbMovTlHor)AND(NOT gbHGBigTl)AND(iSrcFLog>100) GOTOF _HORIZ
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG1Z]
+    STOPRE
+    giActLaneX=0 giActLaneZ=iSrcG1Z rActPosZ=grLaneZ[iSrcG1Z]
+
+    ;=======
+    _START2:
+    ;=======
+
+    ;=======
+    _START1:
+    ;=======
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+    STOPRE
+    giActLaneX=1 giActLaneZ=0 rActPosX=grLaneX[1]
+
+    ;=======
+    _HORIZ:
+    ;=======
+    ;
+    IF (NOT gbMagWithFixedGuide)
+      ;
+      ;VSHLT X1 solange HG nicht gehoben und horizontal
+      ID=SyncID_MovTool WHENEVER ((NOT mcbDBB_HGLifted)OR(NOT mcbDBB_HGHorizontal)) DO $AA_OVR[mcAxX1]=0
+      ;
+      IF (rActPosZ>grHgMaxSwingPosZ)
+        ;
+        ID=SyncID_MovTool+1 WHEN ($AA_IM[mcAxZ1]<=grHgMaxSwingPosZ)AND((NOT mcbDBB_HGLifted)OR(NOT mcbDBB_HGHorizontal)) DO M_HgHorizontal0
+        ;
+        IPOBRKA(mcAxZ1,100)
+        ADISPOSA(mcAxZ1,0)
+        ;ELSP HG nicht gehoben und Horizontal
+        WHENEVER ((NOT mcbDBB_HGLifted)OR(NOT mcbDBB_HGHorizontal)) DO RDISABLE
+        FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=(grHgMaxSwingPosZ-rc2x0mm)
+      ELSE
+        M_HgHorizontal0
+      ENDIF
+      ;
+      STOPRE
+      ;HG mit Wkz horizontal gehoben in Fahrgasse
+      giMagState=32
+      ;
+    ELSE
+      ;
+      ;horizontales Schwenken wird im ToPrep erledigt, da abhaengig von Werkzeuglaenge und Tuerstellung !!!
+      ;
+      STOPRE
+      ;HG mit Wkz vertikal gesenkt in Fahrgasse
+      giMagState=31 rActPosX=grHgTcPosX iAlarmNo=0
+      ;
+      IF (bWithChip)AND(giWaitRWChip>0)
+        ;
+        ;Warten auf Balluff, 1: bei Fehler Alarm absetzen
+        RWChip(giWaitRWChip,iTNo,1,iAlarmNo,sAlarmParam,iTNoChip)
+      ENDIF
+      ;
+      ;Wz ist in Bereitstellungsposition
+      GOTOF _END
+    ENDIF
+  ENDIF
+  ;
+  IF (NOT gbMagWithFixedGuide)
+    ;
+    IF (giMagState==22)OR(giMagState==32)
+      ;
+      ;HG horizontal im Magazin
+      ;
+      ;Z1 faehrt in Fenster WZW, X1 wird in Gasse 1 gefahren, dann weiter in WZW X1/Z1
+      giMagState=0 giActLaneX=0 giActLaneZ=0
+      ;
+      IPOBRKA(mcAxX1,100)
+      ADISPOSA(mcAxX1,0)
+      COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grHgTcPosZ
+      FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHgTcPosX
+      ;
+      CANCEL(SyncID_MovTool,SyncID_MovTool+1,SyncID_MovTool+2)
+      ;
+      STOPRE
+      ;HG mit Werkzeug geklemmt in Werkzeugwechselposition
+      giMagState=12 giActLaneX=0 rActPosX=grHgTcPosX rActPosZ=grHgTcPosZ
+      ;
+    ENDIF
+    ;
+    IF (giMagState==21)
+      ;
+      ;HG horizontal im Bereich Doppelgreifer
+      ;
+      FINEA[mcAxX1] FINEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grHgTcPosX POS[mcAxZ1]=grHgTcPosZ
+      ;
+      STOPRE
+      ;HG mit Werkzeug geklemmt in Werkzeugwechselposition
+      giMagState=12 rActPosX=grHgTcPosX rActPosZ=grHgTcPosZ
+      ;
+    ENDIF
+    ;
+    IF (giMagState==12)
+      ;
+      ;HG horizontal im Doppelgreifer mit Wkz geklemmt
+      ;
+      IF (bWithChip)AND(giWaitRWChip>0)
+        ;
+        ;Warten auf Balluff
+        RWChip(giWaitRWChip,iTNo,1,iAlarmNo,sAlarmParam,iTNoChip)
+      ENDIF
+      ;
+      M_HgUnclamp0 M_TlTapeCleanOff0
+      ;
+      ;HG bereits loesen (ohne ELSP) wie z.B. Spindel beim WzW auch geloest wird
+      ;
+      STOPRE
+      ;HG mit Werkzeug geloest in Werkzeugwechselposition
+      giMagState=11
+      ;
+      GOTOF _END
+    ENDIF
+  ELSE
+    ;
+    ;horizontales Schwenken wird im ToPrep erledigt, da abhaengig von Werkzeuglaenge und Tuerstellung !!!
+    ;
+    STOPRE
+    ;HG mit Wkz vertikal gesenkt in Fahrgasse
+    giMagState=31 rActPosX=grHgTcPosX
+    ;
+    GOTOF _END
+  ENDIF
+ENDIF
+
+IF (bToMag)
+  ;
+  ;Ziel ist ein Platz im Magazin
+  ;a) altes SpWz: Spindel -> Magazin
+  ;b) Umsetzen: Magazin -> Magazin
+  ;c) Beladen: Beladestelle_Hand -> Magazin
+  ;
+  IF (giMagState==11)
+    ;
+    ;HG horizontal im Doppelgreifer mit Wkz geloest
+    ;
+    M_HgClamp1
+    ;
+    STOPRE
+    ;HG mit Werkzeug geklemmt in Werkzeugwechselposition
+    giMagState=12
+    ;
+  ENDIF
+
+  IF (NOT gbMagWithFixedGuide)
+    ;
+    IF (giMagState==12)OR(giMagState==21)
+      ;
+      ;HG horizontal im Bereich Doppelgreifer
+      ;
+      IF (NOT gbHGNoTapeCl)
+        WHEN ($AA_IM[mcAxX1]>=grLaneX[1]-grPARA[10]) DO M_TlTapeCleanOn0
+      ENDIF
+      ;
+      STOPRE
+      giMagState=0
+      ;
+      IF (gbMovTlHor)AND(NOT gbHGBigTl)AND(iDstFLog>100)
+        ;
+        ;HG gehoben/horizontal -> Gleich zur ZielGasse X fahren
+        ;
+        IF (iDstFLog>200)
+          ;Eckpunkt vor Einfahren in Gasse NewG2X
+          COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[iDstG2X] POS[mcAxZ1]=grHgTcPosZ
+          STOPRE
+          iActFlog=55 giActLaneX=iDstG2X giActLaneZ=0 rActPosX=grLaneX[iDstG2X] rActPosZ=grHgTcPosZ
+        ENDIF
+        ;
+        IF (iDstFLog>100)
+          ;Eckpunkt vor Einfahren in Gasse NewG1X
+          COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[iDstG1X] POS[mcAxZ1]=grHgTcPosZ
+          STOPRE
+          iActFlog=53 giActLaneX=iDstG1X giActLaneZ=0 rActPosX=grLaneX[iDstG1X] rActPosZ=grHgTcPosZ
+        ENDIF
+      ELSE
+        ;
+        ;HG gehoben/horizontal -> Aus Doppelgreifer fahren
+        COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grHgTcPosZ
+        STOPRE
+        iActFlog=1 giActLaneX=1 giActLaneZ=0 rActPosX=grLaneX[1] rActPosZ=grHgTcPosZ
+      ENDIF
+      ;
+      ;Ab jetzt darf HG heruntergeschwenkt werden
+      ;
+      ;HG mit Wkz horizontal gehoben in Zielgasse
+      giMagState=34
+      ;
+      GOTOF _MOVEDST
+    ENDIF
+    ;
+    IF (giMagState==22)
+      ;
+      ;HG horizontal im Bereich Bruchkontrolle
+      ;
+      COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grHgMaxSwingPosZ-grPara[2]
+      ;
+      STOPRE
+      ;HG mit Wkz horizontal gehoben in Fahrgasse
+      giMagState=32 iActFlog=1 giActLaneX=1 giActLaneZ=0 rActPosX=grLaneX[1] rActPosZ=grHgMaxSwingPosZ-grPara[2]
+      ;
+    ENDIF
+
+    IF (giMagState==32)OR(giMagState==33)
+      ;
+      ;HG horizontal im Magazin
+      ;
+      IF (NOT gbHGNoTapeCl)
+        WHEN ($AA_IM[mcAxX1]>=grLaneX[1]-grPARA[10]) DO M_TlTapeCleanOn0
+      ENDIF
+      ;
+      STOPRE
+      giMagState=0
+      ;
+      IF (gbMovTlHor)AND(NOT gbHGBigTl)AND(iDstFLog>100)
+        ;
+        ;HG gehoben/horizontal -> Gleich zur ZielGasse X fahren
+        ;
+        IF (iDstFLog>200)
+          COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iDstG2X]
+          STOPRE
+          iActFlog=55 giActLaneX=iDstG2X giActLaneZ=0 rActPosX=grLaneX[iDstG2X]
+        ENDIF
+        ;
+        IF (iDstFLog>100)
+          COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iDstG1X]
+          STOPRE
+          iActFlog=53 giActLaneX=iDstG1X giActLaneZ=0 rActPosX=grLaneX[iDstG1X]
+        ENDIF
+      ELSE
+        ;
+        ;HG gehoben/horizontal -> In Gasse 1 fahren
+        ;
+        COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+        STOPRE
+        iActFlog=1 giActLaneX=1 giActLaneZ=0 rActPosX=grLaneX[1]
+      ENDIF
+      ;
+      ;Ab jetzt darf HG heruntergeschwenkt werden
+      ;
+      ;HG mit Wkz horizontal gehoben in Zielgasse
+      giMagState=34
+      ;
+      GOTOF _MOVEDST
+    ENDIF
+  ELSE
+    ;
+    IF (giMagState==12)OR(giMagState==21)OR(giMagState==22)OR(giMagState==32)
+      ;
+      ;HG horizontal
+      ;
+      ;Wz Kennungen und Kollisionslaenge Lesen
+      OEM_TlData(iTNo)
+      ;
+      IF (rActPosZ>grLaneZ[iDstG1Z])OR(OEM_rColLen>grMaxColLenZCover)OR(OEM_rColLen<=0)
+        ;
+        IF (OEM_rColLen<=0)AND(rActPosZ<(grHgTcPosZ+grMaxColLenZCover))
+          COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=(grHgTcPosZ+rc800x0mm)
+          rActPosZ=(grHgTcPosZ+rc800x0mm)
+        ENDIF
+        ;
+        IF (OEM_rColLen>grMaxColLenZCover)AND(rActPosZ<(grHgTcPosZ+OEM_rColLen))
+          COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=(grHgTcPosZ+OEM_rColLen)
+          rActPosZ=(grHgTcPosZ+OEM_rColLen)
+        ENDIF
+        ;
+        ;Schwenken mit ELSP
+        M_HgVertical1 M_ProbeCycBackw0
+      ELSE
+        ;
+        ;Schwenken ohne ELSP
+        M_HgVertical0 M_ProbeCycBackw0
+      ENDIF
+      ;
+      IF (iDstFlog>1)OR(rActPosZ<grLaneZ[iDstG1Z])
+        COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iDstG1Z]
+        STOPRE
+        rActPosZ=grLaneZ[iDstG1Z]
+      ENDIF
+      ;
+      IF (NOT (mcbDBB_HGLowered)AND(mcbDBB_HGVertical))
+        ;mit ELSP
+        M_HgVertical1
+        STOPRE
+      ENDIF
+      ;
+      IF (rActPosZ==grLaneZ[iDstG1Z])
+        ;
+        ;HG mit Wkz vertikal gesenkt in Fahrgasse
+        giMagState=31 iActFlog=51 giActLaneX=0 giActLaneZ=iDstG1Z
+        ;
+      ELSE
+        ;
+        ;HG mit Wkz vertikal gesenkt in Fahrgasse
+        giMagState=31 iActFlog=51 giActLaneX=1 giActLaneZ=0
+        ;
+      ENDIF
+      ;
+      GOTOF _MOVEDST
+    ENDIF
+  ENDIF
+
+  IF (giMagState==31)AND((iActFlog>1)AND(iActFlog<=5))
+    ;
+    ;HG vertikal bei Umsetzauftrag in Startgasse zurueckfahren bis zu erster gemeinsamen Fahrgasse
+    ;
+    IF (NOT gbHGNoTapeCl)
+      M=QU(MQ_TlTapeCleanOn)
+    ENDIF
+    ;
+    iTmpFLog=(iDstFLog MOD 100)
+    GOTOF "_TRANS"<<iActFlog
+    ;
+    ;=======
+    _TRANS5:
+    ;=======
+    IF (iTmpFLog==5) AND (iSrcG2X==iDstG2X) AND (iSrcG2Z==iDstG2Z) AND (iSrcG1X==iDstG1X) AND (iSrcG1Z==iDstG1Z)
+      iActFlog=55
+      GOTOF _MOVEDST
+    ENDIF
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG2Z]
+    STOPRE
+    iActFlog=4 giActLaneX=0 giActLaneZ=iSrcG2Z rActPosZ=grLaneZ[iSrcG2Z]
+
+    ;=======
+    _TRANS4:
+    ;=======
+    IF (iTmpFLog>=4) AND (iSrcG2Z==iDstG2Z) AND (iSrcG1X==iDstG1X) AND (iSrcG1Z==iDstG1Z)
+      iActFlog=54
+      GOTOF _MOVEDST
+    ENDIF
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iSrcG1X]
+    STOPRE
+    iActFlog=3 giActLaneX=iSrcG1X giActLaneZ=0 rActPosX=grLaneX[iSrcG1X]
+
+    ;=======
+    _TRANS3:
+    ;=======
+    IF (iTmpFLog>=3) AND (iSrcG1X==iDstG1X) AND (iSrcG1Z==iDstG1Z)
+      iActFlog=53
+      GOTOF _MOVEDST
+    ENDIF
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG1Z]
+    STOPRE
+    iActFlog=2 giActLaneX=0 giActLaneZ=iSrcG1Z rActPosZ=grLaneZ[iSrcG1Z]
+
+    ;=======
+    _TRANS2:
+    ;=======
+    IF (iTmpFLog>=2) AND (iSrcG1Z==iDstG1Z)
+      iActFlog=52
+      GOTOF _MOVEDST
+    ENDIF
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+    STOPRE
+    iActFlog=1 giActLaneX=1 giActLaneZ=0 rActPosX=grLaneX[1]
+    ;
+  ENDIF
+
+  ;========
+  _MOVEDST:
+  ;========
+  ;
+  IF (iActFlog>50)
+    iActFlog=iActFlog-50
+  ENDIF
+  ;
+  IF ((giMagState==31)OR(giMagState==34))AND(iActFlog>0)AND(iActFlog<=5)
+    ;
+    ;HG horizontal oder vertikal in Fahrgasse bzgl. Zielplatz
+    ;
+    ;Ist die Kassette vorhanden und der Platz frei?
+    ChkSwitch(1,iMagNo,iPotNo, 1,iChkRes)
+    IF (iChkRes<>0)AND(iChkRes<>1)
+      IF (iChkRes<0)
+        ;
+        IF (iChkRes==-1)
+          ;Kassette nicht vorhanden
+          iAlarmNo=AL_CassIsMissing sAlarmParam=<<iMagNo
+          GOTOF HandleAlarm
+        ELSE
+          ;Kassette ist gesperrt
+          iAlarmNo=AL_CassIsLocked sAlarmParam=<<iMagNo
+          GOTOF HandleAlarm
+        ENDIF
+      ELSE
+        ;Platz belegt
+        iAlarmNo=AL_TlPlaceNotEmpty sAlarmParam=<<iMagNo<<"/"<<iPotNo
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+    ;
+    IF (NOT gbHGNoTapeCl)
+      M=QU(MQ_TlTapeCleanOn)
+    ENDIF
+    ;
+    iTmpFLog=(iDstFLog MOD 100)
+    ;
+    IF (NOT mcbDBB_HGLowered)OR(NOT mcbDBB_HGVertical)
+      ;
+      IF (iActFlog==iTmpFLog)
+        rTmpPosZ=rDstPosZ
+      ELSE
+        ;
+        IF (iActFlog>=3)
+          rTmpPosZ=grLaneZ[iDstG2Z]
+        ELSE
+          rTmpPosZ=grLaneZ[iDstG1Z]
+        ENDIF
+      ENDIF
+      ;
+      ID=SyncID_MovTool WHEN (TRUE) DO M_HgVertical0
+      ;
+      giMagState=0
+      ;
+      IF (rTmpPosZ>grHgMaxSwingPosZ)AND(NOT (mcbDBB_HGLowered)AND(mcbDBB_HGVertical))
+        IPOBRKA(mcAxZ1,100)
+        ADISPOSA(mcAxZ1,0)
+        WHENEVER (NOT (mcbDBB_HGLowered)AND(mcbDBB_HGVertical)) DO RDISABLE
+        FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grHgMaxSwingPosZ-rc2x0mm
+      ENDIF
+      ;
+      WHENEVER (NOT (mcbDBB_HGLowered)AND(mcbDBB_HGVertical)) DO RDISABLE
+      COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=rTmpPosZ
+      rActPosZ=rTmpPosZ
+      CANCEL(SyncID_MovTool)
+      ;
+      IF (NOT (mcbDBB_HGLowered)AND(mcbDBB_HGVertical))
+        M_HgVertical1
+      ENDIF
+      ;
+      STOPRE
+      ;HG mit Wkz vertikal gesenkt in Fahrgasse
+      giMagState=31
+      ;
+    ENDIF
+    ;
+    IF (iActFlog<iTmpFLog)
+      ;
+      ;in Zielgasse fahren
+      ;
+      STOPRE
+      ;HG vertikal gesenkt auf Fahrgasse
+      giMagState=31
+      ;
+      GOTOF "_DEST"<<iActFlog
+      ;
+      ;======
+      _DEST1:
+      ;======
+      COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iDstG1Z]
+      STOPRE
+      iActFlog=2 giActLaneX=0 giActLaneZ=iDstG1Z rActPosZ=grLaneZ[iDstG1Z]
+      IF (iActFLog==iTmpFLog) GOTOF _MOVEPOT
+
+      ;======
+      _DEST2:
+      ;======
+      COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iDstG1X]
+      STOPRE
+      iActFlog=3 giActLaneX=iDstG1X giActLaneZ=0 rActPosX=grLaneX[iDstG1X]
+      IF (iActFLog==iTmpFLog) GOTOF _MOVEPOT
+
+      ;======
+      _DEST3:
+      ;======
+      COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iDstG2Z]
+      STOPRE
+      iActFlog=4 giActLaneX=0 giActLaneZ=iDstG2Z rActPosZ=grLaneZ[iDstG2Z]
+      IF (iActFLog==iTmpFLog) GOTOF _MOVEPOT
+
+      ;======
+      _DEST4:
+      ;======
+      COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iDstG2X]
+      STOPRE
+      iActFlog=5 giActLaneX=iDstG2X giActLaneZ=0 rActPosX=grLaneX[iDstG2X]
+      IF (iActFLog==iTmpFLog) GOTOF _MOVEPOT
+      ;
+    ENDIF
+    ;
+    ;HG vertikal gesenkt auf Zielfahrgasse
+    ;
+  ENDIF
+
+  ;========
+  _MOVEPOT:
+  ;========
+  ;
+  IF (giMagState==92)OR(giMagState==93)OR((iActFlog==iTmpFLog)AND(iActFlog>0))
+    ;
+    ;HG geklemmt vertikal gesenkt
+    ;
+    IF ((iTmpFLog MOD 2)==1)
+      ;
+      ;Werkzeugplatz in X-Richtung
+      COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=rDstPosZ
+      ;
+      STOPRE
+      ;HG geklemmt vertikal gesenkt zwischen Zielmagazinplatz und Fahrgasse
+      giMagState=93
+      ;
+      FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=rDstPosX M=QU(MQ_TlTapeCleanOff)
+    ELSE
+      ;
+      ;Werkzeugplatz in Z-Richtung
+      COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=rDstPosX M=QU(MQ_TlTapeCleanOff)
+      ;
+      STOPRE
+      ;HG geklemmt vertikal gesenkt zwischen Zielmagazinplatz und Fahrgasse
+      giMagState=93
+      ;
+      FINEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=rDstPosZ M=QU(MQ_TlTapeCleanOff)
+    ENDIF
+    ;
+    STOPRE
+    ;HG geklemmt vertikal gesenkt an Zielmagazinplatz
+    giMagState=92 giActLaneX=0 giActLaneZ=0 rActPosX=rDstPosX rActPosZ=rDstPosZ
+    ;
+    ; Werkzeug ablegen
+    GOTOF _DropTool
+  ENDIF
+ENDIF
+
+IF (bToBrk)
+  ;
+  ;Ziel ist die Bohrerbruchkontrolle
+  ;---------------------------------
+  ;
+  IF (giMagState==31)
+    ;
+    ;HG vertikal gesenkt in Fahrgasse
+    ;
+    IF (NOT gbHGNoTapeCl)
+      M=QU(MQ_TlTapeCleanOn)
+    ENDIF
+    GOTOF "_START"<<iActFlog
+    ;
+    ;=======
+    _START5:
+    ;=======
+    IF (gbMovTlHor)AND(NOT gbHGBigTl)AND(iSrcFLog>200) GOTOF _HORIZ
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG2Z]
+    STOPRE
+    giActLaneX=0 giActLaneZ=iSrcG2Z rActPosZ=grLaneZ[iSrcG2Z]
+
+    ;=======
+    _START4:
+    ;=======
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[iSrcG1X]
+    STOPRE
+    giActLaneX=iSrcG1X giActLaneZ=0 rActPosX=grLaneX[iSrcG1X]
+
+    ;=======
+    _START3:
+    ;=======
+    IF (gbMovTlHor)AND(NOT gbHGBigTl)AND(iSrcFLog>100) GOTOF _HORIZ
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[iSrcG1Z]
+    STOPRE
+    giActLaneX=0 giActLaneZ=iSrcG1Z rActPosZ=grLaneZ[iSrcG1Z]
+
+    ;=======
+    _START2:
+    ;=======
+
+    ;=======
+    _START1:
+    ;=======
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+    STOPRE
+    giActLaneX=1 giActLaneZ=0 rActPosX=grLaneX[1]
+
+    ;=======
+    _HORIZ:
+    ;=======
+    ;
+    IF (NOT gbMagWithFixedGuide)
+      ;
+      ; VSHLT X1 solange HG nicht gehoben und horizontal
+      ID=SyncID_MovTool WHENEVER (NOT ((mcbDBB_HGLifted)AND(mcbDBB_HGHorizontal))) DO $AA_OVR[mcAxX1]=0
+      ;
+      IF (rActPosZ>grHgMaxSwingPosZ)
+        ;
+        ID=SyncID_MovTool+1 WHEN ($AA_IM[mcAxZ1]<=grHgMaxSwingPosZ)AND(NOT ((mcbDBB_HGLifted)AND(mcbDBB_HGHorizontal))) DO M_HgHorizontal0
+        ;
+        IPOBRKA(mcAxZ1,100)
+        ADISPOSA(mcAxZ1,0)
+        WHENEVER (NOT ((mcbDBB_HGLifted)AND(mcbDBB_HGHorizontal))) DO RDISABLE
+        FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grHgMaxSwingPosZ-rc2x0mm
+      ELSE
+        ;
+        M_HgHorizontal0
+      ENDIF
+      ;
+      STOPRE
+      ;HG mit Wkz horizontal gehoben in Fahrgasse
+      giMagState=32
+      ;
+    ENDIF
+  ENDIF
+
+  IF (NOT gbMagWithFixedGuide)
+    ;
+    IF (giMagState==12)OR(giMagState==21)OR(giMagState==32)OR(giMagState==33)
+      ;
+      ;HG horizontal in Magazin oder Doppelgreifer Z1 faehrt in Fenster WZW, X1 wird in Position Bruchkontrolle oder Gasse 1 gefahren
+      ;
+      giMagState=0 giActLaneX=0 giActLaneZ=0
+      ;
+      IF (grToBreakPosX>=grLaneX[1])
+        ;
+        COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grToBreakPosX POS[mcAxZ1]=grHgTcPosZ
+        ;
+        STOPRE
+        ;HG mit Werkzeug geklemmt horizontal in Position fuer Bohrerbruchkontrolle
+        giMagState=22 giActLaneX=0 rActPosX=grToBreakPosX rActPosZ=grHgTcPosZ
+        ;
+      ELSE
+        ;
+        COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grHgTcPosZ
+        ;
+        STOPRE
+        ;HG mit Werkzeug geklemmt horizontal in Position fuer Bohrerbruchkontrolle
+        giMagState=22 giActLaneX=1 rActPosX=grLaneX[1] rActPosZ=grHgTcPosZ
+        ;
+      ENDIF
+      ;
+      CANCEL(SyncID_MovTool,SyncID_MovTool+1,SyncID_MovTool+2)
+      ;
+      GOTOF _END
+    ENDIF
+    ;
+    ;HG bereits in Position Bohrerbruchkontrolle
+    IF (giMagState==22) GOTOF _END
+    ;
+  ELSE
+    ;
+    IF (giMagState==32)OR((giMagState==31)AND(giActLaneX==1))
+      ;
+      ;HG horizontal oder vertikal in Fahrgasse X 1
+      ;
+      IF (rActPosZ<(grToBreakPosZ+grHgMaxSwingRad))
+        ;
+        ;sichere Schwenkposition
+        COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=(grToBreakPosZ+grHgMaxSwingRad)
+        ;
+      ENDIF
+      M_HgHorizontal0
+      ;
+      STOPRE
+      ;Wz ist in Position Bohrerbruchkontrolle
+      giMagState=22
+      ;
+      GOTOF _END
+    ENDIF
+    ;
+    IF (giMagState==12)OR(giMagState==21)OR(giMagState==22)
+      ;
+      ;HG horizontal in Fahrgasse X1
+      ;
+      ;Wz ist in Position Bohrerbruchkontrolle
+      giMagState=22
+      ;
+      GOTOF _END
+    ENDIF
+  ENDIF
+ENDIF
+
+iAlarmNo=AL_WayNotSpecified
+GOTOF HandleAlarm
+
+;-----------------------------
+;Werkzeug in Cassette ablegen
+;-----------------------------
+
+;=========
+_DropTool:
+;=========
+;
+IF (bWithChip)AND(giWaitRWChip>0)
+  ;
+  ;Warten auf Balluff
+  ;
+  RWChip(giWaitRWChip,iTNo,1,iAlarmNo,sAlarmParam,iTNoChip)
+ENDIF
+;
+;Kegelreiniger AUS
+M=QU(MQ_TlTapeCleanOff)
+;
+;Sonderfall: Pseudoplatz Schreib-/Lesestation -> kein Ablegen/HG loesen etc.
+IF (iPotNo==999) GOTOF _END
+
+;HG loesen
+M_HgUnclamp1
+;
+STOPRE
+grSyncPickUpDrop=ITOR(iTNo*100000)+iMagNo*1000+iPotNo
+;
+;
+IF (giMagState==82) ;82 = HG geklemmt vertikal gesenkt an Quellmagazinplatz
+  giMagState=81     ;81 = HG geloest vertikal gesenkt an Quellmagazinplatz
+ENDIF
+;
+IF (giMagState==92) ;92 = HG geklemmt vertikal gesenkt an Zielmagazinplatz
+  giMagState=91     ;91 = HG geloest vertikal gesenkt an Zielmagazinplatz
+ENDIF
+
+IF (rActPosZ<grLaneZ[1])
+  ;
+  ;HG ueber Schublade -> HG Heben und Warten
+  M_HgLift1
+  ;
+  STOPRE
+  ;Leeres HG vertikal gehoben
+  giMagState=30
+  ;
+  ;Z Achse Freifahren
+  COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1]
+ELSE
+  ;
+  IF (NOT bFast)OR(IN_ReqStopAtCycleEnd)OR(giStepTeststop>=3)
+    ;
+    ;HG ueber Schublade -> HG Heben und Warten
+    M_HgLift1
+    ;
+    STOPRE
+    ;Leeres HG vertikal gehoben
+    giMagState=30
+    ;
+  ELSE
+    ;
+    ;HG ueber Wz-Platz -> Anheben starten
+    M_HgLift0
+  ENDIF
+ENDIF
+
+;====
+_END:
+;====
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

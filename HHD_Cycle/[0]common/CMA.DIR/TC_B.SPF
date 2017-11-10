@@ -1,0 +1,33 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TC_B.SPF
+;# Task:      Call of TC_BS.SPF
+;#            (Compatibility)
+;# Version:   V06.00.02
+;# Date:      25.01.2016  /  Simons
+;# Control:   840DSL Operate/Advanced
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; Verlauf:
+; --------
+;
+; V06.00.02 - 25.01.2016 / Simons
+; - sToolName auf 64 Zeichen erweitert
+;
+; V06.00.00 - 24.08.2015 / Simons
+; - Kommentare angepasst
+; - SAVE entfernt (ist im TC_BS)
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Zyklen zusammengefasst und neue
+;   Versionierung
+; ------------------------------------
+
+PROC TC_B(STRING[64] sToolName, REAL rPosB) DISPLOF SBLOF
+
+TC_BS(mcTaskPrep, sToolName, 0, "B", rPosB)
+
+RET
+

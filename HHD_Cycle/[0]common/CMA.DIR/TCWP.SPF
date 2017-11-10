@@ -1,0 +1,1832 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TCWP.SPF
+;# Task:      Move to Work Piece
+;# Version:   V06.00.07
+;# Date:      09.09.2017 / Simons
+;# Control:   840DSL Operate/Advanced
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 09.09.2017 / Simons
+; - SyncID_TC+9..12 werden erst durch Reset gecancelt,
+;   damit die Ueberwachungen erhalten bleiben
+;
+; V06.00.07 - 27.08.2017 / Simons
+; - Anwahlen Kuehlmittelfunktionen und SpDrehrichtung aus WzDaten aktivieren hinzu
+;
+; V06.00.07 - 06.08.2017 / Simons
+; - Laufzeitoptimierung
+;
+; V06.00.07 - 13.06.2017 / Simons
+; - Neuversionierung
+; - TOOL_BREAK_REACTION hinzu (245.0)
+; - WORKSTEP ohne Argument + numerischer WzName -> WORKSTEP=WzName
+; - Einschraenkung bei Variablennamen
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 31.03.2017 / Simons
+; - giPrepSTNo hinzu
+;
+; V06.00.05 - 16.02.2017 / Simons
+; - SYG_IM[mcSYG_ErrIncCha1] eingefuehrt
+; - ($AA_STAT[...]==4) -> ($AA_TYPE[...]<=2)
+;
+; V06.00.05 - 31.01.2017 / Simons
+; - bAxYInPos hinzu
+;
+; V06.00.05 - 19.01.2017 / Simons
+; - GndSt bMove
+;
+; V06.00.05 - 25.11.2016 / Simons
+; - Neuversionierung
+; - "OVRZ + IPO" bei rOVR<>100
+;
+; V06.00.04 - 26.08.2016 / Simons
+; - Neuversionierung
+; - bProgCallActive
+; - Scheibe Zurueck verzoegert
+; - Miksch hinzu
+; - OVRZ <= 100%
+;
+; V06.00.03 - 22.06.2016 / Simons
+; - CFC... Hinzu
+; - Verrechnung D..
+; - SynAct - Stop Y fuer einen IPO
+; - Abfrage SpWz gespannt nur wenn
+;   erforderlich
+; - Optimierung Prepare angepasst
+; - Satzsuchlauf/Simulation geaendert
+; - Getriebestufe auch bei Motorspindel
+; - Warten auf BBK im Kanal 2
+; - Einfuehrung TM HHD
+; - Kuemi Anwahl, Vorwahl Sp Drehrichtung
+;   bei Verlassen des Magazins
+; - Absolute Wz Bereitstellung
+; - Fehlerueberwaching mit SYG_IM[iSYG+3]
+; - WorkStep geaendert
+; - sCode case sensitive
+;
+; V06.00.01 - 24.08.2015 / Simons
+; - FM:AL_InvalidMissingInput hinzu
+; - G70/71/700/710, G94 hinzu
+; - Beruecksichtigung Spannzustand Sp
+; - Warten auf ZB Achse
+; - ZIM hinzu
+; - Einzelsatz AUS, im IPO Bereich
+;   wieder EIN
+;
+; V06.00.00 - 11.06.2015 / Simons
+; - Prototype
+; -----------------------------------
+
+; Beschreibung:
+; -------------
+; Moegliche Codes im Commandstring (case sensitive):
+;
+; [Achspositionierung  - X,Y]
+; [        optional    - Z, B, B=DC(..), B=ACP(..), B=ACN(..)]
+; [        optional    - XP - Startpunkt Einfaedeln mit IPO XYZB]
+; [Spindel             - M3, M4, M5, S, SPOS]
+; [warten auf Spindeldrehzahl erreicht - WAITS, M48]
+; [Genauhalt           - G601,G602,G603]
+; [Verschleifen        - G64,G641-G645]
+; [Massystem           - G70/G71, G700/G710]
+; [Vorschubtyp         - G93-G97,G931,G942,G952,G961/2,G971/2/3]
+; [Kuehlmittel         - M7, M8, M9, M27, M54, H70=]
+; [B-Achsklemmung      - M11, M10, M18]
+; [NPV                 - Aktivieren von Frames G500 oder G54-599]
+; [                    - SUPA,G53,G153 - Der beim Aufruf aktive ]
+; [                      Frame wird bei UP Ende wieder aktiviert]
+; [WORKSTEP            - Bearbeitungsfortschritt]
+; [T=Naechstes Wz      - Wz Vorgbereitung anstossen
+; [Sonstiges           - G0,G17,G90]
+;
+; Vorwahl fuer Kundenprogramm:
+; [Fraeserradiuskorrektur - G40,41,42]
+; [VorschubBeeinflussung  - CFC, CFIN, CFTCP]
+;
+; Interpolierend:
+; [MOVE_IPO               - X,Y,[Z,B] - Achse]
+; [MOVE_B_XYZ_IPO         - Erst B - dann interpolierend X,Y,[Z]-Achse]
+; [MOVE_XB_XYZ_IPO        - Erst B und X in Vorposition - dann interpolierend X,Y,[Z]-Achse auf Position]
+; Beim Anfahren an die Kontur
+; [Fraeserradiuskorrektur - G40,41,42]
+; [VorschubBeeinflussung  - CFC, CFIN, CFTCP]
+;
+; Nicht Interpolierend:
+; [OVRZ                - Override Z beim Zustellen (1% -> 100%)]
+; [MOVE_XY(B)_Z        - Erst X,Y,(B) - dann Z-Achse]
+; [MOVE_B_XYZ          - Erst B - dann X,Y,[Z]-Achse]
+; [WIN_B               - Freigabefenster B-Achse]
+;
+; Default:
+; G0, G17, G60, G601, G90, G94, G40, M9, SPOS=DC(), B=DC()
+;
+; Belegung SYG im Kanal 1:
+; ------------------------
+;
+; SYG_BM[iSYG + ..]
+; -----------------
+; 5 - Spindelfreigabe
+;
+; SYG_IM[iSYG + ..]
+; -----------------
+; 0 - Schrittzaehler allgemein
+;     0          = GndSt
+;     icLastStep = letzter Schritt
+; 5 - Laufkontrolle X
+; 9 - Workstep Prepare Optimierung
+;
+; Belegung SYG_RM[iSYG + ..]
+; ---------------------------
+; 19 - Startzeit Prepare Optimierung Lernen
+
+PROC TCWP(STRING[255] sCode, REAL rPosX, REAL rPosY, REAL rPosZ, REAL rPosB, REAL rSpeed) DISPLOF
+
+DEF STRING[64] sCycName="TCWP V06.00.07", sAux
+DEF STRING[255] sArg
+;
+DEF STRING[32] scPunkte="...", scNk1Format="%7.1F", sModeB="DC", sAlarmParam="", sFrameXYZ="", sMoveZ="", sMoveXY="", sG4x="", sG6xx="", sG9xx="", sFeed="", sAdis="", sG7xx="", sCFxx="", sCFAct="", sPrepare="", sTName=""
+DEF STRING[32] sFrame, sMoveB, sPosMode, sSTNo, sSepSign, sWaitAxes, sOption, sTmp
+;
+DEF BOOL bM3=FALSE, bM4=FALSE, bCoolM1=FALSE, bCoolM2=FALSE, bNoIPO=TRUE, bM4x=FALSE, bIsSPOS=FALSE, bWaitS=FALSE, bMoveXYB_Z=FALSE, bMoveB_XYZ=FALSE, bMoveXB_XYZ=FALSE, bMoveX_XYZB=FALSE, bMove=FALSE, bFndWinB=FALSE, bFndXP=FALSE
+DEF BOOL bDGIsWM307, bDGIsWM286, bDGIsMTC, bMagIsPickUpDisk, bMagIsChain, bDGIsNCAxis, bRelMoveUnClmp, bRetractDisk, bSpRelX, bSpRelDG, bRelSpByX, bRelCool, bRelSpDir
+DEF BOOL bArgIsString, bSearchSim, bProgCallActive, bAPCInPos, bFndHCool, bFndGG8, bFndX, bFndY, bFndZ, bFndS, bBAxis, bBAxUnclamped, bAxXInPos, bAxYInPos, bAxZInPos, bAxBInPos, bSepArg, bTmp1, bTmp2, bEnabled
+;
+DEF INT icLastStep=7, iGG8No=-1, iDNo=-1, iWorkStep=-1, iSelGearStep=-1, iReqSPOSState=4, icSpiNo=0, iAlarmNo=0, iClpB=0, iGG7=0, iGG8=0, iGG9=0, iGG10=0, iGG12=0, iGG13=0, iGG15=0, iMSpindle=0, iMCool=0, iMCool1=0, iHCool=0, iRelZIm=0, iCount=0
+DEF INT iTmp, iSep, iSYG, iErrTime, iCodeLastPos, iCmdNo, iErrCount, iNo, iActGearStep, iTNoSp, iSTNo, iPos, iActPosAPC, iSpResult, iSpMask, iSep1
+;
+DEF REAL rcErrTimeDefault=5, rcMinFeed=10, rcMaxPosWinB=22.5, rOVR=100, rSPOSVal=0, rPosXP=0, rHCool=0, rWaitSVal=0
+DEF REAL rNo, rTmp, rc0x2mm, rWaitShort, rPosBM, rActPosB, rBPosMin1, rBPosMin2, rBPosMax1, rBPosMax2, rPosWinB, rSPOSMin1, rSPOSMin2, rSPOSMax1, rSPOSMax2, rStopLimit, rPrePosX, rRelSpExitX, rTcRelCoolX, rMaxVeloX, rMaxAccelX, rMaxJerkX
+
+;-0.0--Einzelsatz-
+; Fuer Decoder aus
+;-----------------
+SBLOF
+
+;-1.0--Pruefung-
+;---------------
+iCodeLastPos=STRLEN(sCode)-1
+IF (iCodeLastPos==-1)
+  ;kein Codestring angegeben
+  iAlarmNo=AL_InvalidMissingInput
+  GOTOF HandleAlarm
+ENDIF
+
+;-2.0--GndSt-
+;------------
+;
+bFndX=$P_SUBPAR[2] bFndY=$P_SUBPAR[3] bFndZ=$P_SUBPAR[4] bBAxis=$P_SUBPAR[5] bFndS=$P_SUBPAR[6] iSYG=mcSYG_TC iErrTime=RTOI(rcErrTimeDefault/$MN_IPO_CYCLE_TIME) rWaitShort=2*$MN_IPO_CYCLE_TIME rPosWinB=$MA_STOP_LIMIT_COARSE[mcAxB] rStopLimit=$MA_STOP_LIMIT_FINE[S1] rc0x2mm=(0.2*grInchMetr) rMaxVeloX=$MA_MAX_AX_VELO[mcAxX]/60 rMaxAccelX=$MA_MAX_AX_ACCEL[mcAxX]*1000 rMaxJerkX=grTcJerkX*1000
+
+;-3.0--Konfiguration----
+; Aktuelle Konfiguration
+;-----------------------
+bDGIsMTC=((giDGType B_AND 1)<>0) bDGIsWM286=((giDGType B_AND 2)<>0) bDGIsWM307=((giDGType B_AND 4)<>0) bDGIsNCAxis=((bDGIsWM286)OR(bDGIsWM307)) bMagIsPickUpDisk =((giMagType B_AND 'B1')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bSpRelDG=((bDGIsWM286)OR(bDGIsWM307))
+bSpRelX=(NOT bSpRelDG) bRelSpByX=((giTCMask B_AND 'H400')<>0) bRelMoveUnClmp=((giTCMask B_AND 'H10')<>0) bRelCool=((giTCMask B_AND 'H4000')<>0) bRelSpDir=((giTCMask B_AND 'H8000')<>0)
+;
+;-4.0--Vorposition X-
+;--------------------
+IF (bDGIsWM286)
+  rPrePosX=(grTcPosX-grToMaxRad) rRelSpExitX=rPrePosX
+ELSE
+  rPrePosX=grTCPrePosX rRelSpExitX=rPrePosX
+ENDIF
+
+;-5.0--X Achse-----
+; Warten X bis
+; Spindel gerichtet
+;------------------
+IF (bRelSpByX)
+  rRelSpExitX=grTCPosX-grTCRelSpDist
+  IF (rRelSpExitX>=grTCPosX)OR(rRelSpExitX<rPreposX)
+    rRelSpExitX=rPrePosX
+  ENDIF
+ENDIF
+;
+;-5.1--X Achse----
+; Freigabeposition
+; Kuehlmittel Ein
+;-----------------
+;Abbremsrampe bei Vmax
+IF (rMaxVeloX<(rMaxAccelX*rMaxAccelX/rMaxJerkX))
+  rTmp=rMaxVeloX*SQRT(rMaxVeloX/rMaxJerkX)
+ELSE
+  rTmp=0.5*rMaxVeloX*(rMaxVeloX/rMaxAccelX+rMaxAccelX/rMaxJerkX)
+ENDIF
+rTcRelCoolX=grTcPrePosX+MINVAL(MINVAL(0.5*(grTcPosX-grTcPrePosX),rTmp),grTCCoolOn)
+
+;-10.0--CMD-
+;-----------
+;
+WHILE (iCount<=iCodeLastPos)
+
+  iPos=iCount iCmdNo=0 rNo=0 bArgIsString=FALSE sAux=SUBSTR(sCode,iCount,1)
+
+  IF sAux==" "
+    iCount=iCount+1
+    GOTOF NextCodeCheck
+  ENDIF
+
+  IF (sAux[0]<65)OR(sAux[0]>90) GOTOF Error
+  GOTOF "_Cx"<<sAux
+
+  ;====
+  _CxA:
+  ;====
+  IF (iCodeLastPos>=iCount+6)
+    IF (SUBSTR(sCode,iCount,7)=="ADISPOS")
+      iCmdNo=17 iCount=iCount+6
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxB:
+  ;====
+  iCmdNo=5
+  IF (SUBSTR(sCode,iCount+1,1)=="=")
+    iCount=iCount+1 sTmp=SUBSTR(sCode,iCount,4)
+    IF (iCodeLastPos>=iCount+3)
+      IF sTmp=="=DC("
+        iCount=iCount+3
+        GOTOF NextCode
+      ENDIF
+      IF sTmp=="=IC("
+        sModeB="IC" iCount=iCount+3
+        GOTOF NextCode
+      ENDIF
+      IF sTmp=="=AC("
+        sModeB="AC" iCount=iCount+3
+        GOTOF NextCode
+      ENDIF
+    ENDIF
+    IF (iCodeLastPos>=iCount+4)
+      sTmp=SUBSTR(sCode,iCount,5)
+      IF sTmp=="=ACP("
+        sModeB="ACP" iCount=iCount+4
+        GOTOF NextCode
+      ENDIF
+      IF sTmp=="=ACN("
+        sModeB="ACN" iCount=iCount+4
+        GOTOF NextCode
+      ENDIF
+    ENDIF
+    iCount=iCount-1
+  ENDIF
+  GOTOF NextCode
+
+  ;====
+  _CxC:
+  ;====
+  IF (iCodeLastPos>=iCount+2)
+    IF SUBSTR(sCode,iCount,3)=="CFC"
+      iCmdNo=20 sCFAct=" CFC" iCount=iCount+2
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  IF (iCodeLastPos>=iCount+3)
+    IF SUBSTR(sCode,iCount,4)=="CFIN"
+      iCmdNo=20 sCFAct=" CFIN" iCount=iCount+3
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  IF (iCodeLastPos>=iCount+4)
+    IF SUBSTR(sCode,iCount,5)=="CFTCP"
+      iCmdNo=20 sCFAct=" CFTCP" iCount=iCount+4
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxD:
+  ;====
+  iCmdNo=3
+  GOTOF NextCode
+
+  ;====
+  _CxF:
+  ;====
+  iCmdNo=12
+  GOTOF NextCode
+
+  ;====
+  _CxG:
+  ;====
+  iCmdNo=2
+  GOTOF NextCode
+
+  ;====
+  _CxH:
+  ;====
+  IF (iCodeLastPos>=iCount+3)
+    IF SUBSTR(sCode,iCount,4)=="H70="
+      iCmdNo=19 iCount=iCount+3
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxM:
+  ;====
+  IF (iCodeLastPos>=iCount+4)
+    IF SUBSTR(sCode,iCount,5)=="MOVE_"
+      IF (bMove)
+        iAlarmNo=Al_CombNotAllowed sAlarmParam="MOVE_xxx + MOVE_yyy"
+        GOTOF HandleAlarm
+      ENDIF
+      bMove=TRUE iCount=iCount+5
+      IF (iCodeLastPos>=iCount+2)
+        IF SUBSTR(sCode,iCount,3)=="IPO"
+          bNoIPO=FALSE iCount=iCount+2
+          GOTOF NextCode
+        ENDIF
+      ENDIF
+      IF (iCodeLastPos>=iCount+3)
+        IF SUBSTR(sCode,iCount,4)=="XY_Z"
+          bMoveXYB_Z=TRUE iCount=iCount+3
+          GOTOF NextCode
+        ENDIF
+      ENDIF
+      IF (iCodeLastPos>=iCount+8)
+        IF SUBSTR(sCode,iCount,9)=="B_XYZ_IPO"
+          bNoIPO=FALSE bMoveB_XYZ=TRUE iCount=iCount+8
+          GOTOF NextCode
+        ENDIF
+      ENDIF
+      IF (iCodeLastPos>=iCount+4)
+        sTmp=SUBSTR(sCode,iCount,5)
+        IF sTmp=="B_XYZ"
+          bMoveB_XYZ=TRUE iCount=iCount+4
+          GOTOF NextCode
+        ENDIF
+        IF sTmp=="XYB_Z"
+          bMoveXYB_Z=TRUE iCount=iCount+4
+          GOTOF NextCode
+        ENDIF
+      ENDIF
+      IF (iCodeLastPos>=iCount+9)
+        sTmp=SUBSTR(sCode,iCount,10)
+        IF sTmp=="XB_XYZ_IPO"
+          bNoIPO=FALSE bMoveXB_XYZ=TRUE iCount=iCount+9
+          GOTOF NextCode
+        ENDIF
+        IF sTmp=="X_XYZB_IPO"
+          bNoIPO=FALSE bMoveX_XYZB=TRUE iCount=iCount+9
+          GOTOF NextCode
+        ENDIF
+      ENDIF
+      ;
+      iAlarmNo=Al_SyntaxError sAlarmParam="MOVE_"<< SUBSTR(sCode,iCount,10)
+      GOTOF HandleAlarm
+    ENDIF
+  ENDIF
+  iCmdNo=1
+  GOTOF NextCode
+
+  ;====
+  _CxO:
+  ;====
+  IF (iCodeLastPos>=iCount+3)
+    IF SUBSTR(sCode,iCount,4)=="OVRZ"
+      iCmdNo=9 iCount=iCount+3
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxS:
+  ;====
+  IF (iCodeLastPos>=iCount+3)
+    sTmp=SUBSTR(sCode,iCount,4)
+    IF sTmp=="SPOS"
+      iCmdNo=14 iCount=iCount+3
+      GOTOF NextCode
+    ENDIF
+    IF sTmp=="SUPA"
+      IF (iGG9>0)
+        iAlarmNo=Al_NotAvailable
+        IF (iGG9==999)
+          sAlarmParam="2 * SUPA"
+        ELSE
+          sAlarmParam="G"<<iGG9<<" + SUPA"
+        ENDIF
+        GOTOF HandleAlarm
+      ENDIF
+      iCount=iCount+3 iGG9=999 sFrameXYZ=sFrameXYZ<<" SUPA"
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  iCmdNo=4
+  GOTOF NextCode
+
+  ;====
+  _CxT:
+  ;====
+  iCmdNo=40 bArgIsString=TRUE
+  GOTOF NextCode
+
+  ;====
+  _CxW:
+  ;====
+  IF (iCodeLastPos>=iCount+7)
+    IF SUBSTR(sCode,iCount,8)=="WORKSTEP"
+      iCount=iCount+7 iTmp=iCount bTmp1=FALSE bTmp2=FALSE
+      ;
+      WHILE (iCodeLastPos>iTmp)AND(NOT bTmp1)
+        iTmp=(iTmp+1) bTmp1=(SUBSTR(sCode,iTmp,1)<>" ") bTmp2=(SUBSTR(sCode,iTmp,1)=="=")
+      ENDWHILE
+      ;
+      IF ((bTmp1)AND(NOT bTmp2))OR(iCount==iCodeLastPos)
+        IF (giTNoSp>0)
+          sTName=$TC_TP2[giTNoSp]
+        ENDIF
+        IF (ISNUMBER(sTName))
+          iWorkStep=NUMBER(sTName)
+          GOTOF NextCode
+        ELSE
+          iAlarmNo=Al_CombNotAllowed sAlarmParam="WORKSTEP="<<sTName
+          GOTOF HandleAlarm
+        ENDIF
+      ENDIF
+      iCmdNo=50
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  IF (iCodeLastPos>=iCount+4)
+    sTmp=SUBSTR(sCode,iCount,5)
+    IF sTmp=="WAITS"
+      iCmdNo=15 iCount=iCount+4
+      GOTOF NextCode
+    ENDIF
+    IF sTmp=="WIN_B"
+      iCmdNo=16 iCount=iCount+4
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  GOTOF Error
+
+  ;====
+  _CxX:
+  ;====
+  IF (iCodeLastPos>=iCount+1)
+    IF SUBSTR(sCode,iCount,2)=="XP"
+      iCmdNo=18 iCount=iCount+1
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  iCmdNo=6
+  GOTOF NextCode
+
+  ;====
+  _CxY:
+  ;====
+  iCmdNo=7
+  GOTOF NextCode
+
+  ;====
+  _CxZ:
+  ;====
+  IF (iCodeLastPos>=iCount+2)
+    IF SUBSTR(sCode,iCount,3)=="ZIM"
+      iRelZIm=1 iCount=iCount+2
+      GOTOF NextCode
+    ENDIF
+  ENDIF
+  iCmdNo=8
+  GOTOF NextCode
+
+  ;===
+  ;A
+  ;B
+  ;C
+  ;D
+  _CxE:
+  ;F
+  ;G
+  ;H
+  _CxI:
+  _CxJ:
+  _CxK:
+  _CxL:
+  ;M
+  _CxN:
+  ;O
+  _CxP:
+  _CxQ:
+  _CxR:
+  ;S
+  ;T
+  _CxU:
+  _CxV:
+  ;W
+  ;X
+  ;Y
+  ;Z
+  ;===
+  GOTOF Error
+
+  ;========
+  NextCode:
+  ;========
+  ;
+  iCount=iCount+1
+  IF (iCount>iCodeLastPos)OR(iCmdNo==0) GOTOF NextCodeCheck
+  ;
+  iPos=iCount iSep1=INDEX(SUBSTR(sCode,iCount)," ")
+  ;
+  IF (iSep1==-1)
+    sArg=SUBSTR(sCode,iCount,iCodeLastPos-iCount+1) iCount=(iCodeLastPos+1)
+  ELSE
+    ;
+    IF (iCount==iCodeLastPos)OR(iSep1==0) GOTOF Error
+    ;
+    sArg=SUBSTR(sCode,iCount,iSep1) iCount=(iCount+iSep1+1)
+  ENDIF
+  ;
+  IF (SUBSTR(sArg,0,1)=="=")
+    ;
+    IF (STRLEN(sArg)<2) GOTOF Error
+    ;
+    sArg=SUBSTR(sArg,1) iTmp=(STRLEN(sArg)-1)
+    ;
+    IF (bArgIsString)
+      ;
+      IF (SUBSTR(sArg,0,1)=="<")AND(SUBSTR(sArg,iTmp,1)==">")
+        IF (iTmp>1)
+          sArg=SUBSTR(sArg,1,iTmp-1)
+        ELSE
+          sArg=""
+        ENDIF
+      ELSE
+        ;
+        IF ISVAR(sArg)
+          IF (STRINGIS(sArg)==211) GOTOF VarError
+          EXECSTRING("sArg=<<"<<sArg)
+        ENDIF
+      ENDIF
+    ELSE
+      ;
+      IF (NOT ISNUMBER(sArg))
+        ;
+        IF (NOT ISVAR(sArg)) GOTOF Error
+        IF (STRINGIS(sArg)==211) GOTOF VarError
+        EXECSTRING("sArg=<<"<<sArg)
+        IF (NOT ISNUMBER(sArg)) GOTOF Error
+      ENDIF
+      rNo=NUMBER(sArg) iNo=RTOI(rNo)
+    ENDIF
+  ELSE
+    ;
+    IF (NOT ISNUMBER(sArg))OR(bArgIsString) GOTOF Error
+    rNo=NUMBER(sArg) iNo=RTOI(rNo)
+  ENDIF
+
+  ;aktuellen CMDCODE abschliessen
+  GOTOF "_Cx"<<iCmdNo
+
+  ;====
+  _Cx1:
+  ;====
+  IF (iNo>=3)AND(iNo<=5)
+    IF (iMSpindle>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="M"<<iMSpindle<<" + M"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iMSpindle=iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==$MCS_M_CODE_COOLANT_1_ON)OR(iNo==$MCS_M_CODE_COOLANT_2_ON)OR(iNo==$MCS_M_CODE_COOLANT_1_AND_2_ON)OR(iNo==$MCS_M_CODE_ALL_COOLANTS_OFF)OR(iNo==50)OR(iNo==54)
+    IF ((iMCool==$MCS_M_CODE_COOLANT_1_ON)AND(iNo==$MCS_M_CODE_COOLANT_2_ON))OR((iMCool==$MCS_M_CODE_COOLANT_2_ON)AND(iNo==$MCS_M_CODE_COOLANT_1_ON))
+      iNo=$MCS_M_CODE_COOLANT_1_AND_2_ON
+    ENDIF
+    IF ((iMCool>0)AND(iNo==$MCS_M_CODE_ALL_COOLANTS_OFF))OR((iMCool==$MCS_M_CODE_ALL_COOLANTS_OFF)OR((iMCool<50)AND(iMCool>0)))AND((iNo==50)OR(iNo==52))
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="M"<<iMCool<<" + M"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    IF ((iMCool1>0)AND(iNo==$MCS_M_CODE_ALL_COOLANTS_OFF))OR(iMCool==$MCS_M_CODE_ALL_COOLANTS_OFF)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="M"<<iMCool1<<" + M"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    IF (iNo==54)
+      iMCool1=iNo
+    ELSE
+      iMCool=iNo
+    ENDIF
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==10)OR(iNo==18)OR(iNo==11)
+    IF (iClpB>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="M"<<iClpB<<" + M"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    IF (iNo==10)
+      iNo=18
+    ENDIF
+    iClpB=iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo>=40)AND(iNo<=42)
+    IF (bM4x)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="M"<<(40+iSelGearStep)<<" + M"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    bM4x=TRUE iSelGearStep=iNo-40
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==48)
+    IF (bWaitS)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="WAITS + M48"
+      GOTOF HandleAlarm
+    ENDIF
+    bWaitS=TRUE rWaitSVal=100-$MA_SPIND_DES_VELO_TOL[S1]
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  iAlarmNo=Al_NoSupport sAlarmParam="M"<<iNo
+  GOTOF HandleAlarm
+
+  ;====
+  _Cx2:
+  ;====
+  bFndGG8=FALSE
+  IF (iNo==153)OR(iNo==53)
+    IF (iGG9>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG9<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    bFndGG8=TRUE iGG9=iNo sFrameXYZ=sFrameXYZ<<" G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo>=54)AND(iNo<=57)
+    bFndGG8=TRUE iGG8No=iNo-54+1
+  ELSE
+    IF (iNo>=501)AND(iNo<=599)
+      bFndGG8=TRUE iGG8No=iNo-501+5
+    ELSE
+      IF (iNo==500)
+        bFndGG8=TRUE iGG8No=0
+      ENDIF
+    ENDIF
+  ENDIF
+  IF (bFndGG8)
+    IF (iGG8>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG8<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iGG8=iNo sFrameXYZ=sFrameXYZ<<" G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==90)OR(iNo==0)OR(iNo==17)
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo>=601)AND(iNo<=603)
+    IF (iGG12>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG12<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iGG12=iNo sG6xx=sG6xx<<" G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==70)OR(iNo==71)OR(iNo==700)OR(iNo==710)
+    IF (iGG13>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG13<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iGG13=iNo sG7xx=" G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==60)OR(iNo==64)OR((iNo>=641)AND(iNo<=645))
+    IF (iGG10>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG10<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iGG10=iNo sG6xx=sG6xx<<" G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo>=40)AND(iNo<=42)
+    IF (iGG7>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG7<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iGG7=iNo sG4x=" G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  IF (iNo==93)OR(iNo==94)OR(iNo==95)OR(iNo==96)OR(iNo==97)OR(iNo==931)OR(iNo==942)OR(iNo==952)OR(iNo==961)OR(iNo==962)OR(iNo==971)OR(iNo==972)OR(iNo==973)
+    IF (iGG15>0)
+      iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG15<<" + G"<<iNo
+      GOTOF HandleAlarm
+    ENDIF
+    iGG15=iNo sG9xx="G"<<iNo
+    GOTOF NextCodeCheck
+  ENDIF
+  ;
+  iAlarmNo=Al_NoSupport sAlarmParam="G"<<iNo
+  GOTOF HandleAlarm
+
+  ;====
+  _Cx3:
+  ;====
+  IF (iDNo>-1)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="D"<<iDNo<<" + D"<<iNo
+    GOTOF HandleAlarm
+  ENDIF
+  iDNo=iNo
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx4:
+  ;====
+  IF (rSpeed>0)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="S"<<rSpeed<<" + S"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  bFndS=TRUE rSpeed=rNo
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx5:
+  ;====
+  IF (bBAxis)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="B"<<rPosB<<" + B"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rNo>=360)
+    iAlarmNo=Al_NotAvailable sAlarmParam="B"<<rPosB<<">=360"
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rNo<0)
+    iAlarmNo=Al_NotAvailable sAlarmParam="B"<<rPosB<<"<0"
+    GOTOF HandleAlarm
+  ENDIF
+  bBAxis=TRUE rPosB=rNo
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx6:
+  ;====
+  IF (bFndX)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="X"<<rPosX<<" + X"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  bFndX=TRUE rPosX=rNo
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx7:
+  ;====
+  IF (bFndY)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="Y"<<rPosY<<" + Y"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  bFndY=TRUE rPosY=rNo
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx8:
+  ;====
+  IF (bFndZ)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="Z"<<rPosZ<<" + Z"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  bFndZ=TRUE rPosZ=rNo
+  GOTOF NextCodeCheck
+
+  ;====
+  _Cx9:
+  ;====
+  IF (rOVR<>100)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="OVRZ="<<rOVR<<" + OVRZ="<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rNo>100)OR(rNo<1)
+    iAlarmNo=Al_NotAvailable sAlarmParam="OVRZ="<<rOVR<<"% (0%<OVRZ<=100%)"
+    GOTOF HandleAlarm
+  ENDIF
+  rOVR=rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx12:
+  ;=====
+  IF (sFeed<>"")
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="F"<<rFeed<<" + F"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  sFeed=" F"<<rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx14:
+  ;=====
+  IF (bIsSpos)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="SPOS"<<rSPOSVal<<" + SPOS"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rSpeed>0)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="S"<<rSpeed<<" + SPOS"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  bIsSPOS=TRUE rSPOSVal=rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx15:
+  ;=====
+  IF (bWaitS)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="WAITS="<<rWaitSVal<<" + WAITS="<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  IF (iNo>100)OR(iNo<1)
+    iAlarmNo=Al_NotAvailable sAlarmParam="WAITS="<<rWaitSVal<<"% (0%<WAITS<100%)"
+    GOTOF HandleAlarm
+  ENDIF
+  IF (iNo<=50)
+    ;Genauhalt Grob bei SPOS
+    iReqSPOSState=3
+  ENDIF
+  bWaitS=TRUE rWaitSVal=rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx16:
+  ;=====
+  IF (bFndWinB)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="WIN_B"<<rPosWinB<<" + WIN_B"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rNo<$MA_STOP_LIMIT_COARSE[mcAxB])
+    rNo=$MA_STOP_LIMIT_COARSE[mcAxB]
+  ELSE
+    IF (rNo>rcMaxPosWinB)
+      iAlarmNo=Al_NotAvailable sAlarmParam="WIN_B>"<<SPRINT(scNk1Format,rcMaxPosWinB)
+      GOTOF HandleAlarm
+    ENDIF
+  ENDIF
+  bFndWinB=TRUE rPosWinB=rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx17:
+  ;=====
+  IF (sAdis<>"")
+    iAlarmNo=Al_CombNotAllowed sAlarmParam=sAdis<<" + ADISPOS="<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  sAdis=" ADISPOS="<<rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx18:
+  ;=====
+  IF (bFndXP)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="XP"<<rPosXP<<" + X"<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  bFndXP=TRUE rPosXP=rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx19:
+  ;=====
+  IF (bFndHCool)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="H70="<<rHCool<<" + H70="<<rNo
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rNo<=0)
+    iAlarmNo=Al_NotAvailable sAlarmParam="H70<=0"
+    GOTOF HandleAlarm
+  ENDIF
+  bFndHCool=TRUE rHCool=rNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx20:
+  ;=====
+  IF (sCFxx<>"")
+    iAlarmNo=Al_CombNotAllowed sAlarmParam=sCFxx<<" + "<<sCFAct
+    GOTOF HandleAlarm
+  ENDIF
+  sCFxx=sCFAct
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx40:
+  ;=====
+  IF (sArg<>"")
+    sPrepare=sArg
+  ELSE
+    iAlarmNo=Al_Missing sAlarmParam="T=?"
+    GOTOF HandleAlarm
+  ENDIF
+  GOTOF NextCodeCheck
+
+  ;=====
+  _Cx50:
+  ;=====
+  IF (iWorkStep>0)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="WORKSTEP"<<iWorkStep<<" + WORKSTEP"<<iNo
+    GOTOF HandleAlarm
+  ENDIF
+  iWorkStep=iNo
+  GOTOF NextCodeCheck
+
+  ;=====
+  Error:
+  ;=====
+  iAlarmNo=AL_SyntaxError sAlarmParam=scPunkte<<SUBSTR(sCode,MAXVAL(iPos-10,0),20)<<scPunkte
+  GOTOF HandleAlarm
+
+  ;========
+  VarError:
+  ;========
+  iAlarmNo=Al_NotAvailable sAlarmParam="LUD "<<sArg
+  GOTOF HandleAlarm
+
+  ;=============
+  NextCodeCheck:
+  ;=============
+ENDWHILE
+
+;-10.2--CMD-----------
+; Keine X-Achsposition
+; -> interpolierend
+;---------------------
+IF (NOT bFndX)
+  bNoIPO=FALSE
+ENDIF
+
+;-10.3--CMD----
+; Default Werte
+;--------------
+IF (iGG10==0)
+  iGG10=60
+ENDIF
+;
+IF (iDNo==-1)
+  ;
+  ;D.. nicht programmiert -> D1
+  iDNo=1
+ENDIF
+
+;-10.4--CMD--------
+; Ueberpruefung von
+; Syntax und Logik
+;------------------
+;
+IF (NOT bBAxis)AND(bMoveB_XYZ OR bMoveXB_XYZ)
+  iAlarmNo=AL_PosMissing sAlarmParam="B (MOVE...)"
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (NOT bFndZ)AND(bMoveXYB_Z)
+  iAlarmNo=AL_PosMissing sAlarmParam="Z"
+  GOTOF HandleAlarm
+ENDIF
+;
+IF NOT (bFndXP OR bFndX)AND(bMoveX_XYZB OR bMoveXB_XYZ)
+  iAlarmNo=AL_PosMissing sAlarmParam="XP/X"
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iGG10>60)AND(iGG12>0)
+  iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG10<<" + G"<<iGG12
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iGG10==60)AND(sAdis<>"")
+  iAlarmNo=Al_CombNotAllowed sAlarmParam="G60 + "<<sAdis
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (bNoIpo)
+  IF (iGG7>0)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="G"<<iGG7<<" + NO IPO"
+    GOTOF HandleAlarm
+  ENDIF
+  IF (bFndXP)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="XP + NO IPO"
+    GOTOF HandleAlarm
+  ENDIF
+ELSE
+  IF (bFndWinB)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="WIN_B + IPO"
+    GOTOF HandleAlarm
+  ENDIF
+  IF (rOVR<>100)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="OVRZ + IPO"
+    GOTOF HandleAlarm
+  ENDIF
+  IF NOT ((bFndX)OR(bFndY))AND(iGG7>0)
+    iAlarmNo=AL_PosMissing sAlarmParam="X,Y ("<<sG4x<<")"
+    GOTOF HandleAlarm
+  ENDIF
+  IF (iRelZIm>0)
+    iAlarmNo=Al_CombNotAllowed sAlarmParam="ZIM + IPO"
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+;-20.0--Spindelposition------
+; Fuer spaetere Ueberpruefung
+;----------------------------
+IF (bIsSPOS)
+  ;
+  ;mit Spindel Richten
+  rSPOSMin1=rSPOSVal-rStopLimit rSPOSMax1=rSPOSVal rSPOSMin2=rSPOSVal rSPOSMax2=rSPOSVal+rStopLimit
+  IF (rSPOSMin1<0)
+    rSPOSMin1=rSPOSMin1+360.0 rSPOSMax1=360.0 rSPOSMin2=0
+  ENDIF
+  IF (rSPOSMax2>360)
+    rSPOSMin2=0 rSPOSMax2=rSPOSMax2-360 rSPOSMax1=360
+  ENDIF
+ELSE
+  ;
+  ;ohne Drehzahl
+  IF (rSpeed==0)
+    bWaitS=FALSE
+  ENDIF
+ENDIF
+
+;-80.0--Status----------------
+; Aktuelle Zustaende ermitteln
+;-----------------------------
+rActPosB=$AA_IM[mcAxB] bBAxUnclamped=(($A_DBB[71] B_AND 'H20')<>0) bAxXInPos=($AA_TYPE[mcAxX]<=2) bAxYInPos=($AA_TYPE[mcAxY]<=2) bAxZInPos=($AA_TYPE[mcAxZ]<=2) bAxBInPos=($AA_TYPE[mcAxB]<=2) iActGearStep=$AC_SGEAR[icSpiNo] bProgCallActive=$A_OUT[19] SYG_IM[iSYG+5]=iRelZIm bSearchSim=(($P_SEARCH)OR($P_ISTEST)OR($P_SIM)) SYG_BM[iSYG+5]=FALSE bRetractDisk=((mcDBW_WaitDiskRetract>1)AND(bMagIsPickUpDisk)) bAPCInPos=(IN_APCInPos)
+
+;-90.0--Vorbereitung-
+; B Achse - Position
+;--------------------
+IF (bBAxis)
+  ;
+  ;Positionsfenster
+  rBPosMin1=rPosB-grBAxStopLimitFine rBPosMax1=rPosB rBPosMin2=rPosB rBPosMax2=rPosB+grBAxStopLimitFine
+  IF (rBPosMin1<0)
+    rBPosMin1=rBPosMin1+360.0 rBPosMax1=360.0 rBPosMin2=0
+  ENDIF
+  IF (rBPosMax2>360)
+    rBPosMin2=0 rBPosMax2=rBPosMax2-360 rBPosMax1=360
+  ENDIF
+  ;
+  ; Verrechnung der Nullpunktverschiebung
+  IF (iGG8No>-1)
+    rActPosB=rActPosB-$P_UIFR[iGG8No,mcAxB,TR]-$P_UIFR[iGG8No,mcAxB,FI] rPosBM=rPosB+$P_UIFR[iGG8No,mcAxB,TR]+$P_UIFR[iGG8No,mcAxB,FI]
+    ;
+    IF (rActPosB<0)
+      rActPosB=rActPosB+360
+    ENDIF
+    IF (rActPosB>360)
+      rActPosB=rActPosB-360
+    ENDIF
+    ;
+    IF (rPosBM<0)
+      rPosBM=rPosBM+360
+    ENDIF
+    IF (rPosBM>360)
+      rPosBM=rPosBM-360
+    ENDIF
+  ELSE
+    rPosBM=rPosB
+  ENDIF
+  ;
+  IF((bAxBInPos)AND(((rActPosB>=rBPosMin1)AND(rActPosB<=rBPosMax1))OR((rActPosB>=rBPosMin2)AND(rActPosB<=rBPosMax2))))
+    ;
+    ;Steht schon in Zielposition
+    bBAxis=FALSE sMoveB=""
+  ENDIF
+  ;
+  IF (bBAxis)
+    ;
+    sMoveB=" B="<<sModeB<<"(rPosB)"
+    ;
+    IF (NOT bBAxUnclamped)AND(iClpB<=10)
+      ;
+      ;-90.1-Vorbereitung---
+      ; - B nicht geloest
+      ; - nichts vorgewaehlt
+      ; -> M18
+      ;---------------------
+      iClpB=18
+    ENDIF
+  ENDIF
+ENDIF
+;
+;-90.2-Vorbereitung-
+; B-Achse - Klemmen
+;-------------------
+IF (iClpB>10)OR((NOT bBAxis)AND(iClpB>0))
+  M=QU(iClpB)
+ENDIF
+
+;-100.0--Workstep-
+;-----------------
+;
+IF (iWorkStep>-1)AND(NOT $P_SIM)
+  ;
+  IF (BufNo>0)AND(BufNo<18)AND(bProgCallActive)
+    iTmp=BufNo
+  ELSE
+    ;
+    IF (NOT bAPCInPos)
+      M91
+    ENDIF
+    bAPCInPos=(IN_APCInPos) iActPosAPC=(INA_APCPos)
+    ;
+    IF (NOT bAPCInPos)OR(iActPosAPC==0)
+      iAlarmNo=AL_APCNotInBasePos
+      GOTOF HandleAlarm
+    ELSE
+      iTmp=giPal_BufNo[iActPosAPC]
+    ENDIF
+  ENDIF
+
+  CFG_MAN("MPS_HOST",sOption)
+  IF (sOption<>"")
+    ;
+    ;mit Leitrechner
+    giMPSWorkStep[giMPSActivProg]=iWorkStep
+  ELSE
+    giMMC_Pal[2,iTmp]=iWorkStep
+  ENDIF
+  ;
+  Working_Step=iWorkStep
+  ;
+ENDIF
+
+;-110.0--Spindel_1-----
+; - Wz in Spindel
+; - Sp Drehrichtung und
+;   Kuehlmittelanwahl
+;   aus Wz Daten
+;----------------------
+iTNoSp=$TC_MPP6[9998,mcLocSp] bM3=FALSE bM4=FALSE
+;
+IF (iTNoSp>0)
+  ;
+  iSpResult='B1' iSpMask='B11' sAux=" (T="<<$TC_TP2[iTNoSp]<<")"
+  ;
+  IF (gbTMIsHHD)
+    iTmp=(RTOI($TC_TPC1[iTNoSp]) B_AND 'H3030') bM3=((iTmp B_AND 'H1000')<>0)AND(bRelSpDir) bM4=((iTmp B_AND 'H2000')<>0)AND(bRelSpDir) bCoolM1=((iTmp B_AND 'H10')<>0)AND(bRelCool) bCoolM2=((iTmp B_AND 'H20')<>0)AND(bRelCool) iHCool=$TC_TPC4[iTNoSp]
+  ELSE
+    iTmp=(RTOI($TC_DP25[iTNoSp,1]) B_AND 'HF00') bM3=((iTmp B_AND 'H100')<>0)AND(bRelSpDir) bM4=((iTmp B_AND 'H200')<>0)AND(bRelSpDir) bCoolM1=((iTmp B_AND 'H400')<>0)AND(bRelCool) bCoolM2=((iTmp B_AND 'H800')<>0)AND(bRelCool) iHCool=$TC_TPC6[iTNoSp]
+  ENDIF
+  ;
+  IF (bM3)AND(iMSpindle==4)
+    iAlarmNo=AL_CombNotAllowed sAlarmParam="M4 + M3"<<sAux
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (bM4)AND(iMSpindle==3)
+    iAlarmNo=AL_CombNotAllowed sAlarmParam="M3 + M4"<<sAux
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (bM3)
+    iMSpindle=3
+  ELSE
+    ;
+    IF (bM4)
+      iMSpindle=4
+    ELSE
+      IF (iMSpindle==0)
+        iMSpindle=5
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF (iMCool>0)
+    ;
+    iAlarmNo=AL_CombNotAllowed
+    IF (bCoolM1)AND(iMCool<>$MCS_M_CODE_COOLANT_1_ON)
+      sAlarmParam="M"<<iMCool<<" + M"<<$MCS_M_CODE_COOLANT_1_ON<<sAux
+      GOTOF HandleAlarm
+    ENDIF
+    ;
+    IF (bCoolM2)AND(iMCool<>$MCS_M_CODE_COOLANT_2_ON)
+      sAlarmParam="M"<<iMCool<<" + M"<<$MCS_M_CODE_COOLANT_2_ON<<sAux
+      GOTOF HandleAlarm
+    ENDIF
+  ENDIF
+  ;
+  IF (bCoolM1)AND(bCoolM2)
+    iMCool=$MCS_M_CODE_COOLANT_1_AND_2_ON
+  ELSE
+    IF (bCoolM1)
+      iMCool=$MCS_M_CODE_COOLANT_1_ON
+    ELSE
+      ;
+      IF (bCoolM2)
+        iMCool=$MCS_M_CODE_COOLANT_2_ON
+      ELSE
+        iMCool=$MCS_M_CODE_ALL_COOLANTS_OFF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF (bFndHCool)AND(iHCool==rHCool)
+    ;
+    ;Druckstufe wurde schon im TC_BS vorgewaehlt
+    bFndHCool=FALSE
+  ENDIF
+ELSE
+  ;
+  iSpResult='B10' iSpMask='B10'
+  ;
+  IF (iMCool<>0)
+    ;Kein Wz in Sp aber Kuemi angewaehlt
+    iAlarmNo=AL_CombNotAllowed sAlarmParam="T0 + M"<<iMCool
+  ENDIF
+ENDIF
+;
+;-110.1--Spindel_1------------
+; Spindeldrehzahl Ueberpruefen
+;-----------------------------
+IF (((iMSpindle==5)AND(rSpeed>0))OR((rSpeed==0)AND(iMSpindle<>5)))AND(NOT bM3)AND(NOT bM4)
+  iAlarmNo=AL_CombNotAllowed sAlarmParam="M"<<iMSpindle<<" S"<<SPRINT(scNk1Format,rSpeed)
+  GOTOF HandleAlarm
+ENDIF
+;
+;-110.2--Spindel_1--
+; M41/M42 angewaehlt
+;-------------------
+IF (bM4x)AND(gbIsGearSpindle)AND(iActGearStep==iSelGearStep)
+  ;
+  ;schon richtige Getriebestufe
+  bM4x=FALSE
+ENDIF
+
+;-120.0-Prepare-
+;---------------
+IF (sPrepare<>"")
+  ;
+  iSep=INDEX(sPrepare,"/") iSTNo=0
+  IF (iSep>-1)AND(iSep<STRLEN(sPrepare))
+    sSTNo=SUBSTR(sPrepare,iSep+1)
+    IF ISNUMBER(sSTNo)
+      iSTNo=NUMBER(sSTNo) sPrepare=SUBSTR(sPrepare,0,iSep)
+    ELSE
+      SETAL(AL_SyntaxError,sSTNo)
+    ENDIF
+  ENDIF
+  ;
+  IF (gbOptToolPrep)AND(iTNoSp>0)
+    ;
+    ;Startwert erfassen, Optimierung anfordern
+    ;
+    IF (NOT bSearchSim)
+      SYG_RM[iSYG+19]=mcDBR_Time SYG_IM[mcSYG_TC+9]=Working_Step gsPrepReq=sPrepare<<"*"<<$TC_TP2[iTNoSp]<<"*"<<Working_Step gbGetToTime=TRUE
+    ENDIF
+  ENDIF
+  ;
+  gsPrepTName=sPrepare giPrepSTNo=iSTNo gbPrepAfterTC=TRUE bRetractDisk=FALSE
+  ;
+  IF (sPrepare=="0")
+    T0
+  ELSE
+    IF (iSTNo>0)
+      TCA(sPrepare,iSTNo)
+    ELSE
+      T=sPrepare
+    ENDIF
+  ENDIF
+ENDIF
+
+;-130.0--NC Programm-
+;--------------------
+IF (iGG10==60)
+  sPosMode=sG6xx
+ELSE
+  sPosMode=" G603"
+ENDIF
+;
+;
+;Metrisch oder Inch
+IF (gbMetricScale)
+  G0 G17 G90 G94 G40 G60 G71
+ELSE
+  G0 G17 G90 G94 G40 G60 G70
+ENDIF
+;
+;-130.1--NC Programm-
+; Schneide
+;------------------------
+sFrame="D=iDNo"<<sFrameXYZ
+
+;-140.0--Achsen_1-
+; Fahrlogik
+;-----------------
+IF (bFndX)
+  sMoveXY=sMoveXY<<" X=rPosX"
+ENDIF
+IF (bFndY)
+  sMoveXY=sMoveXY<<" Y=rPosY"
+ENDIF
+IF (bFndZ)
+  sMoveZ=" Z=rPosZ"
+ENDIF
+
+;-150.0--Satzvorlauf und Simulation-
+;-----------------------------------
+IF (bSearchSim)
+  ;
+  IF (bFndHCool)
+    H70=rHCool
+  ENDIF
+  ;
+  IF (bM4x)
+    M=iSelGearStep+40
+  ENDIF
+  ;
+  IF (iMCool>0)
+    M=iMCool
+  ENDIF
+  ;
+  IF (iMCool1>0)
+    M=iMCool1
+  ENDIF
+  ;
+  IF (bIsSPOS)
+    SPOS=DC(rSPOSVal)
+  ELSE
+    M=iMSpindle S=rSpeed
+  ENDIF
+  ;
+  D0 G60 G603 SUPA X=rPrePosX
+  EXECSTRING(sFrame<<sG7xx<<sG6xx<<sG4x<<sMoveXY<<sMoveZ<<sMoveB)
+  RET
+ENDIF
+
+;-160.0--Achsen_2-
+; Warten auf X,Z,B
+;-----------------
+sWaitAxes="WAITP(" sSepSign=""
+IF (NOT bAxXInPos)AND((bFndX)OR(bFndXP))
+  sWaitAxes=sWaitAxes<<"X" sSepSign=","
+ENDIF
+IF (NOT bAxYInPos)AND(bFndY)
+  sWaitAxes=sWaitAxes<<sSepSign<<"Y" sSepSign=","
+ENDIF
+IF (NOT bAxZInPos)AND(bFndZ)
+  sWaitAxes=sWaitAxes<<sSepSign<<"Z" sSepSign=","
+ENDIF
+IF (NOT bAxBInPos)AND(bBAxis)
+  sWaitAxes=sWaitAxes<<sSepSign<<"B"
+ENDIF
+;
+IF (sWaitAxes<>"WAITP(")
+  EXECSTRING(sWaitAxes<<")")
+ENDIF
+
+;-170.0--Spindel_2-------------
+; Einschalten und Positionieren
+;------------------------------
+CANCEL(SyncID_TC, SyncID_TC+1, SyncID_TC+2)
+;
+IF (iSelGearStep>-1)
+  ;
+  ;-170.1--Spindel----------
+  ; - Sp Freigabe
+  ; - Getriebestufe Schalten
+  ;-------------------------
+  ID=SyncID_TC WHEN (($A_DBB[0] B_AND iSpMask)==iSpResult)AND((($VA_IM[mcAxX]<=rRelSpExitX)AND(bSpRelX))OR((bSpRelDG)AND(OUT_DGRotInBasePos))) DO M=QU(iSelGearStep+40) SYG_BM[iSYG+5]=TRUE SYG_IM[iSYG]=icLastStep
+ELSE
+  ;
+  ;-170.2--Spindel-
+  ; - Sp Freigabe
+  ;----------------
+  ID=SyncID_TC WHEN (($A_DBB[0] B_AND iSpMask)==iSpResult)AND((($VA_IM[mcAxX]<=rRelSpExitX)AND(bSpRelX))OR((bSpRelDG)AND(OUT_DGRotInBasePos))) DO SYG_BM[iSYG+5]=TRUE SYG_IM[iSYG]=icLastStep
+ENDIF
+;
+IF (iSelGearStep>0)
+  ;
+  ;-170.3--Spindel-
+  ; mit M41/M42
+  ;----------------
+  IF (bIsSPOS)
+    ID=SyncID_TC+2 WHEN (SYG_BM[iSYG+5])AND($AC_SGEAR[icSpiNo]==iSelGearStep)AND($AA_TYPE[mcAxSp1]==2) DO SPOS=DC(rSPOSVal)
+  ELSE
+    ID=SyncID_TC+2 WHEN (iTNoSp>0)AND(SYG_BM[iSYG+5])AND($AC_SGEAR[icSpiNo]==iSelGearStep)AND($AA_TYPE[mcAxSp1]==2) DO M=QU(iMSpindle) S=rSpeed
+  ENDIF
+ELSE
+  ;
+  ;-170.4--Spindel------------------
+  ; mit M40/ohne Getriebeumschaltung
+  ;---------------------------------
+  IF (bIsSPOS)
+    ID=SyncID_TC+2 WHEN (SYG_BM[iSYG+5]) DO SPOS=DC(rSPOSVal)
+  ELSE
+    ID=SyncID_TC+2 WHEN (iTNoSp>0)AND(SYG_BM[iSYG+5]) DO M=QU(iMSpindle) S=rSpeed
+  ENDIF
+ENDIF
+
+;-180.0--Kuehlmittel-
+;--------------------
+IF (bFndHCool)
+  ;
+  ;Druckstufe vorgeben
+  H70=QU(rHCool)
+ENDIF
+;
+;X in TCPrePos oder X faehrt, keine Beeinflussung, Sp gespannt -> Kuehlmittel Ein
+IF (iMCool1>0)AND(iMCool>0)
+  ID=SyncID_TC+1 WHEN (($A_DBB[0] B_AND 'B11')<>0)AND(NOT gbTCSlowMode)AND((mcbDBB_TCDoorClosed)OR((SYG_IM[iSYG+3]==1)AND($AA_STAT[mcAxX]<3)AND($VA_IM[mcAxX]<rTcRelCoolX))) DO M=iMCool M=iMCool1
+ELSE
+  IF (iMCool>0)
+    ID=SyncID_TC+1 WHEN (($A_DBB[0] B_AND 'B11')<>0)AND(NOT gbTCSlowMode)AND((mcbDBB_TCDoorClosed)OR((SYG_IM[iSYG+3]==1)AND($AA_STAT[mcAxX]<3)AND($VA_IM[mcAxX]<rTcRelCoolX))) DO M=iMCool
+  ELSE
+    IF (iMCool1>0)
+      ID=SyncID_TC+1 WHEN (($A_DBB[0] B_AND 'B11')<>0)AND(NOT gbTCSlowMode)AND((mcbDBB_TCDoorClosed)OR((SYG_IM[iSYG+3]==1)AND($AA_STAT[mcAxX]<3)AND($VA_IM[mcAxX]<rTcRelCoolX))) DO M=iMCool1
+    ENDIF
+  ENDIF
+ENDIF
+;
+;-200.0--Ans Werkstueck Fahren-
+; Interpolierend
+;------------------------------
+IF (NOT bNoIPO)
+  ;
+  SBLON
+  ;
+  IF ($VA_IM[mcAxX]>rPrePosX)
+    ;
+    ;X ist im Magazin -> Erst aus dem Magazin fahren
+    IF (bMoveXB_XYZ)
+      ;
+      ;-200.1--Ans Werkstueck Fahren-
+      ; X auf PREPOS gleichzeitig
+      ; B in Position
+      ;------------------------------
+      bBAxis=FALSE
+      EXECSTRING("D0 G60 G603 SUPA X=rPrePosX B="<<sModeB<<"(rPosBM)")
+    ENDIF
+    ;
+    IF (bMoveX_XYZB)
+      ;
+      ;-200.2--Ans Werkstueck Fahren---
+      ; X auf PREPOS dann B in Position
+      ;--------------------------------
+      D0 G60 G603 SUPA X=rPrePosX
+      EXECSTRING(sFrame<<sG7xx<<sG4x<<sCFxx<<"X=rPosXP")
+    ELSE
+      IF (bMoveB_XYZ)
+        ;
+        ;-200.3--Ans Werkstueck Fahren-
+        ; B in Position,
+        ; dann X auf PREPOS
+        ;------------------------------
+        bBAxis=FALSE
+        EXECSTRING("D0 G64 SUPA B="<<sModeB<<"(rPosBM)")
+        SUPA X=rPrePosX
+      ELSE
+        ;
+        ;-200.4--Ans Werkstueck Fahren-
+        ; nur X auf PREPOS
+        ;------------------------------
+        D0 G60 G603 SUPA X=rPrePosX
+      ENDIF
+    ENDIF
+    ;
+  ENDIF
+  ;
+  IF (bBAxis)
+    ;
+    ;-201.0--Ans Werkstueck Fahren-
+    ; mit B-Achse
+    ;------------------------------
+    IF (bMoveB_XYZ)
+      EXECSTRING(sFrame<<sG7xx<<sPosMode<<sMoveB)
+      EXECSTRING(sFrameXYZ<<sG6xx<<sG4x<<sCFxx<<sMoveXY<<sMoveZ)
+    ELSE
+      EXECSTRING(sFrame<<sG7xx<<sG6xx<<sG4x<<sCFxx<<sMoveXY<<sMoveZ<<sMoveB)
+    ENDIF
+  ELSE
+    ;
+    ;-202.0--Ans Werkstueck Fahren-
+    ; ohne B-Achse
+    ;------------------------------
+    EXECSTRING(sFrame<<sG7xx<<sG6xx<<sG4x<<sCFxx<<sMoveXY<<sMoveZ)
+  ENDIF
+  ;
+  ;---------
+  GOTOF ENDE
+  ;---------
+  ;
+ENDIF
+;
+;-210.0--Ans Werkstueck Fahren-
+; Nicht interpolierend
+;------------------------------
+;
+RTLIOF COARSEA[mcAxX] COARSEA[mcAxY] COARSEA[mcAxZ] COARSEA[mcAxB]
+;
+IF (iRelZIm==0)
+  ;
+  ;-210.1--Ans Werkstueck Fahren-
+  ; - kein ZIM programmiert
+  ; - X (soll) sich bewegen
+  ;   oder
+  ; - X ist nicht im Magazin
+  ; -> Freigabe Z
+  ;-------------------------
+  WHEN (ABS($AA_VACTM[mcAxX])>rcMinFeed)OR($AA_IM[mcAxX]<rPrePosX) DO SYG_IM[iSYG+5]=1
+ENDIF
+;
+;-210.2--Ans Werkstueck Fahren----
+; Beeinflussung Z mittels OVRZ/ZIM
+;---------------------------------
+WHENEVER (TRUE) DO $AA_OVR[mcAxZ]=rOVR*SYG_IM[iSYG+5]
+;
+IF (bFndY)
+  ;
+  ;-210.3--Ans Werkstueck Fahren-
+  ; verhindert, dass die Y losfaehrt
+  ; bevor sich bei Y ein Restweg
+  ; aufbaut und ID=SyncID_TC+10
+  ; die Kontrolle uebernimmt
+  ;---------------------------------
+  WHEN (TRUE) DO $AA_OVR[mcAxY]=0
+ENDIF
+;
+IF (bBAxis)
+  ;
+  IF (bMoveXYB_Z)
+    ;
+    ;-211.0--Ans Werkstueck Fahren-
+    ; X,Y und Tisch noch nicht
+    ; in Position -> Sperre Z
+    ;------------------------------
+    WHENEVER ($AA_INPOS_STAT[mcAxX]<3)OR($AA_INPOS_STAT[mcAxY]<3)OR(($AA_INPOS_STAT[mcAxB]<3)AND(ABS($AA_DTEB[mcAxB])>rPosWinB)) DO $AA_OVR[mcAxZ]=0
+    ;
+  ENDIF
+  ;
+  IF (bMoveB_XYZ)
+    ;
+    ;-211.1--Ans Werkstueck Fahren-
+    ; Tisch noch nicht in
+    ; Position -> Sperre X,Y,Z
+    ;-------------------------
+    WHENEVER ($AA_INPOS_STAT[mcAxB]<3)AND(ABS($AA_DTEB[mcAxB])>rPosWinB) DO $AA_OVR[mcAxX]=0 $AA_OVR[mcAxY]=0 $AA_OVR[mcAxZ]=0
+    ;
+  ENDIF
+  ;
+  ;-211.2--Ans Werkstueck Fahren-
+  ; X,Y,Z,B Fahren
+  ;------------------------------
+  EXECSTRING(sFrame<<sG7xx<<sMoveXY<<sMoveZ<<sMoveB)
+ELSE
+  ;
+  IF (bMoveXYB_Z)
+    ;
+    ;-212.0--Ans Werkstueck Fahren-
+    ; X oder Y noch nicht
+    ; in Position -> Sperre Z
+    ;------------------------
+    WHENEVER ($AA_INPOS_STAT[mcAxX]<3)OR($AA_INPOS_STAT[mcAxY]<3) DO $AA_OVR[mcAxZ]=0
+    ;
+  ENDIF
+  ;
+  ;-212.1--Ans Werkstueck Fahren-
+  ; X,Y,Z Fahren
+  ;------------------------------
+  EXECSTRING(sFrame<<sG7xx<<sMoveXY<<sMoveZ)
+ENDIF
+
+;====
+ENDE:
+;====
+
+IF (iSelGearStep>0)
+  ;
+  ;-230.0--Warten auf Spindel-------
+  ; Warten bis Getriebestufenwechsel
+  ; abgeschlossen und neutrale Achse
+  ; ist (M41, M42)
+  ;---------------------------------
+  iErrCount=0
+  REPEAT
+    bEnabled=($AC_SGEAR[icSpiNo]==iSelGearStep)AND($AA_TYPE[mcAxSp1]==2) iErrCount=(iErrCount+SYG_IM[mcSYG_ErrIncCha1])
+    IF (NOT bEnabled)
+      G4 F=rWaitShort
+      IF (iErrCount>iErrTime)
+        iAlarmNo=Al_WaitFor sAlarmParam="M41/M42"
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+  UNTIL (bEnabled)
+ENDIF
+;
+IF (bIsSPOS)
+  ;
+  ;-230.1--Warten auf Spindel---
+  ; Warten auf Spindel gerichtet
+  ;-----------------------------
+  iErrCount=0
+  REPEAT
+    bEnabled=($AA_INPOS_STAT[mcAxSp1]==iReqSPOSState)OR(($VA_IM[mcAxSp1]>=rSPOSMin1)AND($VA_IM[mcAxSp1]<=rSPOSMax1))OR(($VA_IM[mcAxSp1]>=rSPOSMin2)AND($VA_IM[mcAxSp1]<=rSPOSMax2)) iErrCount=(iErrCount+SYG_IM[mcSYG_ErrIncCha1])
+    IF (NOT bEnabled)
+      G4 F=rWaitShort
+      IF (iErrCount>iErrTime)
+        iAlarmNo=Al_WaitFor sAlarmParam="CS: SPOS"<<SPRINT(scNk1Format,rSPOSVal)
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+  UNTIL (bEnabled)
+ENDIF
+;
+IF (bWaitS)
+  ;
+  ;-230.2--Warten auf Spindel-
+  ; Drehzahl im WAITS Bereich
+  ;---------------------------
+  iErrCount=0
+  REPEAT
+    bEnabled=ABS($AA_S[icSpiNo]>=(rSpeed*rWaitSVal/100-0.5)) iErrCount=(iErrCount+SYG_IM[mcSYG_ErrIncCha1])
+    IF (NOT bEnabled)
+      G4 F=rWaitShort
+      IF (iErrCount>iErrTime*2)
+        iAlarmNo=Al_WaitFor sAlarmParam="S: n <"<<SPRINT(scNk1Format,rSpeed)<<"U/min"
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+  UNTIL (bEnabled)
+ENDIF
+
+;-230.3--Warten auf Sp/DG----
+; Wz Gespannt und DG in GndSt
+;----------------------------
+iErrCount=0
+REPEAT
+  bTmp1=((($A_DBB[0] B_AND iSpMask)==iSpResult)OR(NOT bRelMoveUnClmp)) bTmp2=((OUT_DGRotInBasePos)OR(NOT bDGIsNCAxis)) bEnabled=(bTmp1)AND(bTmp2) iErrCount=(iErrCount+SYG_IM[mcSYG_ErrIncCha1])
+  IF (NOT bEnabled)
+    G4 F=rWaitShort
+    IF (iErrCount>=iErrTime)
+      IF (NOT bTmp1)
+        iAlarmNo=Al_SpNotClamped
+        GOTOF HandleAlarm
+      ENDIF
+      IF (NOT bTmp2)
+        iAlarmNo=AL_DgNotInBasePos
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+  ENDIF
+UNTIL (bEnabled)
+;
+giSyncTC=0
+;
+IF (gbToCheckAtTC)AND(giToNoProb>0)
+  ;
+  ;-240.0--BBK--------------
+  ; Das alte SpWz soll noch
+  ; vor der Folgebearbeitung
+  ; geprueft werden
+  ;-------------------------
+  IF (giToBreakCtrlState<>0)
+    ;
+    ;ToPrep arbeitet nur, wenn WzW nicht mehr laeuft
+    ;
+    iErrCount=0 bEnabled=TRUE
+    WHILE (giToBreakCtrlState<>0)OR(OUT_TcActive)
+      G4 F=rWaitShort
+      iErrCount=iErrCount+1
+      IF (iErrCount>iErrTime)AND(bEnabled)
+        ;
+        ;Meldung erst nach Wartezeit ausgeben
+        ;
+        MSG(MSG_ToBreakCtrlRunning)
+        bEnabled=FALSE
+      ENDIF
+    ENDWHILE
+    ;
+    IF (NOT bEnabled)
+      MSG("")
+    ENDIF
+    ;
+  ENDIF
+  ;
+  ;Abloeschen, ausser gbLastToBroken (eventuell Abfrage im Bearbeitungsprogramm)
+  ;
+  giToBreakCtrlState=0 iTNoSp=giToNoProb giToNoProb=0 gbToCheckAtTC=FALSE
+  ;
+  IF (iTNoSp>0)
+    ;
+    IF (($TC_TP8[iTNoSp] B_AND 'B100')<>0)
+      ;
+      ;Wz bei BBK gesperrt und Reaktion gefordert -> Meldung und Stopp
+      ;
+      IF (gbLastToBroken)AND(((mcDBB_ProgConfig B_AND 'B10')==0)OR(gbErrMsgOnToCheck))
+        ;
+        ;-240.1--BBK----------
+        ; das gerade gepruefte
+        ; Wz ist gebrochen
+        ;---------------------
+        MsgBox(<<AL_LastTlBrokenAsk67,"M0 DELAY=1.0",,<<$TC_TP2[iTNoSp]<<"/"<<$TC_TP1[iTNoSp])
+        ;
+        gbLastToBroken=FALSE
+      ENDIF
+    ELSE
+      gbLastToBroken=FALSE
+    ENDIF
+  ELSE
+    gbLastToBroken=FALSE
+  ENDIF
+ENDIF
+;
+;-245.0--BBK-
+;------------
+IF (NOT gbLastToBroken)AND(NOT gbPrevToBroken)
+  ;
+  ;kein BBK Fehler aufgetreten
+  ;
+  TOOL_BREAK_REACTION=0
+ENDIF
+
+IF (bNoIPO)
+  ;
+  ;-250.0--Achsen-
+  ;---------------
+  ;
+  ;Interpolation Ein
+  RTLION FINEA[mcAxX] FINEA[mcAxY] FINEA[mcAxZ] FINEA[mcAxB]
+  ;
+  IF (bFndX)OR(bFndY)OR(bFndZ)
+    ;
+    ;XYZ zu Geometrieachsen machen
+    EXECSTRING(sFrameXYZ<<sG7xx<<sMoveXY<<sMoveZ)
+  ENDIF
+ENDIF
+
+;-260.0--Kundenprogramm-
+; Vorwahlen Aktivieren
+;-----------------------
+EXECSTRING(sG7xx<<sG9xx<<sG6xx<<sG4x<<sCFxx<<sFeed)
+;
+GOTOF TCEND
+
+;-9999.0--Alarme-
+;----------------
+;
+;===========
+HandleAlarm:
+;===========
+;
+IF (bNoIPO)
+  ;Positionierachsen auf FINE und Interpolation ein
+  RTLION FINEA[mcAxX] FINEA[mcAxY] FINEA[mcAxZ] FINEA[mcAxB]
+ENDIF
+;
+CANCEL(SyncID_TC+0,SyncID_TC+1,SyncID_TC+2)
+;
+IF ($VA_IM[mcAxX]>rPrePosX)
+  ;
+  ;-9999.1--Alarme---
+  ; Bei Fehler WzW in PreposX beenden
+  ;------------------
+  G0 G17 G60 G601 G40 G153 G90 X=rPrePosX M5 M=$MCS_M_CODE_ALL_COOLANTS_OFF
+ENDIF
+;
+SETAL(iAlarmNo,sAlarmParam)
+;
+;=====
+TCEND:
+;=====
+;
+;-1000.0--Programmende------
+; TC endgueltig abschliessen (ohne Kuemittel Einschalten SyncID_TC+1)
+;---------------------------
+IF (bRetractDisk)AND(iAlarmNo==0)
+  CANCEL(SyncID_TC+0,SyncID_TC+2,SyncID_TC+3,SyncID_TC+4,SyncID_TC+6,SyncID_TC+7,SyncID_TC+8)
+ELSE
+  CANCEL(SyncID_TC+0,SyncID_TC+2,SyncID_TC+3,SyncID_TC+4,SyncID_TC+5,SyncID_TC+6,SyncID_TC+7,SyncID_TC+8)
+ENDIF
+;
+IF (iAlarmNo<>0)
+  ;SyncID_TC+9..12 werden erst durch Reset gecancelt, damit eventuelle Ueberwachungen erhalten bleiben
+  CANCEL(SyncID_TC+9,SyncID_TC+10,SyncID_TC+11,SyncID_TC+12)
+ENDIF
+;
+RET

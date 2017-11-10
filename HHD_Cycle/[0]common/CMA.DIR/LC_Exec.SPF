@@ -1,0 +1,174 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_Exec.SPF
+;# Task:      LoadCase Ueberwachung
+;# Version:   V06.00.07
+;# Date:      04.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 04.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 02.05.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 14.11.2016 / Simons
+; - EES und NC Extern hinzu
+;
+; V06.00.05 - 20.10.2016 / Simons
+; - Neuversionierung
+;
+; V01.06.01  - 10.10.2013 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;Aufrufen der Daten aus der Liste und
+;anstarten der Berechnung falls notwendig
+;Integration der Programm-/Paletten-Verwaltung
+;------------------------------------
+
+PROC LC_Exec SAVE DISPLOF SBLOF
+
+DEF STRING[32] sCycName="LC_Exec V06.00.07", sProgPrefix="LC_", sPathPrefix="", sProgName, sResult, sMPFDIR, sMPF, sSPF, sArea
+;
+DEF STRING[128] sProgPath, sActProg, sFileName
+;
+DEF CHAR sAux=34 ;Hochkomma
+;
+DEF BOOL bLCActive=FALSE, bInSysProg
+;
+DEF INT iError=0
+
+IF ($P_SEARCH)OR($P_SIM)
+  RET
+ENDIF
+
+bInSysProg=(OUT_SysPrgActive) sProgPath=Prog_Path
+
+;Abfrage Konfiguration mit Lastfallüberwachung für Torque-Tisch
+CFG_MAN("LOADCASE",sResult)
+IF (sResult=="") GOTOF ENDE
+
+IF (giActDeviceNo<0)OR(giActDeviceNo>mcNumExtDevices)
+  ;
+  SETAL(AL_NotAvailable,"DEV"<<giActDeviceNo)
+ENDIF
+;
+IF (giActDeviceNo==0)OR(NOT bInSysProg)
+  ;
+  ;NC Programme liegen in der NC bzw. der Aufruf erfolgte nicht im ProgCall
+  ;
+  sMPF="_MPF" sSPF="_SPF" sArea="/_N_" sMPFDIR=sArea<<"MPF_DIR"
+ELSE
+  ;
+  IF (gbWithEES)
+    ;
+    ;Datenliegen auf einem externen Device
+    ;
+    sMPF=".MPF" sSPF=".SPF" sArea="/" sPathPrefix=gsDeviceName[giActDeviceNo]
+  ELSE  
+    ;
+    ;Daten liegen in der NC
+    ;
+    sMPF="_MPF" sSPF="_SPF" sArea="/_N_" sProgPath=sArea<<"WKS_DIR"<<sArea<<sProgPrefix<<"WPD"
+  ENDIF
+ENDIF
+
+IF (bInSysProg)
+  ;
+  ;Aufruf im ProgCall
+  ;------------------
+  ;
+  ;Daten liegen z.B. in /N_WKS_DIR/N_WERKSTUECK_WPD/N_LC_TEST_SPF
+  ;
+  sProgName=Prog_Name sActProg=(Prog_Path<<sArea<<sProgName<<sMPF) sFileName=(sPathPrefix<<sProgPath<<sArea<<sProgPrefix<<sProgName<<sSPF)
+ELSE
+  ;
+  ;Aufruf nicht im ProgCall
+  ;------------------------
+  ;
+  ;Daten liegen in /_N_WKS_DIR/_N_LC_WPD/_N_LC_TMP_SPF
+  ;
+  sProgName = "TMP" sActProg=$P_PROG[0] sFileName=(sPathPrefix<<sProgPath<<sArea<<sProgPrefix<<sProgName<<sSPF)
+  ;
+  ;Anpassungsprogramm nur bis Palettenwechsel, danach automatische Löschung bei Reset
+  ;Ein Palettenwechsel läuft oder lief -> dann neu einmessen
+  ;
+  IF ISFILE(sFileName)
+    ;
+    IF (giLCActPal<>INA_APCPos)AND(giLCActPal>0)
+      DELETE(iError,sFileName)
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (NOT ISFILE(sFileName))
+  ;
+  giLCActPal=0
+  ;
+  IF (giLCAxisIdent>0)AND(gbLCCheckAxis)
+    ;
+    ;Warten auf Ende Palettenwechsel
+    M91
+    ;
+    ;Messzyklus aufrufen
+    LC_CALC(sFileName,sActProg,sProgName)
+    ;
+    bLCActive=TRUE
+  ENDIF
+  ;
+  IF (bLCActive)
+    ;
+    IF ISFILE(sFileName)
+      ;
+      ;Wird an das in LC_CALC_SPF begonnene Anpassprogramm angehaengt
+      ;
+      WRITE(iError,sFileName,"gsLCActProgName="<<(sAux<<sFileName<<sAux))
+      WRITE(iError,sFileName,"gbLCAutoDelete="<<(NOT bInSysProg))
+      ;
+      WRITE(iError,sFileName,"IF ($A_INA[2]==0)")
+      WRITE(iError,sFileName,"  giLCActPal=BufNo")
+      WRITE(iError,sFileName,"ELSE")
+      ;Falls Palettenwechsel noch läuft
+      WRITE(iError,sFileName,"  giLCActPal=$A_INA[2]")
+      WRITE(iError,sFileName,"ENDIF")
+      ;
+      WRITE(iError,sFileName,"NEWCONF")
+      WRITE(iError,sFileName,"STOPRE")
+      WRITE(iError,sFileName,"RET")
+      ;
+      STOPRE
+      ;
+      IF ((iError==10)OR(iError==12))
+        SETAL(AL_LCNoMemoryDelete67)
+      ENDIF      
+    ELSE
+      SETAL(AL_LCProgNotWrite)  	  	
+      GOTOF ENDE
+    ENDIF
+  ELSE
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF ISFILE(sFileName)
+  ;
+  ;Anpassungsprogramm ausführen
+  ;
+  CALL sFileName
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET

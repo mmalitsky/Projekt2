@@ -1,0 +1,163 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     NC_INIT2.SPF
+;# Task:      Hochlauf Kanal 2
+;# Version:   V06.00.08
+;# Date:      17.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 17.08.2017 / Simons
+; - Neuversionierung
+; - WHENEVER (TRUE) DO -> DO
+; - mcDBB_MagExist -> mcDBW_MagExist
+;
+; V06.00.07 - 30.07.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neue Versionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 04.02.2017 / Simons
+; - SYG_IM[mcSYG_ErrIncCha2] hinzu
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - icBit7 entfernt
+;
+; V06.00.05 - 21.09.2016 / Simons
+; - Neue Versionierung
+; - Nacharbeit HHD TM
+; - Anzahl SyncAkt verringern
+;
+; V06.00.03 - 14.05.2016 / Simons
+; - Neue Versionierung
+; - HHD TM
+;
+; V04.00.00 - 26.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Hochlaufprogramm Kanal 2 fuer Kassette
+;
+;------------------------------------
+
+PROC NC_INIT2
+
+DEF STRING[32] sCycName="NC_INIT2 V06.00.08"
+;
+DEF INT iCount
+;
+DEF REAL rc0x1mm, rc10x0mm, rc20x0mm, rc50x0mm
+
+OUT_StartUpFinished2=FALSE rc0x1mm=grInchMetr*0.1 rc10x0mm=grInchMetr*10 rc20x0mm=grInchMetr*20 rc50x0mm=grInchMetr*50
+
+WHILE (NOT OUT_StartUpFinished1)
+  ;Warten bis NC_INIT1 fertig ist
+  G04 F 0.2
+ENDWHILE
+
+IF (mcbDBB_WithTlChipFix)
+  ;
+  ;Balluff eingebaut + angewaehlt Verb. Schublade<->Spindel trennen. Keine Spindelversorgung aus Schublade heraus
+  $TC_MDP2[1,1]=9999
+ELSE
+  ;
+  IF ((mcDBW_MagExist B_AND 'B1')<>0)
+    ;
+    ;Cass1 vorhanden/eingefahren
+    $TC_MDP2[1,1]=0
+  ELSE
+    ;Trennen
+    $TC_MDP2[1,1]=9999
+  ENDIF
+ENDIF
+
+FOR iCount=1 TO 39
+  CANCEL(iCount)
+  STOPRE
+ENDFOR
+
+; Aktivieren der Synchronaktionen fuer Kanal 2
+;---------------------------------------------
+;
+;Synchronaktionen 1 .. 10 (Kanal 2) von PLC nur in JOG freigegeben
+;
+;In Gasse Bewegung stoppen, aber nur, falls Verfahrbewegung nicht von PLC (FC18) angestossen wurde:
+IDS=1 WHENEVER (NOT OUT_SysCha2Active)AND(OUT_OnMiddleX)AND(NOT IN_StopOnMiddleX)AND($AA_TYP[mcAxX1]<>3) DO $AA_OVR[mcAxX1]=0
+IDS=2 WHENEVER (NOT OUT_SysCha2Active)AND(OUT_OnMiddleZ)AND(NOT IN_StopOnMiddleZ)AND($AA_TYP[mcAxZ1]<>3) DO $AA_OVR[mcAxZ1]=0
+
+;Z1-Bewegung sperren, sofern PLUS-Richtung angewaehlt, HG (noch) nicht vertikal und
+;drohender Kollision mit der Blechverkleidung Bahnoverride $AC_OVR, damit auch bei G0/G1 u.a. wirksam
+IDS=3 WHENEVER (NOT (IN_ManModeWoLock OR OUT_SysCha2Active)) AND ($AA_IM[mcAxZ1]>=(grHgMaxSwingPosZ-rc50x0mm)) AND (($A_DBB[16] B_AND 3)<=1) AND (($A_DBB[1] B_AND 32)==0)  DO $AC_OVR=0 $AA_OVR[mcAxZ1]=0
+IDS=4 EVERY    (NOT (IN_ManModeWoLock OR OUT_SysCha2Active)) AND ($AA_IM[mcAxZ1]>=(grHgMaxSwingPosZ-rc50x0mm)) AND (($A_DBB[16] B_AND 1)<>0) AND (($A_DBB[1] B_AND 32)==0) DO SETAL(AL_HgNotVertAxisBlocked)
+
+;Stoerkontur "links (Z1-minus-Richtung) vom Wz-Wechsler"
+IDS=5 WHENEVER (NOT (IN_ManModeWoLock OR OUT_SysCha2Active)) AND ($AA_IM[mcAxX1]<=grHgTcPosX+rc20x0mm) AND ($AA_IM[mcAxZ1]<=grHgTcPosZ-rc10x0mm) AND ((($A_DBB[16] B_AND 3)==0) OR (($A_DBB[16] B_AND 3)==2)) DO $AC_OVR=0 $AA_OVR[mcAxZ1]=0
+IDS=6 EVERY    (NOT (IN_ManModeWoLock OR OUT_SysCha2Active)) AND ($AA_IM[mcAxX1]<=grHgTcPosX+rc20x0mm) AND ($AA_IM[mcAxZ1]<=grHgTcPosZ-rc10x0mm) AND (($A_DBB[16] B_AND 3)==2) DO SETAL(AL_AxMinusBlocked)
+
+;HG im Einfaedelbereich HG->DG
+IF (gbMagWithFixedGuide)
+  IDS=11 DO OUT_ComeInTC=(($AA_IM[mcAxX1]>=grHgTcPosX-grRange)AND($AA_IM[mcAxX1]<=grLaneX[1]+grRange))
+ELSE
+  IDS=11 DO OUT_ComeInTC=(($AA_IM[mcAxX1]>=grHgTcPosX-grRange)AND($AA_IM[mcAxX1]<=grLaneX[1]-grRange)AND(ABS($AA_IM[mcAxZ1]-grHgTcPosZ)<=grRange))
+ENDIF
+;
+;HG in WzW-Position
+IDS=12 DO OUT_HgInTcPos=((ABS($AA_IM[mcAxX1]-grHgTcPosX)<=rc0x1mm)AND(ABS($AA_IM[mcAxZ1]-grHgTcPosZ)<=rc0x1mm)) $A_DBB[47]=($AC_STAT) SYG_IM[mcSYG_ErrIncCha2]=(($A_DBB[6] B_AND 2)<>0)
+
+;Z1-Bewegung sperren, sofern PLUS-Richtung angewaehlt, HG (noch) nicht vertikal und Zielposition so,
+;dass HG mit Wz in die Blechverkleidung fahren wuerde. Bahnoverride $AC_OVR, damit auch bei G0/G1 u.a. wirksam
+IDS=13 WHENEVER ($AC_PROG<>0) AND (NOT (OUT_SysCha2Active OR OUT_RevCha2Active)) AND ($AA_IM[mcAxZ1]>=(grHgMaxSwingPosZ-$$AA_DTEB[mcAxZ1])) AND (($A_DBB[16] B_AND 3)<=1) AND (($A_DBB[1] B_AND 32)==0) DO $AC_OVR=0 $AA_OVR[mcAxZ1]=0
+IDS=14 EVERY    ($AC_PROG<>0) AND (NOT (OUT_SysCha2Active OR OUT_RevCha2Active)) AND ($AA_IM[mcAxZ1]>=(grHgMaxSwingPosZ-$$AA_DTEB[mcAxZ1])) AND (($A_DBB[16] B_AND 1)<>0) AND (($A_DBB[1] B_AND 32)==0) DO SETAL(AL_HgNotVertAxisBlocked)
+
+IF (gbMagWithFixedGuide)
+  ;
+  ;Wenn der Restweg < 0.1 und in TCPos ->erlaubte Stellbewegung:
+  IDS=15 WHENEVER (((($A_DBB[1] B_AND 'H30')<>'H20')AND(($A_DBB[14] B_AND 'H3')<>'H2'))OR(($AA_IM[mcAxX1]<grHGFreeGuideX)AND($AA_IM[mcAxX1]>grHGInGuideX)AND(($A_DBB[1] B_AND 'H3')<>'H2')AND(($A_DBB[14] B_AND 'H3')<>'H1'))) DO $AA_OVR[mcAxX1]=0
+ELSE
+  ;X1-Bewegung (MINUS) sperren, solange HG im Einlaufbereich nicht gehoben und/oder nicht horizontal
+  IDS=15 WHENEVER (OUT_ComeInTC) AND (($A_DBB[1] B_AND 'H33')<>'H11')AND(($A_DBB[14] B_AND 3)==2) DO $AA_OVR[mcAxX1]=0
+ENDIF
+
+; X1-Achse auf Mittelgasse 1..8
+;------------------------------
+;
+;Belegt im Kanal 2 Synchronaktionen IDS=15 .. 24 und SYG_IM[2..9]
+;
+FOR iCount=1 TO MINVAL(giNumLaneX,9)
+  ;Mittelgasse <iCount>
+  IDS=16+(iCount-1) DO SYG_IM[(iCount-1)+2]=($AA_IM[mcAxZ1]>=grLaneXMin[iCount]-grRange)AND($AA_IM[mcAxZ1]<=grLaneXMax[iCount]+grRange)AND(ABS($AA_IM[mcAxX1]-grLaneX[iCount])<=grRange)
+ENDFOR
+IDS=26 DO $A_DBB[117]=(SYG_IM[2]+SYG_IM[3]*2+SYG_IM[4]*4+SYG_IM[5]*8+SYG_IM[6]*16+SYG_IM[7]*32+SYG_IM[8]*64+SYG_IM[9]*128) OUT_OnMiddleX=($A_DBB[117]<>0) $A_DBR[196]=$AA_IM[mcAxX1]
+;
+;Z1-Achse
+;--------
+;
+;Mittelgasse 1
+IDS=30 DO SYG_IM[2]=($AA_IM[mcAxX1]>=grLaneZMin[1]-grRange)AND($AA_IM[mcAxX1]<=grLaneZMax[1]+grRange)AND(ABS($AA_IM[mcAxZ1]-grLaneZ[1])<=grRange)
+IF (gbMagWithFixedGuide)
+  ;Mittelgasse 2
+  IDS=31 DO SYG_IM[3]=($AA_IM[mcAxX1]>=grLaneZMin[2]-grRange)AND($AA_IM[mcAxX1]<=grLaneZMax[2]+grRange)AND(ABS($AA_IM[mcAxZ1]-grLaneZ[2])<=grRange)
+ELSE
+  SYG_IM[3]=0
+ENDIF
+IDS=32 DO $A_DBB[118]=(SYG_IM[2]+SYG_IM[3]*2) OUT_OnMiddleZ=($A_DBB[118]<>0) $A_DBR[192]=$AA_IM[mcAxZ1]
+
+;Netzausfall: gebildet bei Netzausfall im NC_INIT1
+;Wenn NA erkannt, Setze Merker und Sperre OVR
+IDS=210 WHENEVER ($A_DBB[82]==1) DO $AC_OVR=0 $AA_OVR[mcAxX1]=0 $AA_OVR[mcAxZ1]=0
+
+;NC-Initialisierung erfolgreich
+OUT_StartUpFinished2=TRUE
+;
+M30
+

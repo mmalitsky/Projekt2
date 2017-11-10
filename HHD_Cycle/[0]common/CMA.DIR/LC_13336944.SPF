@@ -1,0 +1,49 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_13336944.SPF
+;# Task:      LoadCase - Messzyklus
+;# Version:   V06.00.05
+;# Date:      20.10.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 6,630
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 20.10.2016 / Simons
+; - Neuversionierung
+;
+; V01.06.01  - 28.04.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+
+PROC LC_13336944
+
+;Spindel Leerfahren:
+;-------------------
+TC("0")
+
+IF (grWorkarea_MaxPos_Z < grPalLoadPosZ)
+  ;
+  D0 G0 G40 G60 G17 G153 G500 G90 G94 Z=grWorkarea_MaxPos_Z AX[mcAxB]=0
+ENDIF
+
+;Mess-Programm:
+;--------------
+;
+mcDBB_LoadCaseMeas=(mcDBB_LoadCaseMeas B_OR 'B1')
+;
+G4F.1
+G0 POS[B]=IC(720)
+G4F.5
+POS[B]=IC(-720)
+G4F.5
+;
+mcDBB_LoadCaseMeas=(mcDBB_LoadCaseMeas B_AND (B_NOT 'B1'))
+;
+RET

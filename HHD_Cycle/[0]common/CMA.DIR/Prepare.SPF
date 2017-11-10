@@ -1,0 +1,113 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Prepare.SPF
+;# Task:      Prepare Tool
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 23.03.2017 / Simons
+; - Gross / Kleinschreibung
+; - giPrepSTNo hinzu
+;
+; V06.00.03 - 09.05.2016 / Simons
+; - Prepare Optimierung
+; - Absolute Wz Bereitstellung
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+
+PROC Prepare(STRING[32] sToolName, INT iTime) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="Prepare V06.00.06", sTime, sTmp
+;
+DEF BOOL bSearchSim
+;
+DEF INT iSep, iSTNo
+
+bSearchSim=($P_SEARCH)OR($P_ISTEST)OR($P_SIM)
+
+IF (sToolName=="")
+  sToolName="0"
+ENDIF
+;
+IF (gbPrepAfterTC)AND(NOT bSearchSim)
+  ;
+  ;Vorbereitung schon in TCWP oder PREPARE angestossen -> auf Quittierung der Vorbereitung warten
+  ;
+  WHILE (OUT_PrepareActive)
+    gbWaitPrepare=FALSE
+    G04 F0.1
+  ENDWHILE
+ENDIF
+;
+iSep=MATCH(TOUPPER(sToolName)," CHECK")
+IF (iSep>-1)
+  ;
+  ;Wz soll geprueft werden
+  sToolName=SUBSTR(sToolName,1,iSep) ;giToBreakCtrlState=1 gbPrevToolBroken=FALSE
+ENDIF
+;
+;Getrennt durch ein "/"  hinter dem Wz Namen wird die SchwesterWzNummer angegeben
+iSep=INDEX(sToolName,"/") iSTNo=0
+;
+IF (iSep>-1)AND(iSep<STRLEN(sToolName))
+  sTmp=SUBSTR(sToolName,iSep+1)
+  IF ISNUMBER(sTmp)
+    iSTNo=NUMBER(sTmp) sToolName=SUBSTR(sToolName,0,iSep)
+  ELSE
+    SETAL(AL_SyntaxError,sTmp)
+  ENDIF
+ENDIF
+;
+IF (gbOptToolPrep)AND(giTNoSp>0)
+  ;
+  IF (iTime>0)
+    sTime="="<<iTime
+  ELSE
+    sTime=""
+  ENDIF
+  ;
+  IF (sToolName<>$TC_TP2[giTNoSp])AND(NOT bSearchSim)
+    ;
+    ;Das geforderte Wz ist nicht in der Sp -> Startzeit ermitteln und (verzoegerte) Vorbereitung anfordern
+    SYG_RM[mcSYG_TC+19]=mcDBR_Time SYG_IM[mcSYG_TC+9]=Working_Step gsPrepReq=sToolName<<"*"<<$TC_TP2[giTNoSp]<<"*"<<Working_Step<<sTime gbGetToTime=TRUE
+  ENDIF
+ENDIF
+;
+gsPrepTName=sToolName giPrepSTNo=iSTNo gbPrepAfterTC=TRUE
+;
+IF (sToolName=="0")
+  ;
+  ;Spindel Leerfahren
+  T0
+ELSE
+  ;
+  ;Werkzeugbereitstellung
+  ;
+  IF (iSTNo>0)
+    ;
+    ;Mit SchwesterWzNr -> Absoluter Wz Aufruf
+    TCA(sToolName,iSTNo)
+  ELSE
+    ;
+    ;Freigegebenes Wz -> Normaler Wz Aufruf
+    T=sToolName
+  ENDIF
+ENDIF
+;
+RET
+

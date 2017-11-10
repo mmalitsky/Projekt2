@@ -1,0 +1,231 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TstStop2.SPF
+;# Task:      TestStopp Kanal 2
+;# Version:   V06.00.07
+;# Date:      23.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: DDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 23.10.2017 / Simons
+; - MovASync
+;
+; V06.00.07 - 04.07.2017 / Simons
+; - Neuversionierung
+; - IF (NOT OUT_OnPosX)"OR(OUT_ComeInTC)" hinzu
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 28.03.2017 / Simons
+; - Neuversionierung
+; - FreeHGSp -> MovAsync
+;
+; V06.00.04 - 04.09.2016 / Simons
+; - Neuversionierung
+; - HandleAlarm Entfernt
+;
+; V04.00.00 - 14.01.2015 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Teststop mit Bremsentest im Kanal 2
+;
+;------------------------------------
+
+PROC TSTSTOP2(INT iMode)
+
+DEF STRING[32] sCycName="TstStop2 V06.00.07", sAlarmParam=""
+;
+DEF BOOL bTmp=FALSE
+;
+DEF INT iAlarmNo=0
+;
+DEF REAL rVeloX
+
+;Hauptlaufsynchronisierung
+STOPRE
+
+IF (NOT $P_SUBPAR[1])
+  iMode=0
+ENDIF
+
+IF ($P_SEARCH)OR($P_SIM)OR($P_CHANNO<>2) GOTOF ENDE
+
+;Istwert X1
+rVeloX=$MA_POS_AX_VELO[mcAxX1]
+
+;- Schritt 1-
+;------------
+;
+IF ($TC_MPP6[9998,mcLocHG]>0)
+  ;
+  ;HG erst leerfahren
+  ;
+  ;Auftrag (asynchron) absetzen und Zyklus verlassen
+  MovASync("0")
+  ;
+  ;TstStop2 wartet nicht auf Vollzug, da ja der Kanal 2 zugleich der Ausfuehrende ist.
+  ;Erst wenn der NC-Zyklus <TestStop> verlassen wird, kommt Sys_Cha2.spf wieder zum
+  ;Zuge und kann den zuvor abgesetzten fuer Kanal 2 bestimmten Auftrag aufgreifen. Nach
+  ;dessen Ausfuehrung verzweigt die Stelle (in Sys_Cha2.spf), an der abgefragt wird, ob Teststop
+  ;angefordert ist, wieder in den NC-Zyklus <Teststop> und fuehrt dann die geforderten Achsbewegungen aus.
+  ;solange im HG (noch) ein Wz ist aussteigen, um dieses wegbringen zu koennen.
+  ;
+  GOTOF ENDE
+ENDIF
+
+;HG ist leer
+
+MSG(MSG_TestStopRunning)
+
+IF (OUT_HgInTcPos)
+  ;
+  ;HG ist in WzW-Position
+  ;
+  IF (($TC_MPP6[9998,mcLocDG1]>0)OR($TC_MPP6[9998,mcLocDG2]>0))
+    ;DG muss leer sein
+    iAlarmNo=AL_DGNotEmpty
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (NOT OUT_DGRotInBasePos)OR(NOT mcbDBB_HGAdvanced)
+    ;
+    IF (NOT OUT_DGRotInBasePos)
+      iAlarmNo=AL_DgNotInBasePos
+    ELSE
+      iAlarmNo=AL_HgNotLowered
+    ENDIF
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (NOT mcbDBB_HGUnClamped)
+    M_HgUnclamp1
+  ENDIF
+  ;
+  M_TlTapeCleanOff0
+  ;
+  ;leeres HG in WzW-Pos sowie HG geloest/vorn sowie DG leer/horizontal
+ELSE
+  ;
+  ;ausserhalb WzW-Position
+  ;
+  IF (NOT OUT_OnPosX)OR(OUT_ComeInTC)
+    ;
+    ;HG in keiner der 7 moeglichen Positionen oder im Bereich WzW
+    ;
+    IF ($AA_IM[mcAxX1]<grLaneX[2]-grRange)
+      ;
+      ;HG im Bereich Scheibenpaket A und ..
+      ;
+      bTmp=(mcbDBB_Disk1InPassage)
+    ELSE
+      ;
+      IF ($AA_IM[mcAxX1]>grLaneX[2]+grRange)
+        ;
+        ;HG im Bereich Scheibenpaket B und ..
+        ;
+        bTmp=(mcbDBB_Disk2InPassage)
+      ELSE
+      	;
+      	;HG schon in Durchfahrposition
+      	;
+      	GOTOF HG_IN_LANE
+      ENDIF
+    ENDIF
+    ;
+    IF (bTmp)
+      ;
+      ; ..  zugehoerige V-Achse in Durchfahrposition
+      ;
+      ;X1 in Gasse Fahren
+      FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[2]
+    ELSE
+      ;HG nicht in definierter Position
+      iAlarmNo=AL_HgPosInvalid
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+  ;==========
+  HG_IN_LANE:
+  ;==========
+  ;
+  IF (NOT mcbDBB_HGUnClamped)
+    M_HgUnclamp1
+  ENDIF
+  ;
+  M_HgRet1 M_TlTapeCleanOff0
+  ;
+  ;leeres HG in Pos. Scheibe1, 2, 3, 4 oder in Gasse oder in Beladepos. sowie HG geloest/hinten
+ENDIF
+
+STOPRE
+;an Kanal 1: Kanal2-Achsen haben Teststop-Position erreicht
+giStepTeststop=4
+
+;-Schritt 2-
+;-----------
+;warten, bis Kanal1 Teststop mit Bremsentest beendet hat
+STOPRE
+REPEAT
+  G4 F0.1
+  STOPRE
+UNTIL (giStepTeststop==5)
+
+;-Schritt 3-
+;-----------
+STOPRE
+;Start Teststop (mit Bremsentest)
+M299
+;
+STOPRE
+;Warten auf Teststop-Ende
+M296
+STOPRE
+;
+;der von Kanal 1 geforderte Teststop wurde von Kanal 2 ausgefuehrt
+giStepTeststop=6
+
+;-Schritt 4-
+;-----------
+WHILE giStepTeststop  ;warten, bis Kanal 2 Teststop beendet hat
+  G4 F0.1
+  STOPRE
+ENDWHILE
+;
+IF (giTNoHg==0)
+  ;
+  ;kein Werkzeug im HG
+  ;
+  IF (NOT mcbDBB_HGUnClamped)
+    M_HgUnclamp1
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+MSG("")
+;
+giStepTeststop=0
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+M17

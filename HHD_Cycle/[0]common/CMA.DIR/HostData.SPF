@@ -1,0 +1,168 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     HostData.SPF
+;# Task:      Leitrechner Programme
+;# Version:   V06.00.08
+;# Date:      18.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 18.10.2017 / Simons
+; - Integration Bearbeitungszeitzaehler
+;
+; V06.00.05 - 02.05.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungem
+;
+; V06.00.05 - 12.11.2016 / Simons
+; - EES Devices hinzu
+;
+; V06.00.05 - 28.10.2016 / Simons
+; - Neuversionierung
+; - ToPrepOptInit Aufruf geaendert
+;
+; V06.00.04 - 10.08.2016 / Simons
+; - Neuversionierung
+; - ToPrepOptInit hinzu
+;
+; V06.00.03 - 09.05.2015 / Simons
+; - Kommentare
+; - Prepare Optimierung hinzu
+;
+; V04.00.00 - 28.01.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Aufruf mehrerer Werkstueckprogramme
+;
+; "gsMPSProgName[giMPSActivProg]"
+; enthaelt den vollstaendigen NC-Programmnamen.
+; (1 <= n <= mcMaxWPOnPal-1)
+;
+;------------------------------------
+
+PROC HostData
+
+DEF STRING[32] sCycName="HostData V06.00.08", sPathName, sProgName, sDeviceFromMPS
+;
+DEF STRING[128] sName, sProgPath
+;
+DEF BOOL bFound
+;
+DEF INT iPathLen, iStrLen, iAreaLen, iPathStart, iDeviceEnd, iCount
+
+;Synchronisieren mit Hauptlauf
+STOPRE
+;
+IF (giMPSWorkState[giMPSActivProg]==1)
+  ;
+  ;Werkstueck (giMPSActivProg) freigegeben
+  sName=gsMPSProgName[giMPSActivProg]
+  ;
+  IF ISFILE(sName)
+    ;
+    ;Aufloesen des Programmnamens
+    iStrLen=STRLEN(sName) iPathLen=RINDEX(sName,"/") sProgPath=SUBSTR(sName,0,iPathLen) iDeviceEnd=MATCH(sProgPath,":") iPathStart=RINDEX(sProgPath,"/") iAreaLen=4
+    ;
+    IF (iDeviceEnd>-1)
+      ;
+      ;EES Device (//XYZ: ...)
+      ;
+      IF (iDeviceEnd<3)
+        SETAL(AL_NotAvailable,"DEV="<<SUBSTR(sProgPath,0,iDeviceEnd+1))
+      ENDIF
+      ;
+      iAreaLen=1
+      ;
+      bFound=FALSE iCount=0 sDeviceFromMPS=TOUPPER(SUBSTR(sName,0,iDeviceEnd+1))
+      WHILE (iCount<=mcNumExtDevices)AND(NOT bFound)
+        ;
+        ;DeviceNummer ermitteln
+        ;
+      	iCount=iCount+1 bFound=(sDeviceFromMPS==TOUPPER(gsDeviceName[iCount]))
+      ENDWHILE
+      ;
+      IF (bFound)
+        ;
+        ;DeviceNummer aktivieren
+        giActDeviceNo=iCount
+      ELSE
+        ;
+        SETAL(AL_NotAvailable,"DEV"<<iCount) 
+      ENDIF
+    ENDIF
+    ;
+    IF (iPathLen>0)AND(iStrLen>iPathLen+iAreaLen+4)
+      ;
+      sPathName=SUBSTR(sProgPath,iPathStart+iAreaLen,iPathLen-iPathStart-4) sProgName=SUBSTR(sName,iPathLen+iAreaLen,iStrLen-iPathLen-iAreaLen-4)
+    ENDIF
+    ;
+    ;Prepare Initialisierung
+    ToPrepOptInit(sPathName,sProgName)
+    ;
+    IF (gbMPSSafeOffs==1)
+      ;
+      ;Alle zuvor gesicherten Nullpunkverschiebungen laden
+      READOFFS
+    ENDIF
+    ;
+    ;Lokalen Werkstueckpfad und Schrittzaehler aktivieren
+    CALLPATH(sProgPath)
+    WORKING_STEP=giMPSWorkStep[giMPSActivProg]
+    ;
+    ;Bearbeitungszeiterfassung Start
+    $AC_PROG_NET_TIME_TRIGGER=2
+    ;
+    ;Bearbeitungsprogramm Aufrufen
+    CALL sName
+    ;
+    ;Bearbeitungszeiterfassung Stop
+    $AC_PROG_NET_TIME_TRIGGER=3
+    ;
+    STOPRE
+    CALLPATH
+    ;
+    IF (gbMPSSafeOffs==1)
+      ;
+      ;Im Bearbeitungsprogramm ermittelte Nullpunktverschiebungen sichern
+      SAVEOFFS
+    ENDIF
+    ;
+    IF (giMPSWorkState[giMPSActivProg]==1)
+      ;
+      ;Immer Noch Status "Freigegeben" -> Abbruch erkannt
+      giMPSWorkState[giMPSActivProg]=3
+    ENDIF
+    ;
+    ;naechstes Werkstueck
+    giMPSActivProg=giMPSActivProg+1
+  ELSE
+    ;
+    ;Programm nicht geladen oder freigegeben
+    giMPSWorkState[giMPSActivProg]=mcMaxWPonPal
+  ENDIF
+ELSE
+  ;
+  IF (giMPSActivProg<mcMaxWPonPal-1)
+    ;
+    ;naechstes Werkstueck
+    giMPSActivProg=giMPSActivProg+1
+  ELSE
+    giMPSActivProg=0
+  ENDIF
+ENDIF
+;
+WP_CHECK
+;
+RET

@@ -1,0 +1,278 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     PutTool.SPF
+;# Task:      WZ Vorbereitung Kanal 2
+;# Version:   V06.00.07
+;# Date:      28.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 28.10.2017 / Simons
+; - <FestplatzWz> Setzen
+;
+; V06.00.07 - 14.07.2017 / Simons
+; - Formale Aenderungen
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 17.04.2017 / Simons
+; - Formale Aenderungen
+; - giSyncPickupDrop-> grSyncPickupDrop
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - HHD TM (V04.02.02 / Sept. 2016, Balles)
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+; - Falls HG im Bereich eines Magazinplatzes
+;   steht, Status neu ermitteln
+; - gbDG2MagSide hinzu
+;
+; V06.00.03 - 17.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 14.04.2016 / Simons
+; Einfuehrung
+; - HHD TM
+; - WaitCycEnd
+; - giNumRealMag,giMagNoLoadList
+;
+; V04.00.01 - 06.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Werkzeug im HG/DG im Magazin
+; asynchron ablegen
+;
+; Voraussetzungen: Werkzeug im DG/HG
+;
+;------------------------------------
+
+PROC PutTool DISPLOF
+
+DEF STRING[32] sCycName="PutTool V06.00.07", sAlarmParam=""
+;
+DEF BOOL bMagIsCas, bMagIsOldCas
+;
+DEF INT iAlarmNo=0, iDstMagNo=0, iDstPotNo=0, iSrcMagNo=0, iSrcPotNo=0, iTmp, iTmp0, iTmp1, iTNo, iTransLoc, iChkRes, iTmpMagNo, iTmpLocNo
+
+bMagIsCas=((giMagType B_AND 'B1000000')<>0) bMagIsOldCas=((bMagIsCas)AND(gbMagWithFixedGuide))
+
+IF (gbWithHG)
+  iTNo=giTNoHG iTransLoc=mcLocHG
+ELSE
+  ;
+  IF (gbWithDG)
+    ;
+    IF (gbDg2MagSide)
+      iTNo=giTNoDg2 iTransLoc=mcLocDG2
+    ELSE
+      iTNo=giTNoDg1 iTransLoc=mcLocDG1
+    ENDIF
+  ELSE
+    iTNo=0 iTransLoc=0
+  ENDIF
+ENDIF
+;
+IF ((giMagState MOD 10)==0)OR(iTNo<=0)
+  iAlarmNo=AL_NoTlInHG
+  GOTOF HandleAlarm
+ENDIF
+
+;Zielplatz ermitteln
+GetTlLoc(3,iTNo,iDstMagNo,iDstPotNo)
+;
+;Platzpruefung, ggf. Leerplatzsuche
+ChkTlLoc(0,iTNo,iDstMagNo,iDstPotNo,iTmpMagNo,iTmpLocNo,iAlarmNo,sAlarmParam)
+IF (iAlarmNo>0) GOTOF HandleAlarm
+;
+iDstMagNo=iTmpMagNo iDstPotNo=iTmpLocNo
+IF (iDstMagNo>=1)AND(iDstMagNo<=giNumRealMag)
+  ;
+  ;Platz im realen Magazin
+  ;
+  IF (($TC_MAP3[iDstMagNo] B_AND 'B10')<>0)
+    ;
+    ;Zielmagazin gesperrt
+    ;
+    SETAL(AL_WaitForCassUnlocked67)
+    ;
+    ;Auf Freigabe Warten
+    WaitCycEnd("(($TC_MAP3["<<iDstMagNo<<"] B_AND 2)==0)")
+    ;
+  ENDIF
+ENDIF
+
+;Quellplatz ermitteln
+GetTlLoc(1,iTNo,iSrcMagNo,iSrcPotNo)
+IF (iDstMagNo==iSrcMagNo)AND(iDstPotNo==iSrcPotNo)
+  ;
+  ;Quellplatz ist auch Zielplatz
+  ;
+  GetPlDat(0,0,iDstMagNo,iDstPotNo)
+ELSE
+  GetPlDat(iSrcMagNo,iSrcPotNo,iDstMagNo,iDstPotNo)
+ENDIF
+
+IF (bMagIsOldCas)
+  ;
+  ;beim alten Magazin (Baureihe nbh170ff) den Fall behandeln, dass es
+  ;2 Z-Gassen gibt (z.B. Z1=170 bzw. Z1=200 bei Magazinen mit 1 Ruestplatz)
+  ;
+  IF (gbTMIsHHD)
+    ;
+    IF (iSrcMagNo==1)AND(iDstMagNo>1)AND(iDstMagNo<=giNumRealMag)
+      ;
+      ;von Schublade => Kassette
+      ;
+      ;Zielgasse=Quellgasse
+      giPlDatLane1Z[1]=giPlDatLane1Z[0]
+    ENDIF
+    ;
+    IF (iDstMagNo==1)AND(iSrcMagNo>1)AND(iSrcMagNo<=giNumRealMag)
+      ;
+      ;von Kassette => Schublade
+      ;
+      ;Quellgasse=Zielgasse
+      giPlDatLane1Z[0]=giPlDatLane1Z[1]
+    ENDIF
+    ;
+    IF (iSrcMagNo>1)AND(iDstMagNo>1)AND(iSrcMagNo<=giNumRealMag)AND(iDstMagNo<=giNumRealMag)
+      ;Index Quellgasse , Index Zielgasse
+      iTmp0=giPlDatLane1Z[0] iTmp1=giPlDatLane1Z[1]
+      IF (iTmp>0)AND(iTmp0>0)AND(iTmp<>iTmp0)
+        ;
+        ;unterschiedliche Gassenindizes fuer Quell- und Zielplatz
+        ;
+        IF (grLaneZ[iTmp1]>=grLaneZ[iTmp0])
+          iTmp0=iTmp1
+        ELSE
+          iTmp1=iTmp0
+        ENDIF
+        ;Index Quellgasse , Index Zielgasse
+        giPlDatLane1Z[0]=iTmp0 giPlDatLane1Z[1]=iTmp1
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    IF (iSrcMagNo==1)AND(iDstMagNo>1)AND(iDstMagNo<=giNumRealMag)
+      ;
+      ;von Schublade => Kassette
+      ;
+      ;Zielgasse=Quellgasse
+      giPlDatLane1Z[0]=giPlDatLane1Z[1]
+    ENDIF
+    ;
+    IF (iDstMagNo==1)AND(iSrcMagNo>1)AND(iSrcMagNo<=giNumRealMag)
+      ;
+      ;von Kassette => Schublade
+      ;
+      ;Quellgasse=Zielgasse
+      giPlDatLane1Z[1]=giPlDatLane1Z[0]
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (gbWithHG)
+  ;
+  ;warten, bis Teilmagazin vorhanden/eingefahren/nicht gesperrt
+  ChkSwitch(1, iDstMagNo, iDstPotNo, 1, iChkRes)
+  IF (iChkRes<0)
+    sAlarmParam=<<iDstMagNo
+    IF (iChkRes==-1)
+      iAlarmNo=AL_CassIsMissing
+    ELSE
+      IF (iChkRes==-2)
+        iAlarmNo=AL_CassIsLocked
+      ENDIF
+    ENDIF
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+OEM_TlData(iTNo)
+;
+IF (gbWithHG)
+  gbHGNoTapeCl=OEM_bSelHGNoTapeCl gbHGHeavyTl=OEM_bHeavyTlHG gbHGBigTl=OEM_bBigTlHG
+ELSE
+  gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+ENDIF
+
+IF (giMagState>=80)
+  ;
+  ;HG/DG steht im Bereich eines Magazinplatzes -> Status neu ermitteln
+  GetMagSt
+ENDIF
+
+;Wz im HG/DG asynchron ins Magazin zurueckbringen
+MovTool(mcTaskAS_Displace,iTNo,iDstMagNo,iDstPotNo,iAlarmNo,sAlarmParam)
+IF (iAlarmNo>0) GOTOF HandleAlarm
+
+;Grundsaetzlich <FestplatzWz> Setzen
+TlData(iTNo,mcSetFixPlaceTl)
+
+;Werkzeugdaten aktualisieren HG/DG -> Mag
+ToAckn(TRUE,5,2,iTNo,iTNo,iDstMagNo,iDstPotNo,9998,iTransLoc,1)
+;
+;HG/DG leer in Grundstellung
+giMagState=30 grSyncPickupDrop=0 gbDG2MagSide=FALSE
+
+;Belegung Aktualisieren und Ueberpruefen
+IF (gbWithHG)
+  giTNoHg=$TC_MPP6[9998,mcLocHG] iTNo=giTNoHG gbHGBigTl=FALSE gbHGHeavyTl=FALSE gbHGNoTapeCl=FALSE
+ELSE
+  ;
+  iTNo=0
+  IF (gbWithDG)
+    ;
+    giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+    ;
+    IF (giTNoDG1>0)
+      iTNo=giTNoDG1
+    ELSE
+      ;
+      IF (giTNoDG2>0)
+        iTNo=giTNoDG2
+      ENDIF
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (iTNo>0)
+  ;HG/DG nicht leer
+  MakeAlarmParam(sAlarmParam,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+  iAlarmNo=AL_TlNotMoved
+  GOTOF HandleAlarm
+ENDIF
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+IF (iAlarmNo>0)
+  ;
+  MSG("")
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

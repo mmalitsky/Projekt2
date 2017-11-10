@@ -1,0 +1,228 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_APOS.SPF
+;# Task:      Hochlaufprogramm Kanal 1
+;# Version:   V06.00.08
+;# Date:      01.07.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;----------------------------------------------------
+; Beschreibung:
+; - Achspositionen fuer Uebergabe an PLC beschreiben
+; - Wird aufgerufen aus NC_INIT1 beim Hochlauf
+;
+; Aufgerufen im NC_INIT1.SPF
+;
+; Info:
+;
+; noch frei:
+; - grAxisPos[10-14]
+; - grAxisPos[23]
+; - grAxisPos[27-29]
+; - grAxisPos[48-59]
+; - grAxisPos[69]
+; - grAxisPos[78-79]
+;
+; grAxisPos[32..47] reserviert fuer
+; max. 2*8 diskrete Anfahrpositionen
+; (z.B. fuer PLC-Handsteuern)
+;
+;----------------------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 01.07.2017 / Simons
+; - Neuversionierung
+; - Palettenwechsler mit NC Hubachse
+;
+; V06.00.07 - 23.06.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 02.04.2017 / Simons
+; - Neue Versionierung
+; - grAxisPos[60-77] hinzu
+;
+; V06.00.05 - 19.10.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neue Versionierung
+; - D60NC / D120 / HTC042
+; - NBH1200
+;
+; V06.00.03 - 23.04.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.02 - 23.04.2016 / Simons
+; - grAxisPos[6]  NCDG Ausgehoben Fenster
+; - grAxisPos[19] Kuehlmittel Freigabe X
+;
+; V06.00.01 - 03.09.2015 / Simons
+; - grAxisPos[20] fuer CH_WM307
+; - grAxisPos[15] SW Stand Posprogramme hinzu
+; - grAxisPos[22] grTCSPos.. hinzu
+;
+; V06.00.00 - 16.06.2015 / Simons
+; - Prototyp
+;
+; V04.00.00 - 04.03.2015 / Schaaf
+; - Neues POS-Programm
+;   Bestehendes POS-Programm wurde in mehrere Einzel-
+;   programme aufgeteilt.
+;----------------------------------------------------
+
+DEF STRING[32] sCycName="SET_APOS V06.00.08", sAlarmParam="", sAPCType, sMNType, sMCType, sTCType
+;
+DEF INT iAlarmNo=0, iCount
+
+;-[]-1.0--Loeschen aller grAxisPos-
+;----------------------------------
+FOR iCount=0 TO 79
+  grAxisPos[iCount]=0
+ENDFOR
+;
+;SW Stand PosProgramme/TC
+grAxisPos[15]=60008
+;
+; Maschinentyp
+CFG_MAN("MC",sMCType)
+; Magazintyp
+CFG_MAN("MN",sMNType)
+; WzW Typ
+CFG_MAN("TC",sTCType)
+; Palettenwechsler
+CFG_MAN("APCNC",sAPCType)
+;
+; Maschine Positionen
+;--------------------
+IF (sMCType=="NBH1200")
+  grAxisPos[1]=grPalLoadPosXL ; Palettenwechselposition X links
+  grAxisPos[2]=grPalLoadPosXR ; Palettenwechselposition X rechts
+  grAxisPos[4]=grTcPosZ       ; WzW Position X
+ELSE
+  grAxisPos[1]=grPalLoadPosZ  ; Palettenwechselposition Z
+  grAxisPos[2]=grFreePosZ     ; Freifahrpositon Z
+  grAxisPos[4]=grTcPosX       ; WzW Position X
+ENDIF
+;  
+grAxisPos[3]=grTcPrePosX    ; Vorposition X
+grAxisPos[5]=grTcPosY       ; WzW Position Y
+grAxisPos[6]=grLiftWinDGRot+grPara[1]          ;+/- Fenster NCDG Ausgehoben
+grAxisPos[19]=grTcPrePosX+grTCCoolOn+grPara[1] ;Kuehlmittel Freigabe, wenn X < grAxisPos[19]
+grAxisPos[22]=grTcSPos      ; WzW Position Sp
+;
+;Systemmaschine
+grAxisPos[16]=grLineNo      ; Liniennummer
+grAxisPos[17]=grOpNo        ; Operationsnummer
+grAxisPos[18]=grMachNo      ; Maschinennummer
+
+;Spindel mit Analogwertgeber - Vorgabewerte
+grAxisPos[24]=grSpEncUnclamped     ; Geloest
+grAxisPos[25]=grSpEncClamped       ; Geklemmt mit Wz
+grAxisPos[26]=grSpEncClampedWoTool ; Geklemmt ohne Wz
+
+; Palettenwechsel
+grAxisPos[30]=grPalLoadPosB ; Beladeposition B-Achse
+;
+IF (sAPCType=="APCNC")
+  ;Palettenwechsler mit NC Hubachse
+  grAxisPos[43]=grPCPosFreeZ                   ;Z-Achse Freifahrposition Palettenwechsel
+  grAxisPos[44]=grPCYPosLow                    ;Palettenwechsler-Hub Untere Position
+  grAxisPos[45]=grPCYPosLoadPos                ;Palettenwechsler-Hub Position Beladeplatz	
+  grAxisPos[46]=grPCYPosRotTab                 ;Palettenwechsler-Hub Position Drehtisch
+  grAxisPos[47]=grPCYPosUpper                  ;Palettenwechsler-Hub Obere Position
+ENDIF
+;
+IF (sMCType=="NBH1200")
+  ;
+  ;Kettenpositionen
+  ;
+  grAxisPos[60]=grChWaitPosLD
+  grAxisPos[61]=grChPosLD
+  grAxisPos[62]=grChPosCH
+  grAxisPos[63]=grChPosMC
+  grAxisPos[64]=grChWaitPosMC
+  grAxisPos[65]=grChPrePosToLD
+  grAxisPos[66]=grChPrePosToMC
+  grAxisPos[67]=grChPrePosMCToCH
+  grAxisPos[68]=grChPrePosLDToCH
+ENDIF
+
+IF (sTCType=="HHD")
+  ;
+  ;Position DG Linearachse
+  ;
+  grAxisPos[70]=grHomePosDGLin
+  grAxisPos[71]=grHomePosDGLinPlus
+  grAxisPos[72]=grTransPosDGLin
+  grAxisPos[73]=grTransPosDGLinPlus
+  grAxisPos[74]=grSwivPosDGLin
+  grAxisPos[75]=grSwivPosDGLinPlus
+  grAxisPos[76]=grRelPosZDGLin
+  grAxisPos[77]=grPosWinDGLin
+ENDIF
+
+; Magazine
+;---------
+;
+IF (gbWithHG)
+  grAxisPos[7]=grHGTcPrePosX
+  grAxisPos[8]=grHgTcPosX
+  grAxisPos[9]=grHgTcPosZ
+ENDIF
+;
+IF (sMNType=="D")OR(sMNType=="CH_WM307")
+  ;
+  grAxisPos[20]=giMagOffsetLoadPot
+  RET
+ENDIF
+;
+IF (sMNType=="CH")
+  ;
+  ;Kette Miksch
+  ;
+  grAxisPos[20]=giMagOffsetLoadPot
+  ;
+  grAxisPos[32]=grHGPosX[1] ;WzW-Punkt
+  grAxisPos[33]=grHGPosX[2] ;Kette
+  RET
+ENDIF
+;
+IF (sMNType=="D60NC")OR(sMNType=="D120")
+  ;
+  grAxisPos[20]=giMagOffsetLoadPot
+  grAxisPos[21]=grDiskPassage
+  ;
+  grAxisPos[32]=grHgTcPosX ;WzW-Punkt
+  grAxisPos[33]=grHGPosX[2]+grCassCorrX[1]  ;Scheibe1
+  grAxisPos[34]=grHGPosX[3]+grCassCorrX[2]  ;Scheibe2
+  grAxisPos[35]=grHGPosX[4] ;freie Gasse / Pos. manuelles Beladen
+  grAxisPos[36]=grHGPosX[5]+grCassCorrX[3]  ;Scheibe3
+  grAxisPos[37]=grHGPosX[6]+grCassCorrX[4]  ;Scheibe4
+  grAxisPos[38]=grHgLoadPosX ;Pos. manuelles Beladen
+  ;
+  RET
+ENDIF
+;
+IF (sMNType=="CAS")
+  ;
+  RET
+ENDIF
+;
+iAlarmNo=AL_WrongCFG sAlarmParam="MN"
+
+;===========
+HandleAlarm:
+;===========
+;
+SETAL(iAlarmNo,sAlarmParam)
+;
+RET

@@ -1,0 +1,70 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Send.SPF
+;# Task:      Telegramm an MMC mit Warten
+;# Version:   V06.00.08
+;# Date:      18.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+; Verlauf:
+;
+; V06.00.08 - 18.08.2017 / Simons
+; - Neuversionierung
+;
+; V04.02.00 - Maerz 2016/Balles
+; - Vorlage
+;----------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; HHD-Werkzeugverwaltung mit unterlagerter SIEMENS-WzV
+; a) Telegramm an MMC senden
+;
+; Eingangsparameter:
+; ------------------
+;  iTelNo:        Telegramm-Nummer (stets>0)
+;  sTelDat:       Nutzdaten
+;
+;----------------------------------
+
+PROC Send(INT iTelNo, STRING[200] sTelDat)
+
+DEF STRING[32] sCycName="Send V06.00.07"
+;
+DEF INT iTmpTelNo
+
+IF (giAcknFromMMC<>giReqToMMC)
+  ;maximal 30s warten
+  WaitResp(30)
+ENDIF
+;
+IF (giTelOffset<999)
+  giTelOffset=giTelOffset+1
+ELSE
+  giTelOffset=0
+ENDIF
+iTmpTelNo=iTelNo+giTelOffset
+;
+IF (iTmpTelNo==giAcknFromMMC)
+  ;
+  ;Telegrammnummer haette die gleiche Nummer wie die Quittierung -> Sie muss nochmals modifiziert werden
+  ;
+  IF (giTelOffset<999)
+    giTelOffset=giTelOffset+1
+  ELSE
+    giTelOffset=0
+  ENDIF
+  iTmpTelNo=iTelNo+giTelOffset
+  ;
+ENDIF
+;
+;jetzt Telegramm ausloesen
+giMBoxFromMMC[0]=0 giMBoxFromMMC[1]=0 giMBoxFromMMC[2]=0 giMBoxFromMMC[3]=0 gsMBoxToMMC[0]=sTelDat
+giReqToMMC=iTmpTelNo
+;
+RET

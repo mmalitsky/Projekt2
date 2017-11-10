@@ -1,0 +1,173 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkSwitch.SPF
+;# Task:      Mag. Belegung Pruefen
+;# Version:   V06.00.07
+;# Date:      24.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 24.08.2017 / Simons
+; - Neuversionierung
+; - Parametrierung von WaitCycEnd
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 27.07.2016 / Simons
+; - Neuversionierung
+; - HHD TM
+;
+; V06.00.02 - 14.04.2015 / Simons
+; - WaitCycEnd eingefuehrt
+;
+; V04.02.00 - 29.04.2016 / Balles
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Pruefen, ob Magazin vorhanden ist
+; Pruefen, ob Magazinplatz belegt ist
+;
+; Eingangsparameter:
+; ------------------
+; iMode:
+; 0=Nur Pruefen
+; 1=Warten auf Magazin
+; 2=Warten auf Werkzeug entnommen
+; 3=Warten auf Werkzeug eingelegt
+; 4=Pruefen auf Werkzeug vorhanden unabhaengig von Magazin vorhanden
+;
+; iCassNo: Magazin fuer Anwesenheitspruefung
+; iPotNo:  Platz fuer Anwesenheitspruefung
+; iBufNo:  Buffernummer fuer Werkzeugdaten
+;
+; Ausgangsparameter:
+; ------------------
+; iChkRes: Pruefergebnis
+; -2 : Magazin vorhanden, aber gesperrt
+; -1 : Magazin nicht vorhanden
+;  0 : Magazin vorhanden, kein Bero am Platz
+;  1 : Magazin vorhanden, Platz leer von Bero
+;  2 : Magazin vorhanden, Platz belegt von Bero
+;
+; >=0: keine Magazinabfrage bei iMode=4
+;
+;------------------------------------
+
+PROC ChkSwitch(INT iMode, INT iCassNo, INT iPotNo, INT iBufNo, VAR INT iChkRes) SBLOF DISPLOF
+
+DEF STRING[32] sCycName="ChkSwitch V06.00.07"
+;
+DEF INT iMaskBero=0, iMaskCass, iBero
+
+iChkRes=0 iBero=giPlDatBero[iBufNo] iMaskCass=RTOI(EXP((iBufNo-1)*LN(2)))
+
+IF (iBero>0)
+  ;
+  ;Freigabe ueber Konfiguration
+  ;
+  iMaskBero=RTOI(EXP((iBero-1)*LN(2))) iMaskBero=(iMaskBero B_AND $MN_USER_DATA_INT[15])
+ENDIF
+
+;Wz vorhanden Kontrolle mit BERO
+IF (iMode==4) GOTOF _MODE4
+
+IF ((mcDBW_MagExist B_AND iMaskCass)==0)
+  ;
+  ;Magazin ist nicht vorhanden
+  ;
+  IF (iMode>0)
+    ;
+    IF (gbTMIsHHD)
+      ;Format ccpppnnn
+      giStateToMMC[1]=(iCassNo*1000)*1000 + mcState2WaitForCassPutIn
+    ENDIF
+    ;
+    ;Im HNT Warten auf Magazin/Werkzeug
+    SETAL(AL_WaitForCassPutIn67,<<iCassNo)
+    WaitCycEnd("((mcDBW_MagExist B_AND "<<iMaskCass<<")<>0)")
+  ELSE
+    iChkRes=-1
+    GOTOF _END
+  ENDIF
+ENDIF
+
+IF (($TC_MAP3[iCassNo] B_AND 'B10')<>0)
+  ;
+  ;Magazin ist gesperrt
+  ;
+  IF (iMode>0)
+    ;
+    IF (gbTMIsHHD)
+      giStateToMMC[1]=(iCassNo*1000)*1000 + mcState2WaitForCassUnlocked
+    ENDIF
+    ;
+    ;Im HNT Warten auf Freigabe Magazin/Werkzeug
+    SETAL(AL_WaitForCassUnlocked67,<<iCassNo)
+    WaitCycEnd("(($TC_MAP3["<<iCassNo<<"] B_AND 2)==0)")
+  ELSE
+    iChkRes=-2
+    GOTOF _END
+  ENDIF
+ENDIF
+
+;=====
+_MODE4:
+;=====
+;
+;Werkzeug vorhanden Kontrolle ueber Bero
+IF (iMaskBero<>0)
+  ;
+  IF ((mcDBW_MagBero B_AND iMaskBero)<>0)
+    ;
+    ;Magazin vorhanden, Platz belegt von Bero
+    iChkRes=2
+  ELSE
+    ;
+    ;Magazin vorhanden, Platz leer von Bero
+    iChkRes=1
+  ENDIF
+ENDIF
+
+IF (iMode==2)AND(iChkRes==2)
+  ;
+  IF (gbTMIsHHD)
+    giStateToMMC[1]=((iCassNo*1000)+iPotNo)*1000+mcState2WaitForToolRemoved
+  ENDIF
+  ;
+  ;Im HNT Warten auf Werkzeug entnommen
+  SETAL(AL_WaitForToolRemoved67,<<iCassNo<<"/"<<iPotNo)
+  WaitCycEnd("((mcDBW_MagBero B_AND "<<iMaskBero<<")==0)")
+  ;
+  iChkRes=1
+ENDIF
+
+IF (iMode==3)AND(iChkRes==1)
+  ;
+  IF (gbTMIsHHD)
+    giStateToMMC[1]=((iCassNo*1000)+iPotNo)*1000 + mcState2WaitForToolPutIn
+  ENDIF
+  ;
+  ;Im Warten auf Werkzeug eingelegt
+  SETAL(AL_WaitForToolPutIn67,<<iCassNo<<"/"<<iPotNo)
+  WaitCycEnd("((mcDBW_MagBero B_AND "<<iMaskBero<<")<>0)")
+  ;
+  iChkRes=2
+ENDIF
+
+;====
+_END:
+;====
+;
+RET

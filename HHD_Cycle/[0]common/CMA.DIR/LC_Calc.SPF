@@ -1,0 +1,373 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_Calc.SPF
+;# Task:      LoadCase Uebernahme Messwerte
+;# Version:   V06.00.07
+;# Date:      08.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 08.08.2017 / Simons
+; - WHENEVER (TRUE) DO -> DO
+;
+; V06.00.07 - 20.07.2017 / Simons
+; - Protokolltexte in Englisch
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 05.01.2017 / Simons
+; - rc0x1Nm hinzu
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - "DRIVEDATA" hinzu
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - Neuversionierung
+; - MsgBox hinzu
+;
+; V01.06.01  - 10.10.2013 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Voraussetzungen:
+; a) Siemens-Option [Auswertung interner Antriebsgrößen]:   MD19320 Bit0=1 ($ON_TECHNO_FUNCTION_MASK),  
+; b) Option [Erfasssung der axialen Antriebswerte] B-Achse: MD36730=1      ($MA_DRIVE_SIGNAL_TRACKING[B]).
+; c) REDEF für max.Achsbeschleunigung und KV-Faktor in MGUD_maschinenspezifisch.
+; 
+; Allgemeine Funktionsbeschreibung:
+; Der Zyklus ermittelt den Drehmomentmaximalwert der B-Achse beim Schwenken um +360Grad und -360Grad.
+; Dabei wird zunächst die Achsbeschleunigung und der KV-Faktor der B-Achse auf den "worst case" zurückgenommen (Default).
+; Aus dem ermittelten Drehmomentmaximalwert wird die maximale Beschleunigung und der KV-Faktor für den aktuellen Lastfall abgeleitet.
+; Die max. Auslastung beträgt nach dieser Adaption < 90%.
+; Der KV-Faktor variiert hierbei mit gestuften Festwerten, die Beschleunigungsanpassung erfolgt stufenlos zwischen Minimal- und Maximalwert.
+; Der nichtlineare Zusammenhang zwischen den Dynamikparametern und dem Drehmomentmaximalwert wird über 2 Geradengleichungen angenähert.  
+; Der Vorschuboverride wird während der Messung auf 100% überwacht.
+;
+; Parameterbeschreibung (Kanal 1):
+; SYG_RM[iLoadCaseSYGR]=absoluter Drehmomentmaximalwert (LC_CALC)
+; SYG_RM[iLoadCaseSYGR+1]=Timer (LC_INIT)
+; SYG_RM[iLoadCaseSYGB]=Geschwindigkeit im erlaubten Bereich (LC_CALC)
+;
+;------------------------------------
+
+PROC LC_Calc(STRING[128] sFileName, STRING[128] sActProg, STRING[32] sProgName) SAVE DISPLOF SBLOF
+
+DEF STRING[32] sCycName="LC_Calc V06.00.07", sWLine=";-------------------------------", sResult
+;
+DEF STRING[128] sLCMeasProgName
+DEF STRING[255] sDiag="", sDiag1="", sWrTxt
+;
+DEF BOOL bNoOptMode=FALSE, bErrorAcc=FALSE, bErrOVR=FALSE, bCalcDataNotOk=FALSE, bConfSpecType=FALSE, bStepCalc, bPalMounted, bInfluenceSideAx, bSpecialType
+;
+DEF AXIS aAX
+;
+DEF INT iError=0
+;
+DEF REAL rc0x1Nm=0.1, rJerkSideAx, rAccCal, rJerkCal, rKvCal, rVeloCal, rActTorque
+
+IF ($P_SIM)
+  RET
+ENDIF
+
+;----------------
+;Globadaten laden
+;----------------
+aAx=gaxLCAxName bInfluenceSideAx=(grLCTorqLimSideAxInflu>0)
+
+;----------------------------------------
+;Konfiguration und Voraussetzungen prüfen
+;----------------------------------------
+;
+;Abfrage Konfiguration mit Lastfallüberwachung für Torque-Tisch
+CFG_MAN("LOADCASE",sResult)
+IF (sResult=="") GOTOF ENDE
+
+CFG_MAN("DRIVEDATA",sResult)
+IF (sResult=="")
+  ;Wenn Option nicht vorhanden dann min. Werte
+  bNoOptMode=TRUE
+  GOTOF SPEICHERN
+ENDIF
+
+;Abfrage ob Option [Erfassung der Antriebs-Istwerte] für die entsprechende Achse freigeschaltet ist
+IF ($MA_DRIVE_SIGNAL_TRACKING[aAx]<>1)
+  SETAL(AL_LCReadAxisDataMissing,<<aAx) 
+  GOTOF ENDE
+ENDIF
+
+;Adaptionsdaten fehlen
+bCalcDataNotOk=((grLCAccDenom1==0)OR(grLCAccDenom2==0)OR(NOT gbLCCheckAxis))
+IF (bCalcDataNotOk) GOTOF SPEICHERN
+
+;------------------------
+;Ausführen der Berechnung
+;------------------------
+;
+;Neuinitialisierung der lokalen Synchronaktionen
+CANCEL(SyncID_LoadCaseMod,SyncID_LoadCaseMod+1)
+
+;Vorbelegen der Parameter / <Palette eingebaut> Antriebsdaten umschalten
+SYG_RM[iLoadCaseSYGR]=0 SYG_RM[iLoadCaseSYGR+1]=0 SYG_BM[iLoadCaseSYGB]=FALSE bPalMounted=(($A_DBB[19] B_AND 'B100')<>0)
+
+IF (NOT bPalMounted) GOTOF SPEICHERN
+
+;---------------------------------------------------------
+;Erkennung Sonderfall Überladung: Antriebsdaten umschalten
+;---------------------------------------------------------
+IF (ISVAR("gsLCPalSpecialTypeName") AND ISVAR("grLCVeloStd"))
+  ;
+  IF ((STRLEN(gsLCPalSpecialTypeName[0])>2)OR(STRLEN(gsLCPalSpecialTypeName[1])>2))
+    ;
+    bConfSpecType=TRUE
+    ;
+    IF ((STRLEN(gsLCPalSpecialTypeName[0])>2)AND(MATCH(sProgName,gsLCPalSpecialTypeName[0])<>-1))OR((STRLEN(gsLCPalSpecialTypeName[1])>2)AND(MATCH(sProgName,gsLCPalSpecialTypeName[1])<>-1))
+      bSpecialType=TRUE
+    ENDIF
+  ENDIF
+  ;
+  IF (bSpecialType) GOTOF SPEICHERN
+  ;
+ENDIF
+
+;----------------------------------------
+;Ausführen der Messungen und Berechnungen
+;----------------------------------------
+IF (gbLCUserRun<>0)
+   ;
+   ;Messungen sollen durch Bediener gestartet werden
+   MsgBox(MSG_StartLoadCase,"CLEAR M0")
+ENDIF
+;
+MsgBox(MSG_RunLoadCase,"CLEAR DELAY=1")
+;
+;----------------------------------------------
+;Startbeschleunigung, Start-KV-Faktor (Default)
+;----------------------------------------------
+IF (bConfSpecType)
+  $MA_MAX_AX_VELO[aAx]=grLCVeloStd $MA_MAX_AX_ACCEL[aAx]=grLCAccMin $MA_POSCTRL_GAIN[0,aAx]=grLCKv1 $MA_JOG_AND_POS_MAX_JERK[aAx]=grLCJerkMin $MA_MAX_AX_JERK[0,aAx]=grLCJerkMin
+ELSE
+  $MA_MAX_AX_ACCEL[aAx]=grLCAccMin $MA_POSCTRL_GAIN[0,aAx]=grLCKv1 $MA_JOG_AND_POS_MAX_JERK[aAx]=grLCJerkMin $MA_MAX_AX_JERK[0,aAx]=grLCJerkMin
+ENDIF
+;
+NEWCONF
+STOPRE
+;
+;-------------------------------
+;absoluter Drehmomentmaximalwert
+;-------------------------------
+ID=SyncID_LoadCaseMod+0 WHENEVER(mcDBB_LoadCaseMeas==1) DO SYG_RM[iLoadCaseSYGR]=MAXVAL(ABS($AA_TORQUE[aAx]),SYG_RM[iLoadCaseSYGR])
+ID=SyncID_LoadCaseMod+1 DO SYG_BM[iLoadCaseSYGB]=((ABS($AA_VACTM[aAx])>=grLCFeedNom)OR(SYG_BM[iLoadCaseSYGB]))
+
+;--------------------------
+;Aufrufen des Messprogramms
+;--------------------------
+sLCMeasProgName = "/_N_CMA_DIR/_N_LC_" << giLCAxisIdent << "_SPF" 
+IF ISFILE(sLCMeasProgName)
+  CALL sLCMeasProgName
+ELSE
+  SETAL(AL_LCMeasProgNotFound)
+  GOTOF ENDE
+ENDIF
+
+CANCEL(SyncID_LoadCaseMod+0,SyncID_LoadCaseMod+1)
+
+;------------------------------------------------
+;Vorschuboverrideüberwachung, Alarm bei OVR<>100%
+;------------------------------------------------
+bErrOVR=(NOT SYG_BM[iLoadCaseSYGB]) rActTorque=SYG_RM[iLoadCaseSYGR]
+;
+IF (bErrOVR)
+  SETAL(AL_LCOvrNot100)
+  GOTOF SPEICHERN
+ENDIF
+
+;-------------------------------------------------------
+;Messungsauswertung: minimale Auslastung -> hohe Dynamik
+;-------------------------------------------------------
+IF (rActTorque<=grLCTorqueMin)
+  rAccCal=grLCAccMax rKvCal=grLCKv3 rJerkCal=grLCJerkMax
+  GOTOF CHECK
+ENDIF
+;
+;-----------------------------------------------------------------------
+;Messungsauswertung: hohe mittlere Auslastung -> mittel niedrige Dynamik
+;-----------------------------------------------------------------------
+IF (rActTorque<=grLCTLimKv32);400
+  rKvCal=grLCKv3 rJerkCal=grLCJerkMin 
+  GOTOF CALC
+ENDIF
+;
+;-----------------------------------------------------------------------
+;Messungsauswertung: niedrige mittlere Auslastung -> mittel hohe Dynamik
+;-----------------------------------------------------------------------
+IF (rActTorque<=grLCTLimKv21);500
+  rKvCal=grLCKv2 rJerkCal=grLCJerkMin
+  GOTOF CALC
+ENDIF
+;
+;-----------------------------------------------------------
+;Messungsauswertung: maximale Auslastung -> niedrige Dynamik
+;-----------------------------------------------------------
+IF (rActTorque>=grLCTorqueMax)
+  rAccCal=grLCAccMin rKvCal=grLCKv1 rJerkCal=grLCJerkMin
+  GOTOF CHECK
+ENDIF
+;
+;kein Fall zutreffend (Default)
+rKvCal=grLCKv1 rJerkCal=grLCJerkMin
+
+;-------------------------
+;Beschleunigung berrechnen
+;-------------------------
+;
+;====
+CALC:
+;====
+IF (rActTorque<=grLCTorqueLim)
+  rAccCal=(rActTorque/grLCAccDenom1)+grLCAccZero1
+ELSE
+  rAccCal=(rActTorque/grLCAccDenom2)+grLCAccZero2
+ENDIF
+
+;=====
+CHECK:
+;=====
+bErrorAcc=(((rAccCal-rc0x1Nm)>grLCAccMax)OR((rAccCal+rc0x1Nm)<grLCAccMin))
+
+;----------------------------
+;Ruckanpassung der Nebenachse
+;----------------------------
+IF (bInfluenceSideAx)
+  ;
+  IF (rActTorque>=grLCTorqLimSideAxInflu)
+    rJerkSideAx=grLCSideAxJerk
+  ELSE
+    rJerkSideAx=grLCSideAxStdValJerk
+  ENDIF 
+ENDIF
+
+;=========
+SPEICHERN:
+;=========
+;
+;------------------------------
+;Minimalwerte bei Fehler setzen
+;------------------------------
+IF (bErrorAcc)
+  sDiag=MSG_LC_OutOfRange<<" ("<<rAccCal<<" rad/s²)" sDiag1="Calculated value out of range ("<<rAccCal<<" rad/s²)"
+ENDIF
+;
+IF (bNoOptMode)
+  sDiag=MSG_LC_LicenseMissing sDiag1="License <Internal Drivedata> is missing"
+ENDIF
+;
+IF (bErrOVR)
+  sDiag=MSG_FeedOvrBelow100 sDiag1="Not 100% override"
+ENDIF
+;
+IF (bCalcDataNotOk)
+  sDiag=MSG_LC_InvalidAdaption
+ENDIF
+;
+IF (NOT bPalMounted)
+  sDiag=MSG_LC_PalNotMounted sDiag1="Pallet not mounted"
+ENDIF
+;
+IF ((bErrorAcc)OR(bNoOptMode)OR(bErrOVR)OR(bCalcDataNotOk)OR(NOT bPalMounted))
+  sDiag=sDiag<<" -> "<<MSG_LC_StndDynamic sDiag1=sDiag1<<" -> Dynamic = Standard"
+  rAccCal=grLCAccMin rKvCal=grLCKv1 rJerkCal=grLCJerkMin rJerkSideAx=grLCSideAxStdValJerk
+ENDIF
+;
+IF (bConfSpecType)
+  ;
+  rVeloCal=grLCVeloStd
+  IF (bSpecialType)AND(bPalMounted)
+    sDiag=sDiag<<" -> "<<MSG_LC_SpecDynamic sDiag1=sDiag1<<" -> Dynamic = Special"
+    rAccCal=grLCAccSpecial rKvCal=grLCKvSpecial rJerkCal=grLCJerkMin rJerkSideAx=grLCSideAxStdValJerk rVeloCal=grLCVeloSpecial
+  ENDIF
+ENDIF
+;
+MSG(sDiag)
+
+;----------------------------
+;Anpassungsprogramm schreiben
+;----------------------------
+IF ISFILE(sFileName)
+  DELETE(iError,sFileName)
+ENDIF
+;
+;File wird neu erstellt:
+;-----------------------
+;
+sWrTxt=";Dataset for A." << giLCAxisIdent
+WRITE(iError,sFileName,sWrTxt)
+sWrTxt=";Dataset related to machining program <" << sActProg << ">"
+WRITE(iError,sFileName,sWrTxt)
+sWrTxt=";TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND
+WRITE(iError,sFileName,sWrTxt)
+;
+IF (sDiag1<>"")
+  WRITE(iError,sFileName,";")
+  WRITE(iError,sFileName,";" << sDiag1)
+  WRITE(iError,sFileName,";")
+ENDIF
+;
+sWrTxt=";Maximum torque for "<< AXSTRING(aAx) <<"-Axis: " << rActTorque << " Nm"
+WRITE(iError,sFileName,sWrTxt)
+WRITE(iError,sFileName,sWLine)
+sWrTxt="$MA_MAX_AX_ACCEL[" << AXSTRING(aAx) << "]=" << rAccCal
+WRITE(iError,sFileName,sWrTxt)
+sWrTxt="$MA_POSCTRL_GAIN[0," << AXSTRING(aAx) << "]=" << rKvCal
+WRITE(iError,sFileName,sWrTxt)
+;
+IF (grLCJerkMin<>grLCJerkMax)
+  sWrTxt="$MA_JOG_AND_POS_MAX_JERK[" << AXSTRING(aAx) << "]=" << rJerkCal
+  WRITE(iError,sFileName,sWrTxt)
+  sWrTxt="$MA_MAX_AX_JERK[0," << AXSTRING(aAx) << "]=" << rJerkCal
+  WRITE(iError,sFileName,sWrTxt)
+ENDIF
+WRITE(iError,sFileName,sWLine)
+;
+IF (bConfSpecType)
+  sWrTxt="$MA_MAX_AX_VELO[" << AXSTRING(aAx) << "]=" << rVeloCal
+  WRITE(iError,sFileName,sWrTxt)
+  IF ((bSpecialType)AND(bPalMounted))
+    ;
+    IF (giLCDrvDataHFctNo>0)
+      sWrTxt="H" << giLCDrvDataHFctNo << "=" << giLCSpecialDrvData
+      WRITE(iError,sFileName,sWrTxt)
+      WRITE(iError,sFileName,"STOPRE")         
+      WRITE(iError,sFileName,sWLine)        
+    ENDIF
+  ENDIF 
+ENDIF
+;
+IF (bInfluenceSideAx)
+  sWrTxt="$MA_JOG_AND_POS_MAX_JERK[" << AXSTRING(gaxLCSideAxis) << "]=" << rJerkSideAx
+  WRITE(iError,sFileName,sWrTxt)
+  sWrTxt="$MA_MAX_AX_JERK[0," << AXSTRING(gaxLCSideAxis) << "]=" << rJerkSideAx
+  WRITE(iError,sFileName,sWrTxt)      
+  WRITE(iError,sFileName,sWLine)      
+ENDIF
+;
+WRITE(iError,sFileName,"G4F.1")    
+;
+IF ((iError==10)OR(iError==12))
+  SETAL(AL_LCNoMemoryDelete67)
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET

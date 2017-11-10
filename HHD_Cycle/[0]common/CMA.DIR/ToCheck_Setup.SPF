@@ -1,0 +1,252 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToCheck_Setup.SPF
+;# Task:      BBK - MSC Typ BK..
+;# Version:   V06.00.06
+;# Date:      16.05.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+;---------
+;
+; V06.00.06 / 16.05.2017 / Simons
+; - mcResAllMeasured_Tested -> mcResMeasured_Tested
+;
+; V06.00.06 / 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 02.04.2017 / Simons
+; - OEM_TlData(..,x) -> OEM_TlData(..,mc..)
+;
+; V06.00.05 / 11.10.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+; - TC("0") vor/nach dem Einmessen
+;
+; V06.00.04 / 29.08.2016 / Simons
+; - Neuversionierung
+; - Plausibilitaetspruefung der Laengen
+;   beim Einmessen
+; - Kennungen nach SetUp Loeschen etc.
+;
+; V06.00.03 / 28.06.2016 / Simons
+; - Wartezeit veraendert
+;
+; V06.00.03 / 07.05.2016 / Simons
+; - Korrekturen
+; - Einfuehrung HHD TM
+;
+; V06.00.01 / 20.07.2015 / Simons
+; - Ueberwachung mit grOFFSETMIN_MSC
+;   grOFFSETMAX_MSC eingefuehrt,
+;   Fehlermeldungen an Magazintyp
+;   angepasst
+;
+; V06.00.00 / 17.07.2015 / Simons
+; - Prototyp
+;
+; V04.00.00 / 27.03.2014 / Huettner
+;------------------------------------
+;
+; Cycle for Setup of Tool breakage
+; Type "MSC BK9"
+;
+; Laengen bei Simulation:
+; Wz1/2/3=300/350/400
+;
+;-------------------------------------
+
+PROC ToCheck_Setup
+
+DEFINE mcbBBKFinished AS (($A_DBB[3] B_AND 'B100')<>0)
+
+DEF STRING[32] sCycName="ToCheck_Setup V06.00.06"
+;
+DEF BOOL bEnabled
+;
+DEF INT icMSCTeach=4, icMinDiff=50, iMeasValue, iMeasResult, iErrCount, iCountTool, iTNo, iError, iError2, iMaxFileSize, iSize, iFError, iMeasCutNo, iErrTime
+;
+DEF REAL rcErrTimeDefault=10, rcBaseAngle=90.0, rcResolution=0.01, rOutVar1, rOutVar2, rOutVar3, rVar1, rVar2, rWaitShort, rGeoVal
+DEF REAL rAngle[4]
+DEF REAL rToolLength[4]
+
+iErrTime=RTOI(rcErrTimeDefault/$MN_IPO_CYCLE_TIME)
+
+;Wait until old order finished
+WHILE (giTaskID<>0)
+  STOPRE
+ENDWHILE
+;
+;Spindel und HG Leerfahren
+TC("0")
+;
+FOR iCountTool = 1 TO 3
+  ;
+  ;Start order with selected Tool (HMI), CutNo=1
+  ;
+  iTNo=GETT(gsMSCToName[iCountTool],1)
+  IF (iTNo<=0)
+    ;missing tool
+    SETAL(AL_TlNotFound67,"T="<<gsMSCToName[iCountTool]<<"/1")
+    RET
+  ENDIF
+  ;
+  ;Wz Pruefen/Vermessen Lesen
+  iMeasCutNo=1
+  ;
+  OEM_TlData(iTNo,mcGetMeasProp,iMeasCutNo)
+  ;
+  IF (NOT OEM_bValidMeasCut)
+    ;Wz soll nicht gerueft werden
+    SETAL(AL_TlMeasInvalidCutNo67,"D"<<$P_TOOLND[iTNo]<<" (D="<<iMeasCutNo<<")")
+    RET
+  ENDIF
+  ;
+  rGeoVal=($TC_DP3[iTNo,iMeasCutNo]+$TC_DP12[iTNo,iMeasCutNo])
+  ;
+  IF (OEM_rCheckLen==0)
+    ;
+    ;Noch kein Sollwert bekannt -> Sollwert setzen
+    ;
+    OEM_TlData(iTNo,mcSetMeasVal,iMeasCutNo,rGeoVal)
+  ENDIF
+  ;
+  ;order to channel 2
+  ToMeas(icMSCTeach,gsMSCToName[iCountTool])
+  ;
+  WHILE (giTaskID<>0)
+    ;wait until current order in channel 2 is finished
+    STOPRE
+  ENDWHILE
+  ;
+  iErrCount=0
+  REPEAT
+    iMeasValue=$A_DBW[20] iMeasResult=$A_DBW[22] bEnabled=(mcbBBKFinished)AND(iMeasResult>0)AND((iMeasResult==4)OR(iMeasValue>0))
+    IF (NOT bEnabled)
+      iErrCount=iErrCount+1
+      IF (iErrCount>iErrTime)
+        SETAL(66621)
+      ENDIF
+    ENDIF
+  UNTIL (bEnabled)
+  ;
+  IF (iMeasResult==4)
+    ;tool to long
+    SETAL(66627)
+  ELSE
+    ;
+    rAngle[iCountTool]=iMeasValue*rcResolution rToolLength[iCountTool]=rGeoVal
+  ENDIF
+  ;
+  G4F1
+  ;
+ENDFOR
+
+IF (ABS(rToolLength[1]-rToolLength[2])<icMinDiff)OR(ABS(rToolLength[1]-rToolLength[3])<icMinDiff)OR(ABS(rToolLength[2]-rToolLength[3])<icMinDiff)
+  ;
+  ;Wrong SetUp tool / Length
+  SETAL(66634,"(L)")
+ENDIF
+
+IF ((ABS(rAngle[1]-rAngle[2]) MOD 90)==0)OR((ABS(rAngle[1]-rAngle[3]) MOD 90)==0)OR((ABS(rAngle[2]-rAngle[3]) MOD 90)==0)
+  ;
+  ;Wrong SetUp tool / Angle
+  SETAL(66634,"(A)")
+ENDIF
+
+;Calculate Result
+;----------------
+rVar1=((rToolLength[3]-rToolLength[2])*TAN(rAngle[1]-rAngle[2])-(rToolLength[2]-rToolLength[1])*TAN(rAngle[2]-rAngle[3]))
+rVar2=((rToolLength[3]-rToolLength[1])*TAN(rAngle[1]-rAngle[2])*TAN(rAngle[2]-rAngle[3]))
+;
+;Offset
+rOutVar1=rcBaseAngle-rAngle[2]-ATAN2(rVar1,rVar2)
+;
+;PosX
+rOutVar2=(rToolLength[2]-rToolLength[1])/(TAN(rAngle[1]-rcBaseAngle+rOutVar1)+TAN(rcBaseAngle-rAngle[2]-rOutVar1))
+;
+;PosZ
+rOutVar3=(rToolLength[2]-((rToolLength[2]-rToolLength[1])*TAN(rcBaseAngle-rAngle[2]-rOutVar1)/(TAN(rAngle[1]-rcBaseAngle+rOutVar1)+TAN(rcBaseAngle-rAngle[2]-rOutVar1))))
+;
+IF (grOFFSETMIN_MSC>rOutVar1)
+  ;calculated Angle out off range
+  SETAL(66634,sPrint("%9.3F",rOutVar1)<<"° <"<<sPrint("%9.3F",grOFFSETMIN_MSC)<<"°")
+ENDIF
+;
+IF (grOFFSETMAX_MSC<rOutVar1)
+  ;calculated Angle out off range
+  SETAL(66634,sPrint("%9.3F",rOutVar1)<<"° >"<<sPrint("%9.3F",grOFFSETMAX_MSC)<<"°")
+ENDIF
+;
+IF ISFILE("/_N_SPF_DIR/_N_LogBreakageMSC_SPF")
+  FileSize(iFError, "/_N_SPF_DIR/_N_LogBreakageMSC_SPF", iSize)
+  iMaxFileSize=($MN_LEN_PROTOCOL_FILE*1024)-1000
+  ; FileSize>7500 -> abrOut 50 entries
+  IF (iSize>iMaxFileSize)OR(iSize>7500)
+    DELETE(iError,"/_N_SPF_DIR/_N_LogBreakageMSC_SPF")
+  ENDIF
+ENDIF
+;
+IF ISFILE("/_N_SPF_DIR/_N_BreakageMSC_SPF")
+  DELETE(iError2,"/_N_SPF_DIR/_N_BreakageMSC_SPF")
+ENDIF
+
+;rVar2<0 and rVar1<0 -> Determine ATAN instead of ATAN2
+IF (rVar2<0)
+  IF (rVar1>=0)
+    rOutVar1=rOutVar1+180.0
+  ELSE
+    rOutVar1=rOutVar1-180.0
+  ENDIF
+ENDIF
+
+;Write new values into cycle
+WRITE(iError,"/_N_SPF_DIR/_N_LogBreakageMSC_SPF",";TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+WRITE(iError,"/_N_SPF_DIR/_N_LogBreakageMSC_SPF","  grToBreakPosX_MSC="<<rOutVar2)
+WRITE(iError,"/_N_SPF_DIR/_N_LogBreakageMSC_SPF","  grToBreakPosZ_MSC="<<rOutVar3)
+WRITE(iError,"/_N_SPF_DIR/_N_LogBreakageMSC_SPF","  grToBreakOffset_MSC="<<rOutVar1)
+;
+;Results
+IF (iError==0)AND(iError2==0)
+  ;
+  grToBreakPosX_MSC=rOutVar2
+  grToBreakposZ_MSC=rOutVar3
+  grToBreakOffset_MSC=rOutVar1
+  ;
+  WRITE(iError,"/_N_SPF_DIR/_N_BreakageMSC_SPF",";TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+  WRITE(iError,"/_N_SPF_DIR/_N_BreakageMSC_SPF","  grToBreakPosX_MSC="<<rOutVar2)
+  WRITE(iError,"/_N_SPF_DIR/_N_BreakageMSC_SPF","  grToBreakPosZ_MSC="<<rOutVar3)
+  WRITE(iError,"/_N_SPF_DIR/_N_BreakageMSC_SPF","  grToBreakOffset_MSC="<<rOutVar1)
+  WRITE(iError,"/_N_SPF_DIR/_N_BreakageMSC_SPF"," RET")
+  ;
+  ;Bei allen zu pruefenden oder zu vermessenden Wz'en die Kennung <Wz Vermessen> und <Wz Getestet> loeschen
+  ;
+  FOR iCountTool=1 TO $P_TOOLNT
+    ;
+    iTNo=$P_TOOLT[iCountTool]
+    IF (iTNo>0)
+      ;
+      OEM_TlData(iTNo,mcGetMeasCut)
+      ;
+      IF (OEM_bSelMeas)OR(OEM_bSelCheck)
+        ;
+        OEM_TlData(iTNo,mcResMeasured_Tested)
+      ENDIF
+    ENDIF
+  ENDFOR
+  ;
+  ;Spindel und HG Leerfahren
+  TC("0")
+  ;
+ELSE
+  SETAL(66636,"BreakageMSC.SPF")
+ENDIF
+
+M30
+

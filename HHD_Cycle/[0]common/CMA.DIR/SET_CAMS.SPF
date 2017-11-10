@@ -1,0 +1,287 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_CAMS.SPF
+;# Task:      SW Endschalter setzen
+;# Version:   V06.00.08
+;# Date:      14.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;
+;----------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Aufgerufen im NC_INIT1.SPF
+;
+;---------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 14.08.2017 / Simons
+; - gr.MiddleZ.. -> grLaneZ[1]
+;
+; V06.00.08 - 04.07.2017 / Simons
+; - Neuversionierung
+; - $SN_SW_CAM_MINUS_POS_TAB_2[0], $SN_SW_CAM_MINUS_POS_TAB_3[4] geaendert
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 06.01.2017 / Simons
+; - Neuversionierung
+; - E_SWCamM...[20] D60NC und D120 aufgetrennt
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - VT1 bei D60NC hinzu 
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+; - D60NC / D120
+; - FL entfernt
+;
+; V06.00.02 - 28.02.2016 / Simons
+; - Einfuehrung grTCSPosTol
+;
+; V06.00.00 - 18.08.2015 / Simons
+; - Prototyp / Neu
+;
+;---------------------------------------
+
+DEF STRING[32] sCycName="SET_CAMS V06.00.08", sMagType, sResult
+;
+DEF REAL rc0x01deg=0.01, rcPalLoadPosBTol=0.1, rc0x1mm, rc0x5mm, rc1x0mm, rc2x0mm, rc5x0mm, rc10x0mm, rc20x0mm, rTmp, rTmp1, rTmp2, rTol
+;
+rc0x1mm=grPara[0] rc0x5mm=grPara[1] rc1x0mm=grPara[2] rc2x0mm=grPara[4] rc5x0mm=grPara[10] rc10x0mm=grPara[20] rc20x0mm=grPara[30]
+;
+; NC-Werkzeugwechsler mit einer Achse
+;------------------------------------
+IF gbDGIsNCAxis AND (NOT gbDGIsNc2Axis)
+  $MA_FIX_POINT_POS[0,Ax8]=grHomePosDGRot
+  $MA_FIX_POINT_POS[1,Ax8]=grHor1DGRot
+  $MA_FIX_POINT_POS[2,Ax8]=grLiftDGRot
+  $MA_FIX_POINT_POS[3,Ax8]=grHor2DGRot
+ENDIF
+
+; Z-Achse im Stoerbereich Werkzeug
+;---------------------------------
+$SN_SW_CAM_MINUS_POS_TAB_1[0]=(grTcPosZ-rc2x0mm)/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_1[0]=0
+
+; Z-Achse steht im Genauhalt Grob
+; in Palettenwechselposition
+;---------------------------------
+$SN_SW_CAM_MINUS_POS_TAB_1[1]=(grPalLoadPosZ+rc0x1mm)/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_1[1]=(grPalLoadPosZ-rc0x1mm)/grInchMetr
+
+; Z-Achse steht im Genauhalt Fein
+; in Palettenwechselposition
+;--------------------------------
+$SN_SW_CAM_MINUS_POS_TAB_1[2]=(grPalLoadPosZ+(rc0x1mm/2))/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_1[2]=(grPalLoadPosZ-(rc0x1mm/2))/grInchMetr
+
+; B-Achse steht in Palettenwechselposition
+; rTol = Fenster um den Softwarenocken
+; Palette in Wechselstellung
+;-----------------------------------------
+rTmp1=grPalLoadPosB-rcPalLoadPosBTol rTmp2=grPalLoadPosB+rcPalLoadPosBTol
+IF (rTmp1<0.0)
+  rTmp1=rTmp1+360.0
+ENDIF
+IF (rTmp2>=360.0)
+  rTmp2=rTmp2-360.0
+ENDIF
+IF (rTmp1>rTmp2)
+  $SN_SW_CAM_MINUS_POS_TAB_1[3]=rTmp2
+  $SN_SW_CAM_PLUS_POS_TAB_1[3]=rTmp1
+ELSE
+  $SN_SW_CAM_MINUS_POS_TAB_1[3]=rTmp1
+  $SN_SW_CAM_PLUS_POS_TAB_1[3]=rTmp2
+ENDIF
+
+; Z-Achse steht in Freifahrposition
+;----------------------------------
+$SN_SW_CAM_MINUS_POS_TAB_1[4]=(grFreePosZ+rc0x1mm)/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_1[4]=(grFreePosZ-rc0x1mm)/grInchMetr
+
+; Werkzeugwechselpositionen
+;--------------------------
+;
+; X-Achse
+;--------
+$SN_SW_CAM_MINUS_POS_TAB_1[5]=(grTcPosX+rc0x1mm)/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_1[5]=(grTcPosX-rc0x1mm)/grInchMetr
+
+; Y-Achse
+;--------
+$SN_SW_CAM_MINUS_POS_TAB_1[6]=(grTcPosY+rc0x1mm)/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_1[6]=(grTcPosY-rc0x1mm)/grInchMetr
+
+; CS-Achse (Spindel)
+;-------------------
+rTmp1=grTCSPos-grTCSPosTol rTmp2=grTCSPos+grTCSPosTol
+IF (rTmp1<0.0)
+  rTmp1=rTmp1+360.0
+ENDIF
+IF (rTmp2>=360.0)
+  rTmp2=rTmp2-360.0
+ENDIF
+IF (rTmp1>rTmp2)
+  $SN_SW_CAM_MINUS_POS_TAB_1[7]=rTmp2
+  $SN_SW_CAM_PLUS_POS_TAB_1[7]=rTmp1
+ELSE
+  $SN_SW_CAM_MINUS_POS_TAB_1[7]=rTmp1
+  $SN_SW_CAM_PLUS_POS_TAB_1[7]=rTmp2
+ENDIF
+;
+; X-Achse in VORPOSITION
+;-----------------------
+$SN_SW_CAM_MINUS_POS_TAB_2[0]=(grTcPrePosX+rc1x0mm)/grInchMetr
+$SN_SW_CAM_PLUS_POS_TAB_2[0]=(grTcPrePosX-rc0x1mm)/grInchMetr
+;
+; A-Achse
+;--------
+IF (gbTiltHeadExist)
+  $SN_SW_CAM_MINUS_POS_TAB_2[5]=(grTcPosA+rc0x01deg)
+  $SN_SW_CAM_PLUS_POS_TAB_2[5]=(grTcPosA-rc0x01deg)
+ENDIF
+;
+; C-Achse
+;--------
+IF (gbSwivHeadExist)
+  $SN_SW_CAM_MINUS_POS_TAB_2[6]=(grTcPosC+rc0x01deg)
+  $SN_SW_CAM_PLUS_POS_TAB_2[6]=(grTcPosC-rc0x01deg)
+ENDIF
+
+; Magazine
+;---------
+;
+;Magazintyp Ermitteln
+;--------------------
+CFG_MAN("MN",sMagType)
+;
+IF (sMagType=="D60NC")OR(sMagType=="D120")
+  ;
+  ;HG X1-Achse steht in Werkzeugwechsel VORPOSITION
+  ;------------------------------------------------
+  ; E_SWCamMinus[16] / E_SWCamPlus[16]
+  $SN_SW_CAM_MINUS_POS_TAB_3[0]=(grHgTcPrePosX+rc1x0mm)/grInchMetr
+  $SN_SW_CAM_PLUS_POS_TAB_3[0]=(grHgTcPrePosX-rc1x0mm)/grInchMetr
+  ;
+  ;HG X1-Achse steht in Werkzeugwechselposition
+  ;--------------------------------------------
+  ; E_SWCamMinus[17] / E_SWCamPlus[17]
+  $SN_SW_CAM_MINUS_POS_TAB_3[1]=(grHgTcPosX+rc0x5mm)/grInchMetr
+  $SN_SW_CAM_PLUS_POS_TAB_3[1]=(grHgTcPosX-rc0x5mm)/grInchMetr
+  ;
+  ;V1-Achse steht in Durchfahrpassage
+  ;----------------------------------
+  ; E_SWCamMinus[23] / E_SWCamPlus[23]
+  $SN_SW_CAM_MINUS_POS_TAB_3[7]=(grPosLaneVT1+rc0x5mm)
+  $SN_SW_CAM_PLUS_POS_TAB_3[7]=(grPosLaneVT1-rc0x5mm)
+  ;
+  IF (sMagType=="D60NC")
+    ;
+    ;HG X1-Achse im Bereich <Beladetuere Magazin>
+    ;--------------------------------------------
+    ; E_SWCamMinus[20] / E_SWCamPlus[20]
+    $SN_SW_CAM_MINUS_POS_TAB_3[4]=(grHGPosX[4]+rc1x0mm)/grInchMetr
+    $SN_SW_CAM_PLUS_POS_TAB_3[4]=(grHGPosX[4]-rc1x0mm)/grInchMetr
+  ENDIF
+  ;
+  IF (sMagType=="D120")
+    ;
+    ;HG X1-Achse im Bereich <Beladetuere Magazin>
+    ;--------------------------------------------
+    ; E_SWCamMinus[20] / E_SWCamPlus[20]
+    $SN_SW_CAM_MINUS_POS_TAB_3[4]=(grHGPosX[7]+rc1x0mm)/grInchMetr
+    $SN_SW_CAM_PLUS_POS_TAB_3[4]=(grHGPosX[7]-rc1x0mm)/grInchMetr
+    ;
+    ;V2-Achse steht in Durchfahrpassage
+    ;----------------------------------
+    ; E_SWCamMinus[21] / E_SWCamPlus[21]
+    $SN_SW_CAM_MINUS_POS_TAB_3[5]=(grPosLaneVT2+rc0x5mm)
+    $SN_SW_CAM_PLUS_POS_TAB_3[5]=(grPosLaneVT2-rc0x5mm)
+  ENDIF
+  ;
+  RET
+ENDIF
+;
+IF (sMagType=="D")OR(sMagType=="CH")OR(sMagType=="CH_WM307")
+  RET
+ENDIF
+;
+IF (sMagType=="CAS")
+  ;
+  ;HG X1-Achse in VORPOSITION
+  ;--------------------------
+  ; E_SWCamMinus[16] / E_SWCamPlus[16]
+  $SN_SW_CAM_MINUS_POS_TAB_3[0]=(grHgTcPrePosX+rc1x0mm)/grInchMetr
+  $SN_SW_CAM_PLUS_POS_TAB_3[0]=(grHgTcPrePosX-rc1x0mm)/grInchMetr
+  ;
+  ;HG X1-Achse
+  ;-----------
+  ; E_SWCamMinus[17] / E_SWCamPlus[17]
+  $SN_SW_CAM_MINUS_POS_TAB_3[1]=(grHgTcPosX+rc0x5mm)/grInchMetr
+  $SN_SW_CAM_PLUS_POS_TAB_3[1]=(grHgTcPosX-rc0x5mm)/grInchMetr
+  ;
+  ;HG Z1-Achse
+  ;-----------
+  ; E_SWCamMinus[18] / E_SWCamPlus[18]
+  $SN_SW_CAM_MINUS_POS_TAB_3[2]=(grHgTcPosZ+rc0x5mm)/grInchMetr
+  $SN_SW_CAM_PLUS_POS_TAB_3[2]=(grHgTcPosZ-rc0x5mm)/grInchMetr
+  ;
+  ;HG Z1-Achse im Kollisionsbereich
+  ;--------------------------------
+  ; E_SWCamMinus[19] / E_SWCamPlus[19]
+  ; - Schublade
+  $SN_SW_CAM_MINUS_POS_TAB_3[3]=(grLaneZ[1]-rc10x0mm)/grInchMetr
+  ; - Verkleidung
+  $SN_SW_CAM_PLUS_POS_TAB_3[3]=(grHgMaxSwingPosZ+rc5x0mm)/grInchMetr
+  ;
+  ; Minus-Nocken: HG X1-Achse im Bereich Schublade (PLC-Abfrage auf "0")
+  ; E_SWCamMinus[20], X1 im Bereich Schublade
+  IF (NOT gbMagWithFixedGuide)
+    $SN_SW_CAM_MINUS_POS_TAB_3[4]=(810.0*grInchMetr-rc5x0mm)/grInchMetr
+  ELSE
+    $SN_SW_CAM_MINUS_POS_TAB_3[4]=(810.0*grInchMetr-rc5x0mm)/grInchMetr
+  ENDIF
+  ; E_SWCamPlus[20],  z.Zt. nicht verwendet
+  ;$SN_SW_CAM_PLUS_POS_TAB_3[4]=
+  ;
+  ; HG Z1-Achse im Bereich DG
+  ;--------------------------
+  ; E_SWCamMinus[21] / E_SWCamPlus[21]
+  $SN_SW_CAM_MINUS_POS_TAB_3[5]=(grHgTcPosZ+rc20x0mm)/grInchMetr
+  $SN_SW_CAM_PLUS_POS_TAB_3[5]=(grHgTcPosZ-rc20x0mm)/grInchMetr
+  ;
+  IF (gbMagWithFixedGuide)
+    ;
+    ; HG X1-Achse steht im Stoerbereich Kulisse
+    ;------------------------------------------
+    ; E_SWCamMinus[22] / E_SWCamPlus[22]
+    ;$SN_SW_CAM_MINUS_POS_TAB_3[6]=(grHGInGuideX)/grInchMetr
+    ;$SN_SW_CAM_PLUS_POS_TAB_3[6]=(-1*rc5x0mm)/grInchMetr
+    ;
+    ; E_SWCamMinus[23] / E_SWCamPlus[23]
+    ;$SN_SW_CAM_MINUS_POS_TAB_3[7]=(grHGFreeGuideX+rc5x0mm)/grInchMetr
+    ;$SN_SW_CAM_PLUS_POS_TAB_3[7]=(-1*rc5x0mm)/grInchMetr
+  ELSE
+    ;
+    ; HG X1-Achse steht in Gasse Bohrerbruchkontrolle
+    ;------------------------------------------------
+    ; E_SWCamMinus[22] / E_SWCamPlus[22]
+    ;$SN_SW_CAM_MINUS_POS_TAB_3[6]=(grToBreakPosX+rc0x5mm)/grInchMetr
+    ;$SN_SW_CAM_PLUS_POS_TAB_3[6]=(grToBreakPosX-rc0x5mm)/grInchMetr
+  ENDIF
+  ;
+  RET
+ENDIF
+;
+RET

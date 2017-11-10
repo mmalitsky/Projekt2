@@ -1,0 +1,392 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     OEM_TlData.SPF
+;# Task:      Wz OEMDaten Handling
+;# Version:   V06.00.08
+;# Date:      07.11.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 07.11.2017 / Simons
+; - OEM_bSelStop hinzu
+;
+; V06.00.08 - 18.08.2017 / Simons
+; - Neuversionierung
+; - _LH10 geaendert
+; - ..OR(iCutNo==-1) hinzu
+;
+; V06.00.07 - 15.07.2017 / Simons
+; - Neuversionierung
+; - Lx1/Lx2 trennen
+; - iTP8 vorziehen
+;
+; V06.00.06 - 02.05.2017 / Simons
+; - Korrektur _LH4
+;
+; V06.00.05 - 01.04.2017 / Simons
+; - Abfrage auf gueltige Schneidennummer vorgezogen
+; - Korrektur _L22
+;
+; V06.00.05 - 28.11.2016 / Simons
+; - RESULT -> _RESULT
+; - Korrektur OEM_rCol... 
+;
+; V06.00.05 - 28.09.2016 / Simons
+; - Neuversionierung
+; - Auftrag 30: Codetraeger Fehler zuruecksetzen
+; - Wz defekt hinzu
+; - giResult/grResult.. -> OEM_...
+;
+; V06.00.04 - 08.08.2016 / Simons
+; - Neuversionierung
+; - Div. Korrekturen
+; - Auftrag 6 hinzu
+;
+; V06.00.03 - 28.06.2016 / Simons
+; - Kippmoment hinzu (22)
+; - Korrektur gueltige Schneidennummer
+;
+; V06.00.03 - 12.05.2016 / Simons
+; - Prototyp
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Eingabeparameter:
+; -----------------
+;
+; Die Kennungen (nicht Pruefen/Vermessen) werden bei jedem Auftrag aktualisiert.
+;
+; iMode: Dienst (Ergebnis in .../...)
+;
+; Bei WzVermessen/Pruefen fuer Schneide in iCutNo/$TC_TPC2
+;
+; mcSetMeasured        1: <Wz ist vermessen> Setzen
+; mcSetMeasured_Val    2: <Wz ist vermessen> und SollWert (rMeasVal) Setzen
+; mcResMeasured_Tested 3: <Wz ist vermessen> Zuruecksetzen (TM HHD fuer alle Schneiden) und <Wz ist getestet> Zuruecksetzen
+; mcResMeasured        4: <Wz ist vermessen> und <Wz ist getestet> Zuruecksetzen
+; mcGetMeasProp        5: <Pruefen/Vermessen> Eigenschaften fuer Schneide bereitstellen
+; mcSetMeasVal         6: SollWert (rMeasVal) Setzen
+; mcSetTested          8: <Wz ist getestet> Setzen
+; mcResTested          9: <Wz ist getestet> ZurueckSetzen
+;
+; mcGetMeasCut    10: Zu vermessende Schneide suchen
+;                     - Schneidenummer (OEM_iCutNo)
+;                     - Sollwert (OEM_rMeasLength)
+;                     - Kennungen WzVermessen/Pruefen bereitstellen
+; mcGetTiltTorque 22: Wz Kippmoment Lesen(OEM_rTiltTorque) 
+;                     Gewicht=0 -> Gewicht=grHeavyTlDG
+; mcSetChipSel    30: Anwahl mit BALLUFF-Codetraeger setzen und Codetraegerfehler Loeschen (TM HHD)
+; mcResChipErr    31: Codetraegerfehler Loeschen (TM HHD)
+; mcSetChipErr    32: Codetraegerfehler Setzen   (TM HHD)
+;
+; Ergebnisstruktur:
+;------------------
+;
+; OEM_bSelCheck        Wz Pruefen (fuer zu pruefende Schneide)
+; OEM_bSelMeas         Wz Vermessen (fuer zu pruefende Schneide)
+; OEM_bSelMeasNoNewVal Wz Vermessen ohne Datenuebernahme (fuer zu pruefende Schneide)
+;      ...
+; OEM_bSelHGNoTapeCl   Abwahl Kegelreiniger
+; OEM_bSelChip         Anwahl Wz mit BALLUFF
+; OEM_bSelStop         Freigabe Stop bei Ersteinsatzerkennung
+;      ...
+; OEM_bValidMeasCut    Wz Schneidennummer richtig angegeben
+; OEM_bHeavyTlHG       Schweres Wz im HG
+; OEM_bBigTlHG         Grosses Wz im HG 
+; OEM_bTlMeasured      Wz ist vermessen
+; OEM_bTlDefect        Wz ist defekt / gesperrt
+; 
+; OEM_iCutNo           Schneidennummer Puefen/Messen
+; OEM_rCheckLen        Prueflaenge
+;     ...
+; OEM_rWeight          Gewicht
+; OEM_rTiltTorque      Kippmoment
+; OEM_rColLen          Kollisionslaenge
+; OEM_rColRad          KollisionsRadius
+;
+;Bemerkung: maximal 5 $TC_... pro Satz
+;
+;------------------------------------
+
+PROC OEM_TlData(INT iTNo, INT iMode, INT iCutNo, REAL rMeasVal)
+
+DEF INT iCount, iSel, iCutStat, iCutSel, iTP8, iTPC8
+;
+DEF REAL rWeight, rTmp1, rTmp2, rTmp3, rTmp4
+
+IF (iTNo<=0) GOTOF _RESULT
+;
+;Ergebnisstruktur zuruecksetzen / Wz Kennungen
+OEM_bSelCheck=FALSE OEM_bSelStop=FALSE OEM_bSelMeas=FALSE OEM_bSelMeasNoNewVal=FALSE OEM_bValidMeasCut=FALSE OEM_bTlMeasured=FALSE OEM_iCutNo=0 OEM_rTiltTorque=0 OEM_rCheckLen=0 iTP8=$TC_TP8[iTNo]
+;
+IF (iMode>=1)AND(iMode<=6)AND(iMode<>3)
+  ;
+  ;WzVermess-/Pruefdienst
+  ;
+  IF (NOT $P_SUBPAR[3])OR(iCutNo==-1)
+    ;Schneidennummer aus WzDaten
+    iCutNo=RTOI($TC_TPC2[iTNo])
+  ENDIF
+  ;
+  ;Ungueltige Schneidennummer -> Abbruch mit OEM_bValidMeasCut=FALSE
+  IF (iCutNo<1)OR(iCutNo>$P_TOOLND[iTNo]) GOTOF _RESULT
+ENDIF
+;
+IF (gbTMIsHHD)
+  ;
+  iSel=RTOI($TC_TPC1[iTNo]) OEM_rWeight=($TC_TPC3[iTNo] MOD 1000) OEM_bSelHGNoTapeCl=((iSel B_AND 'B100')<>0) OEM_bSelChip=((iSel B_AND 'B1')<>0) OEM_bHeavyTlHG=((OEM_rWeight<=0.0)OR(OEM_rWeight>grHeavyTlHG)) iTPC8=RTOI($TC_TPC8[iTNo]) OEM_bTlDefect=(((iTPC8 B_AND 'HFF0000')<>0)OR((iTP8 B_AND 'B100')<>0))
+  OEM_rColRad=MAXVAL(MAXVAL($TC_TPC12[iTNo],$TC_TPC13[iTNo]),MAXVAL($TC_TPC17[iTNo],$TC_TPC18[iTNo])) OEM_bSelStop=((iSel B_AND 'H1000000')<>0)
+  OEM_rColLen=MAXVAL($TC_TPC11[iTNo],$TC_TPC16[iTNo]) OEM_bBigTlHG=((grBigTlSizeHG>0)AND(OEM_rColRad>=grBigTlSizeHG))OR((grBigTlLenHG>0)AND(OEM_rColRad>=grBigTlLenHG))AND((RTOI($TC_TPC7[iTNo]) B_AND 'B1')<>0)
+  ;
+  CASE iMode OF 1 GOTOF _LH1 2 GOTOF _LH2 3 GOTOF _LH3 4 GOTOF _LH4 5 GOTOF _LH5 6 GOTOF _LH6 8 GOTOF _LH8 9 GOTOF _LH9 10 GOTOF _LH10 22 GOTOF _L22 30 GOTOF _LH30 31 GOTOF _LH31 32 GOTOF _LH32 DEFAULT GOTOF _RESULT
+
+  ;====
+  _LH1:
+  ;====
+  ;
+  ;====
+  _LH2:
+  ;====
+  ;
+  ;<Wz ist vermessen> Setzen, <Wz ist gebrochen> ZurueckSetzen
+  iCutStat=RTOI($TC_DPC2[iTNo,iCutNo]) $TC_DPC2[iTNo,iCutNo]=ITOR((iCutStat B_OR 'H100') B_AND (B_NOT 'B1'))
+  IF (iMode==1) GOTOF _RESULT
+  ;
+  ;====
+  _LH6:
+  ;====
+  ;
+  iCutSel=RTOI($TC_DPC1[iTNo,iCutNo])
+  IF ((iCutSel B_AND 'B100')==0)AND(iMode<>1)
+    ;neuer Sollwert darf uebernommen werden
+    $TC_DPC3[iTNo,iCutNo]=rMeasVal
+  ENDIF
+  GOTOF _RESULT
+
+  ;====
+  _LH3:
+  ;====
+  ;
+  ;<Wz ist vermessen> Zuruecksetzen fuer alle Schneiden
+  FOR iCount=1 TO $P_TOOLND[iTNo]
+    iCutStat=RTOI($TC_DPC2[iTNo,iCount]) $TC_DPC2[iTNo,iCount]=ITOR(iCutStat B_AND (B_NOT 'H300'))
+  ENDFOR
+  ;
+  ;<Wz ist getestet> zuruecksetzen
+  $TC_TPC8[iTNo]=ITOR(iTPC8 B_AND (B_NOT 'B1'))
+  GOTOF _RESULT
+  
+  ;====
+  _LH4:
+  ;====
+  ;
+  ;<Wz ist vermessen> Zuruecksetzen, <Wz gebrochen> Setzen
+  iCutStat=RTOI($TC_DPC2[iTNo,iCutNo]) $TC_DPC2[iTNo,iCutNo]=ITOR((iCutStat B_AND (B_NOT 'H300')) B_OR 'B1')
+  GOTOF _RESULT
+
+  ;====
+  _LH5:
+  ;====
+  ;
+  ;Eigenschaften der Schneide bereitstellen
+  OEM_iCutNo=iCutNo OEM_rCheckLen=$TC_DPC3[iTNo,iCutNo] iCutSel=RTOI($TC_DPC1[iTNo,iCutNo]) iCutStat=RTOI($TC_DPC2[iTNo,iCutNo]) OEM_bSelCheck=((iCutSel B_AND 'B1')<>0) OEM_bSelMeas=((iCutSel B_AND 'B10')<>0) OEM_bSelMeasNoNewVal=((iCutSel B_AND 'H100')<>0) OEM_bValidMeasCut=TRUE OEM_bTlMeasured=((iCutStat B_AND 'H100')<>0)
+  GOTOF _RESULT
+
+  ;====
+  _LH8:
+  ;====
+  ;
+  ;<Wz ist getestet> Setzen
+  $TC_TPC8[iTNo]=ITOR(iTPC8 B_AND 'B1')
+  GOTOF _RESULT
+
+  ;===
+  _LH9:
+  ;===
+  ;
+  ;<Wz ist getestet> ZurueckSetzen
+  $TC_TPC8[iTNo]=ITOR(iTPC8 B_AND (B_NOT 'B1'))
+  GOTOF _RESULT
+
+  ;=====
+  _LH10:
+  ;=====
+  ;
+  ;Schneidennummer noch nicht bekannt -> Nummer einer zu pruefenden Schneide ermitteln , Wz Kennungen und Prueflaenge dieser Schneide bereitstellen
+  ;
+  IF (iCutNo>1) GOTOB _LH5
+  ;
+  iCutNo=0
+  WHILE (iCutNo<$P_TOOLND[iTNo])
+    iCutNo=(iCutNo+1) iCutSel=RTOI($TC_DPC1[iTNo,iCutNo])
+    ;
+    ;zu vermessende Schneide gefunden
+    IF ((iCutSel B_AND 'B1')<>0) GOTOB _LH5
+  ENDWHILE
+  GOTOF _RESULT
+
+  ;=====
+  _LH22:
+  ;=====
+  ;
+  ;Wz Gewicht/Kippmoment lesen
+  ;
+  IF (OEM_rWeight==0)
+    ;
+    ;kein Gewicht angegeben -> Schweres Wz
+    rWeight=grHeavyTlDG
+  ELSE
+    rWeight=OEM_rWeight
+  ENDIF
+  ;
+  IF ($TC_TPC3[iTNo]>1000)
+    OEM_rTiltTorque=$TC_TPC3[iTNo]/1000
+  ELSE
+    rTmp1=($TC_TPC11[iTNo]*$TC_TPC12[iTNo]*$TC_TPC12[iTNo]) rTmp2=(MAXVAL($TC_TPC16[iTNo]-$TC_TPC11[iTNo],0)*$TC_TPC17[iTNo]*$TC_TPC17[iTNo])
+    rTmp3=rTmp1+rTmp2 rTmp4=(((0.5*$TC_TPC11[iTNo]*rTmp1)+((0.5*MAXVAL($TC_TPC16[iTNo]-$TC_TPC11[iTNo],0)+$TC_TPC11[iTNo])*rTmp2))/(1000*rTmp3)) OEM_rTiltTorque=(rTmp4*(rWeight-grTlHolderWeight)*9.81)
+  ENDIF
+  GOTOF _RESULT
+
+  ;=====
+  _LH30:
+  ;=====
+  ;
+  ;Anwahl mit BALLUFF-Codetraeger setzen und...
+  iSel=RTOI($TC_TPC1[iTNo]) $TC_TPC1[iTNo]=ITOR(iSel B_OR 'B1')
+  ;
+  ;=====
+  _LH31:
+  ;=====
+  ;...<CodeTraegerfehler> Loeschen und...
+  iTPC8=(iTPC8 B_AND (B_NOT 'H200000')) $TC_TPC8[iTNo]=ITOR(iTPC8)
+  ;  
+  ;...<Wz gesperrt> zuruecknehmen
+  IF ((iTPC8 B_AND 'HFF0000')==0)
+    $TC_TP8[iTNo]=(iTP8 B_AND (B_NOT 'B100'))
+  ENDIF
+  GOTOF _RESULT
+
+  ;=====
+  _LH32:
+  ;=====
+  ;
+  ;Codefehler Setzen und Wz Sperren
+  $TC_TPC8[iTNo]=(iTPC8 B_OR 'H200000') $TC_TP8[iTNo]=(iTP8 B_OR 'B100')
+  GOTOF _RESULT
+  
+ELSE
+  ;
+  OEM_rColLen=$TC_TPC7[iTNo] OEM_rColRad=$TC_TPC8[iTNo] OEM_rWeight=($TC_TPC4[iTNo] MOD 1000) iSel=RTOI($TC_TPC1[iTNo]) OEM_bSelStop=((iSel B_AND 'H1000000')<>0)
+  OEM_bHeavyTlHG=((OEM_rWeight<=0.0)OR(OEM_rWeight>grHeavyTlHG)) OEM_bSelHGNoTapeCl=((iSel B_AND 'H80')<>0) OEM_bSelChip=((iSel B_AND 'H40')<>0) OEM_bBigTlHG=(($TC_TP7[iTNo]>4)OR($TC_TP3[iTNo]>1)OR($TC_TP4[iTNo]>1)) OEM_bTlDefect=((iTP8 B_AND 'B100')<>0)
+  ;
+  CASE iMode OF 1 GOTOF _L1 2 GOTOF _L2 3 GOTOF _L3 4 GOTOF _L4 5 GOTOF _L5 6 GOTOF _L6 8 GOTOF _L8 9 GOTOF _L9 10 GOTOF _L10 22 GOTOF _L22 30 GOTOF _L30 DEFAULT GOTOF _RESULT
+
+  ;===
+  _L1:
+  ;===
+  ;
+  ;===
+  _L2:
+  ;===
+  ;
+  ;<Wz ist vermessen> Setzen
+  iCutStat=iSel $TC_TPC1[iTNo]=ITOR(iCutStat B_OR 'B1000')
+  IF (iMode==1) GOTOF _RESULT
+  ;
+  ;===
+  _L6:
+  ;===
+  ;
+  iCutSel=iSel
+  IF ((iCutSel B_AND 'B100')==0)AND(iMode<>1)
+    ;neuer Sollwert darf uebernommen werden
+    $TC_TPC3[iTNo]=rMeasVal
+  ENDIF
+  GOTOF _RESULT
+
+  ;===
+  _L3:
+  ;===
+  ;
+  ;<Wz ist vermessen> und <Wz ist getestet> zuruecksetzen
+  ;
+  ;===
+  _L4:
+  ;===
+  ;
+  ;<Wz ist vermessen> und <Wz ist getestet> zuruecksetzen
+  $TC_TPC1[iTNo]=ITOR(iSel B_AND (B_NOT 'H208'))
+  GOTOF _RESULT
+
+  ;===
+  _L5:
+  ;===
+  ;
+  ;=====
+  _L10:
+  ;=====
+  ;
+  ;Wz Schneide, Kennungen und Prueflaenge bereitstellen
+  OEM_iCutNo=RTOI($TC_TPC2[iTNo]) OEM_rCheckLen=$TC_TPC3[iTNo] iCutSel=iSel iCutStat=iSel OEM_bSelCheck=((iCutSel B_AND 'B1')<>0) OEM_bSelMeas=((iCutSel B_AND 'B10')<>0) OEM_bSelMeasNoNewVal=((iCutSel B_AND 'B100')<>0) OEM_bValidMeasCut=((OEM_iCutNo>=1)AND(OEM_iCutNo<=$P_TOOLND[iTNo])) OEM_bTlMeasured=((iCutStat B_AND 'B1000')<>0)
+  GOTOF _RESULT
+
+  ;===
+  _L8:
+  ;===
+  ;
+  ;<Wz ist getestet> Setzen
+  $TC_TPC1[iTNo]=ITOR(iSel B_OR 'H200')
+  GOTOF _RESULT
+
+  ;===
+  _L9:
+  ;===
+  ;
+  ;<Wz ist getestet> ZurueckSetzen
+  $TC_TPC1[iTNo]=ITOR(iSel B_AND (B_NOT 'H200'))
+  GOTOF _RESULT
+
+  ;====
+  _L22:
+  ;====
+  ;
+  ;Wz Gewicht/Kippmoment lesen
+  IF (OEM_rWeight==0)
+    ;
+    ;kein Gewicht angegeben -> Schweres Wz
+    rWeight=grHeavyTlDG
+  ELSE
+    rWeight=OEM_rWeight
+  ENDIF
+  ;
+  IF ($TC_TPC4[iTNo]>1000)
+    OEM_rTiltTorque=$TC_TPC4[iTNo]/1000
+  ELSE
+    rTmp4=0.5*$TC_TPC7[iTNo]/1000 OEM_rTiltTorque=rTmp4*(rWeight-grTlHolderWeight)*9.81
+  ENDIF
+  GOTOF _RESULT
+
+  ;====
+  _L30:
+  ;====
+  ;
+  ;Anwahl mit BALLUFF-Codetraeger setzen
+  $TC_TPC1[iTNo]=ITOR(iSel B_OR 'H40')
+  GOTOF _RESULT
+  ;
+ENDIF
+
+;=======
+_RESULT:
+;=======
+;
+RET

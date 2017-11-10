@@ -1,0 +1,821 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Magload.SPF
+;# Task:      Wz Be-/Entladen (Hand)
+;# Version:   V06.00.08
+;# Date:      21.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk,Chain
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 21.08.2017 / Simons
+; - Neuversionierung
+; - OUT_LoadAckn -> OUT_TMJobActive
+;
+; V06.00.07 - 18.08.2017 / Simons
+; - Wz Entladen, wenn mcDBB_ModeFromMagPanel=0
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - mcDBB_ToMagPanel = 1 -> iAcknVal
+; - WzV Synchronisieren auch bei MagPanel
+; - mcDBB_ModeFromMagPanel, TlData(...) hinzu
+; - Erweiterung Fehlerdiagnose
+; - Formale Aenderungen
+;
+; V06.00.05 - 28.02.2017 / Simons
+; - Magazin Be-/Entladen ueber Beladestelle 3
+; - HG Freifahren entfernt
+; - Zusammenfassung PickUpDisk und Kette
+; - LOG(...$TIMESTAMP$...)
+; - FestplatzWz Setzen
+;
+; V06.00.05 - 29.01.2017 / Simons
+; - Ueberpruefung auf minimale Wz Laenge hinzu
+;
+; V06.00.05 - 19.10.2016 / Simons
+; - GetPlDat mit Parameter bcDstIsLoadPlace
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.04 - 31.08.2016 / Simons
+; - Neuversionierung
+; - Ueberarbeitet
+;
+; V06.00.03 - 06.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 16.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag,giMagNoLoadList
+;
+; V04.00.00 - 21.08.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Werkzeug Be-/Entladen ueber Beladestelle Magazin Kanal 2
+;
+; Eingangsparameter:
+; ------------------
+;
+; iToDo:
+;
+; mcTasLoadMag   : fuer (synchrones) BELADEN von Beladestelle (3) Magazin
+;                  Leeres HG an manuelle Beladestelle fahren und warten
+; mcTasUnLoadMag : fuer (ynchrones) ENTLADEN auf Beladestelle (3) Magazin
+;                  EntladeWz im HG an manuelle Beladestelle fahren und warten
+;
+; mcTaskAS_Load   : fuer (asynchrones) BELADEN von Beladestelle Magazin
+;                   Leeres HG an manuelle Beladestelle fahren und warten
+; mcTaskAS_UnLoad : fuer (asynchrones) ENTLADEN auf Beladestelle Magazin
+;                   EntladeWz im HG an manuelle Beladestelle fahren und warten
+;
+; iTNo>0: Interne T-Nummer Belade-/Entladewerkzeug
+;         =0: beim Beladen, allerdings nur in Verbindung mit BALLUFF zulaessig
+;         =0: beim Entladen nicht erlaubt
+;         <0: Aufruf von HgLoad nur, damit dieses den Auftrag zur PLC hin negativ quittiert
+;             iTNo enthaelt die mit (-1) multiplizierte Alarm-Nr
+;
+; Bedienung:
+; Beladen (Standard): interne T-Nr (>0) wird vorgegeben (s.o. iTNo)
+;                     -> Beladen ohne Lesen des Codetraegers (auch, wenn Wz-Optionsbit gesetzt sein sollte)
+; Beladen-Balluff:    als interne T-Nr wird 0 uebergeben (s.o. iTNo)
+;                     -> Beladen mit Lesen des Codetraegers
+; Entladen:           interne T-Nr (>0) wird vorgegeben (s.o. iTNo)
+;                     -> sofern Wz-Optionsbit "Codetraeger" gesetzt wird Schreiben auf Chip angestossen
+;
+; Wird aufgerufen ...
+;   .. direkt aus dem Systemprogramm im Kanal 2 nach Betaetigen
+;      der Softkeys BELADEN bzw. ENTLADEN (ueber Beladestelle Magazin)
+;
+;------------------------------------
+
+PROC MagLoad(INT iToDo, INT iTNo, INT iDstMagNo, INT iDstPotNo) DISPLOF
+
+DEF STRING[32] sCycName="MagLoad V06.00.08", sAlarmParam="", sNameLoad="", sName
+;
+DEF STRING[128] sFName="/_N_MPF_DIR/_N_LogLoad_MPF"
+DEF STRING[255] sAux
+;
+DEF BOOL bcDstIsLoadPlace=TRUE, bTmp, bBalluff, bReadChip, bToolCheckOn, bMagIsWM307, bMagIsChain, bDGIsWM307, bTaskLoad, bTaskUnLoad, bWithLoadList, bUnloadTl, bOnlyCheckTl, bWithComfortPanel
+;
+DEF INT icMagNo=1, iAlarmNo=0, iAlarmNoShown=0, iTNoRead=0, iAcknVal=0, iSrcMagNo=0, iSrcPotNo=0
+DEF INT iFError, iFMaxSize, iFSize, iCount, iLoadPlaceNo, iLoadPot, iNumPot, iChkRes, iTNoDummy, iTNoLoad, iActMagNo, iActPotNo, iTmpMagNo, iTmpPotNo
+
+bDGIsWM307=((giDGType B_AND 'B100')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsWM307=(bMagIsChain)AND(bDGIsWM307) iNumPot=giNumPlacesInMag[icMagNo]
+bWithComfortPanel=(($P_SUBPAR[3])AND($P_SUBPAR[4])) bWithLoadList=(giMagNoLoadList>0) bTaskLoad=((iToDo==mcTaskAS_Load)OR(iToDo==mcTaskLoadMag)) bTaskUnLoad=((iToDo==mcTaskAS_UnLoad)OR(iToDo==mcTaskUnLoadMag))
+
+IF (NOT bTaskLoad)AND(NOT bTaskUnLoad)
+  iAlarmNo=AL_InvalidMissingInput sAlarmParam="iToDo="<<iToDo
+  GOTOF HandleAlarm
+ENDIF
+
+IF (ISFILE(sFName))
+  FileSize(iFError, sFName, iFSize)
+  iFMaxSize=($MN_LEN_PROTOCOL_FILE*1024)-1000
+  IF (iFSize >= iFMaxSize) ;max. Laenge durch MD11420 beschraenkt !!
+    DELETE(iFError,sFName)
+  ENDIF
+ENDIF
+LOG(gbLogTMReset,iFError,sFName,"------------ Start of MagLoad ----------------")
+LOG(gbLogTMReset,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): $TIMESTAMP$")
+LOG(gbLogTMReset,iFError,sFName,"    input parameter: iToDo="<<iToDo<<", iTNo="<<iTNo)
+
+;Init. Koppelsignale NC<->PLC fuer Teil I:
+mcDBB_ToMagPanel=0 mcDBB_ModeFromMagPanel=0 OUT_TMJobActive=FALSE OUT_LoadActiv=FALSE OUT_LoadDone=FALSE OUT_LoadReset=FALSE OUT_LoadEnd=FALSE bToolCheckOn=(mcbDBB_TlCheckOn)
+;
+IF (bWithComfortPanel)
+  iLoadPlaceNo=3
+ELSE
+  iLoadPlaceNo=2
+ENDIF
+
+WHILE ($P_SEARCH)
+  ;Satzsuchlauf
+  G4 F.1
+  STOPRE
+ENDWHILE
+
+;Plausibilitaetsueberpruefungen
+;------------------------------
+;
+IF (iTNo<0)
+  ;Spezialfall, um z.B. ein abgewiesenes Beladen/Entladen zur PLC hin negativ zu quittieren/zu beenden
+  iAlarmNo=-iTNo
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iTNo>0)
+  ;
+  MakeAlarmparam(sName,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+  ; 
+  IF (NOT $P_TOOLEXIST[iTNo])
+    iAlarmNo=AL_TNoNotAllowed67 sAlarmParam=<<iTNo
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  iActMagNo=$A_TOOLMN[iTNo] iActPotNo=$A_TOOLMLN[iTNo]
+  IF (iActMagNo==9998)AND((iActPotNo==mcLocSp)OR((bMagIsChain)AND(iActPotNo==mcLocDG1)OR(iActPotNo==mcLocDG2)))
+    ;Belade-/EntladeWz in SP oder DG1/2
+    iAlarmNo=AL_TlInSpDG67 sAlarmParam=sName
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (bTaskLoad)
+    ;
+    FOR iCount=1 TO giNumRealMag
+      ;
+      IF (iActMagNo==iCount)
+        ;
+        ;BeladeWz bereits in einem der realen Teilmagazine
+        iAlarmNo=AL_TlAlreadyLoaded67 sAlarmParam=sName
+        GOTOF HandleAlarm
+      ENDIF
+    ENDFOR
+    ;
+    IF (gbToLoadFixColDat)
+      ;
+      ;Pruefe Kollisionsdaten zu Werkzeugtyp
+      ChkMagType(1,iTNo,iChkRes)
+    ELSE
+      ;Ueberpruefung WzTyp
+      ChkDim(1,iTNo,iChkRes)
+    ENDIF
+    ;  
+    CASE iChkRes OF 1 GOTOF _F1 -1 GOTOF _FN1 -2 GOTOF _FN2 -3 GOTOF _FN3 -4 GOTOF _FN4 DEFAULT GOTOF _NOERROR
+    ;
+    ;===
+    _F1:
+    ;===
+    ;Wz Daten wurden von Chk... angepasst -> Abbruch und neu Beladen erforderlich
+    iAlarmNo=AL_TlDataChanged sAlarmParam=sName
+    GOTOF HandleAlarm
+    ;
+    ;====
+    _FN1:
+    ;====
+    FileRead("TYPE_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sAux,,,";")
+    iAlarmNo=AL_InvalidToolData67 sAlarmParam="("<<sAux<<")"
+    GOTOF HandleAlarm
+    ;
+    ;====
+    _FN2:
+    ;====
+    FileRead("LENGTH_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sAux,,,";")
+    iAlarmNo=AL_InvalidToolData67 sAlarmParam="("<<sAux<<")"
+    GOTOF HandleAlarm
+    ;
+    ;====
+    _FN3:
+    ;====
+    FileRead("RADIUS_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sAux,,,";")
+    iAlarmNo=AL_InvalidToolData67 sAlarmParam="("<<sAux<<")"
+    GOTOF HandleAlarm
+    ;
+    ;====
+    _FN4:
+    ;====
+    iAlarmNo=AL_TlNotFound67 sAlarmParam=sName
+    GOTOF HandleAlarm
+    ;
+    ;========
+    _NOERROR:
+    ;========
+    ;
+    IF (grTCMinL1>0)
+      ;
+      ;Alle Schneiden muessen ein L1 > grTCMinL1 haben sonst besteht Crashgefahr
+      ;
+      iCount=0
+      WHILE (iCount<$P_TOOLND[iTNo])
+        iCount=iCount+1
+        IF (ABS($TC_DP3[iTNo,iCount]+$TC_DP12[iTNo,iCount]+$TC_DP21[iTNo,iCount])<grTCMinL1)
+          FileRead("LENGTH_"<<$AN_LANGUAGE_ON_HMI,mcSysText,sAux,,,";")
+          MakeAlarmParam(sAlarmParam,sName,"D"<<iCount<<" ("<<sAux<<"<"<<grTCMinL1<<")",2)
+          iAlarmNo=AL_InvalidToolData67
+          GOTOF HandleAlarm
+        ENDIF
+      ENDWHILE
+    ENDIF
+  ENDIF
+  ;
+  IF (bTaskUnLoad)
+    ;
+    IF (iActMagNo==0)OR(iActMagNo==giMagNoLoadList)
+      ;EntladeWz bereits entladen
+      iAlarmNo=AL_TlAlreadyUnLoaded67 sAlarmParam=sName
+      GOTOF HandleAlarm
+    ENDIF
+    ;
+    IF (iActMagNo>=1)AND(iActMagNo<=giNumRealMag)AND(iActPotNo>=1)
+      ;
+      ;Wz z.Zt. noch auf Magazinplatz
+      ;
+      IF (($TC_MPP4[iActMagNo, iActPotNo] B_AND 'B1')<>0)
+        ;Quellpl. gesperrt
+        iAlarmNo=AL_TlLocBlocked67 sAlarmParam=<<iActMagNo<<"/"<<iActPotNo
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+  ENDIF
+ELSE
+  iAlarmNo=AL_TNoNotAllowed67 sAlarmParam=<<iTNo
+  GOTOF HandleAlarm
+ENDIF
+
+IF (bTaskLoad)
+  ;
+  LOG(gbLogTMReset,iFError,sFName,"    tool to be Loaded: T="<<sName)
+  ;
+  ;Beladeziel
+  IF (bWithComfortPanel)
+    ;
+    ;Zielplatz aus WzV Beladen von Beladestelle 3
+    ;
+    LOG(gbLogTMReset,iFError,sFName,"    target location from HMI, entered by user: Mag/Loc="<<iDstMagNo<<"/"<<iDstPotNo)
+  ELSE
+    ;
+    ;Zielplatz aus Operatoreingabe in $TC_TPC9 (die Eingabe ohne Magazinangabe ist auch zulaessig)
+    ;
+    iDstMagNo=($TC_TPC9[iTNo] DIV 1000) iDstPotNo=($TC_TPC9[iTNo] MOD 1000)
+    IF ((iDstMagNo==0)OR(iDstMagNo==icMagNo))AND(iDstPotNo>=1)AND(iDstPotNo<=iNumPot)
+      ;
+      iDstMagNo=icMagNo
+      ;
+      LOG(gbLogTMReset,iFError,sFName,"    target location from $TC_TPC9, entered by user: Mag/Loc="<<iDstMagNo<<"/"<<iDstPotNo)  
+    ELSE
+      ;
+      ;Zielplatz von PLC (Scheiben-/Kettenposition am Beladeplatz des Magazins)
+      iDstMagNo=icMagNo iDstPotNo=mcDBW_FromMagPanelPotNo
+      ;
+      LOG(gbLogTMReset,iFError,sFName,"    target location is Magazine Loadposition: Mag/Loc="<<iDstMagNo<<"/"<<iDstPotNo)
+    ENDIF
+  ENDIF
+  ;
+  IF (iDstPotNo<1)OR(iDstPotNo>iNumPot)
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iDstPotNo
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  ;Platzpruefung
+  ChkTlLoc(1,iTNo,iDstMagNo,iDstPotNo,iTmpMagNo,iTmpPotNo,iAlarmNo,sAlarmParam)
+  IF (iAlarmNo>0)
+    ;
+    IF (iAlarmNo==AL_TLocIsNotFree)
+      iAlarmNo=AL_TLocIsNotFree67
+    ENDIF
+    ;
+    IF (iAlarmNo==AL_NoFreeLocFound)
+      iAlarmNo=AL_NoFreeLocFound67
+    ENDIF
+    ;
+    LOG(gbLogTMReset,iFError,sFName,"    chkTlLoc reports: iAlarmNo="<<iAlarmNo<<", sAlarmParam="<<sAlarmParam)
+    ;
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  ;Vorgegebener Platz oder passender Leerplatz
+  iDstMagNo=iTmpMagNo iDstPotNo=iTmpPotNo
+  ;
+  IF (iDstMagNo>=1)AND(iDstMagNo<=giNumRealMag)AND(iDstPotNo>=1)
+    ;bisherigen Platz in Wz-Daten eintragen (fuer spaeteres Beladen)
+    $TC_TPC9[iTNo]=iDstMagNo*1000+iDstPotNo
+  ENDIF
+  LOG(gbLogTMReset,iFError,sFName,"    target location proved and assigned by tool management: Mag/Loc="<<iDstMagNo<<"/"<<iDstPotNo)
+ENDIF
+
+IF (bTaskUnLoad)
+  ;
+  ;Quellplatz ermitteln
+  GetTlLoc(1,iTNo, iSrcMagNo, iSrcPotNo)
+  ;
+  IF (iSrcMagNo>=1)AND(iSrcMagNo<=giNumRealMag)AND(iSrcPotNo>=1)
+    ;
+    IF (bMagIsWM307)
+      ;Platzinformation Loeschen, da die WzBelegung sich bei flexibler Platzkodierung aendern kann
+      $TC_TPC9[iTNo]=0
+    ELSE
+      ;bisherigen Platz in Wz-Daten eintragen (fuer spaeteres Wiederbeladen)
+      $TC_TPC9[iTNo]=iSrcMagNo*1000+iSrcPotNo
+    ENDIF
+  ENDIF
+  LOG(gbLogTMReset,iFError,sFName,"    tool to be unLoaded: T="<<sName)
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+iLoadPot=($AA_ACT_INDEX_AX_POS_NO[mcAxV1]+giMagOffsetLoadPot)
+IF (iLoadPot>iNumPot)
+  iLoadPot=iLoadPot-iNumPot
+ENDIF
+iTNoLoad=$TC_MPP6[icMagNo,iLoadPot]
+
+;Ablaufbeginn an PLC
+;-------------------
+;
+mcDBB_ToMagPanel=1 OUT_TMJobActive=TRUE OUT_LoadActiv=TRUE
+;PLC Mindestdauer fuer OUT_TMJobActive=TRUE
+G4 F0.2
+
+IF (bTaskLoad)
+  ;
+  LOG(gbLogTMReset,iFError,sFName,"    locate empty pot to loading station")
+  ;
+  ;Platzdaten Zielplatz ermitteln
+  GetPlDat(0,0, iDstMagNo,iDstPotNo,bcDstIsLoadPlace)
+  ;
+  ;leeren Magazinplatz an Beladestelle Magazin bereitstellen
+  GetTool(FALSE,0,9999,iLoadPlaceNo)
+  ;
+  STOPRE
+  ;Leerer Magazinplatz in Werkzeugbeladeposition
+  giMagState=50
+  ;
+  GOTOF WaitForLoadUnload
+ENDIF
+
+IF (bTaskUnLoad)
+  ;
+  ;Werkzeug zur Entladestelle bringen
+  LOG(gbLogTMReset,iFError,sFName,"    locate tool T="<<sName<<" to unload station")
+  ;
+  ;Platzdaten fuer zu entladenes Werkzeug ermitteln
+  GetPlDat(0,0,iSrcMagNo,iSrcPotNo,bcDstIsLoadPlace)
+  ;
+  ;Wz zur Entladestelle bringen
+  MovTool(iToDo,iTNo,9999,iLoadPlaceNo,iAlarmNo,sAlarmParam)
+  IF (iAlarmNo>0)
+    ;
+    LOG(gbLogTMReset,iFError,sFName,"    MovTool reports: iAlarmNo="<<iAlarmNo<<", sAlarmParam="<<sAlarmParam)
+    ;
+    IF (iAlarmNo<67000)
+      ;RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+    ELSE
+      ;67000-er Alarm, allerdings bereits ausgegeben
+      IF (iAlarmNo==AL_VerifyTlPosition67)
+        ;Wz falsch eingelegt
+        iAlarmNo=AL_StopDueToErrors
+      ELSE
+        iAlarmNoShown=iAlarmNo
+      ENDIF
+    ENDIF
+    GOTOF HandleAlarm
+  ELSE
+    GOTOF WaitForLoadUnload
+  ENDIF
+ENDIF
+
+;-------------------------------------------
+;Endlosschleife fuer Synchronisation mit PLC
+;-------------------------------------------
+;
+;=================
+WaitForLoadUnload:
+;=================
+;
+;beim BELADEN  zunaechst leeren Magazinplatz an der Beladestelle Magazin bereitstellen
+;beim ENTLADEN zunaechst Magazinplatz mit Entlade-Wz an der Beladestelle Magazin bereitstellen
+;
+iLoadPot=($AA_ACT_INDEX_AX_POS_NO[mcAxV1]+giMagOffsetLoadPot)
+IF (iLoadPot>iNumPot)
+  iLoadPot=iLoadPot-iNumPot
+ENDIF
+iTNoLoad=$TC_MPP6[icMagNo,iLoadPot]
+IF (iTNoLoad>0)
+  MakeAlarmParam(sNameLoad,$TC_TP2[iTNoLoad],<<$TC_TP1[iTNoLoad])
+ENDIF
+
+IF (bTaskLoad)AND(iTNoLoad<>0)
+  ;Beladeplatz nicht leer
+  iAlarmNo=AL_HgAtLoadingPosNotEmpty
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (bTaskUnLoad)AND((iTNoLoad<>iTNo)OR(iTNoLoad<=0))
+  ;falsches oder kein Wz auf Beladeplatz
+  iAlarmNo=AL_WrongTlAtLoadingPos sAlarmParam=sNameLoad
+  GOTOF HandleAlarm
+ENDIF
+
+;Beladen:  Platz leer, Scheibe/Kette in Position fuer manuelles Beladen
+;Entladen: Richtiges Wz in Position fuer manuelles Entladen
+
+LOG(gbLogTMReset,iFError,sFName,"    $TIMESTAMP$ HG in manual load position: waiting for user interaction")
+
+;-------------------
+;PLC: Teil I beendet
+;-------------------
+
+;Wz oder HG bereitgestellt an PLC, Beladeplatz fuer Abbruch
+OUT_LoadDone=TRUE
+
+IF (bTaskLoad)
+  ;
+  grSyncPickUpDrop=ITOR(iTNo*100000) + icMagNo*1000 + iLoadPot
+  ;
+  MSG(MSG_OpenDoorPutToolIntoHg)
+  ;
+  M_OpenDoorLoadToolInMag
+ENDIF
+;
+IF (bTaskUnLoad)
+  ;
+  grSyncPickUpDrop=icMagNo*1000 + iLoadPot
+  ;
+  MSG(MSG_OpenDoorGetToolFromHg)
+  ;
+  M_OpenDoorUnldToolOfMag
+ENDIF
+;
+WaitCycEnd("ALWAYS")
+;
+MSG("")
+
+LOOP
+  ;
+  IF (OUT_LoadEnd) GOTOF CONTINUE
+  ;
+  IF (OUT_LoadReset)
+    ;von PLC: Vorgang abbrechen
+    LOG(gbLogTMReset,iFError,sFName,"    $TIMESTAMP$ from PLC: LoadReset")
+    GOTOF ENDE
+  ENDIF
+  ;
+  WaitCycEnd("0.1")
+  ;
+ENDLOOP
+
+;========
+CONTINUE:
+;========
+
+LOG(gbLogTMReset,iFError,sFName,"    $TIMESTAMP$ PLC reported end of user handling")
+
+IF (bTaskLoad)
+  ;
+  ;Beladestelle -> Scheibe, Kette
+  IF (bWithComfortPanel)AND(iToDo==mcTaskLoadMag)
+    ToAckn(TRUE,giJobTaskId,giJobTaskIdNo,iTNo,iTNo,iDstMagNo,iDstPotNo,9999,iLoadPlaceNo,1)
+  ENDIF
+  grSyncPickUpDrop=0
+ENDIF
+
+IF (bTaskUnLoad)
+  ;
+  bUnloadTl=(mcDBB_ModeFromMagPanel==0) bOnlyCheckTl=(mcDBB_ModeFromMagPanel==2)
+  ;
+  IF (bUnloadTl);OR(bWithComfortPanel)
+    ;
+    ;Scheibe,Kette -> Wz Liste
+    IF (bWithComfortPanel)
+      ToAckn(TRUE,giJobTaskId,giJobTaskIdNo,iTNo,iTNo,9999,iLoadPlaceNo,iSrcMagNo,iSrcPotNo,1)
+    ELSE
+      ToAckn(TRUE,5,2,iTNo,iTNo,9999,iLoadPlaceNo,iSrcMagNo,iSrcPotNo,1)
+    ENDIF
+  ENDIF
+  grSyncPickUpDrop=0
+  ;
+  IF (NOT bOnlyCheckTl)
+    ;
+    ;Aktiv zuruecksetzen
+    TlData(iTNo,mcResActiveTl)
+    ;
+    ;Ueberwachungsdaten Zuruecksetzen, Verschleiss Loeschen
+    TlData(iTNo,mcResMonData + mcResWear)
+  ENDIF
+ENDIF
+
+;<Wz entladen> und <Wz beladen> immer zuruecksetzen
+TlData(iTNo,mcSetRelTl + mcResLoadUnloadTl)
+;
+;Vor dem naechsten Einsatz soll das Wz immer geprueft werden
+OEM_TlData(iTNo,mcResMeasured_Tested)
+;
+iTNoLoad=$TC_MPP6[icMagNo,iLoadPot]
+IF (iTNoLoad>0)
+  MakeAlarmParam(sNameLoad,$TC_TP2[iTNoLoad],<<$TC_TP1[iTNoLoad])
+ENDIF
+
+;Beladen/Entladen beendet an PLC
+OUT_LoadDone=FALSE OUT_LoadEnd=FALSE
+
+IF (bTaskLoad)
+  ;
+  IF (iTNoLoad>0)
+    ;
+    ;Wz koerperlich im Magazin, datentechnisch angelegt und ebenfalls im Magazin
+    LOG(gbLogTMReset,iFError,sFName,"    tool in Magazine is T="<<sNameLoad)
+    ;
+    ;DG leer in Grundstellung
+    giMagState=30
+    ;
+    IF (iTNo>0)AND(iTNoLoad<>iTNo)
+      ;
+      ;Falsches Wz
+      ;
+      TlData(iTNoLoad,mcResRelTl)
+      ;
+      iAlarmNo=AL_WrongTlAtLoadingPos sAlarmParam=sNameLoad
+      GOTOF HandleAlarm
+    ENDIF
+  ELSE
+    LOG(gbLogTMReset,iFError,sFName,"    no tool in magazine")
+    iAlarmNo=AL_TlNotInMagazine
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+IF (bTaskUnLoad)
+  ;
+  IF (iTNoLoad<=0)OR(iTNo<>iTNoLoad)
+    ;
+    ;Magazinplatz leer oder anderes Wz auf Magazinplatz
+    ;
+    IF ($P_TOOLEXIST[iTNo])
+      ;
+      ;momentaner Ort des EntladeWz
+      iActMagNo=$A_TOOLMN[iTNo] iActPotNo=$A_TOOLMLN[iTNo]
+      IF (iActMagNo<1)OR(iActMagNo>giNumRealMag)
+      	;
+      	;EntladeWz nicht mehr im Magazin
+        ;
+        $TC_TPC10[iTNo]=0
+      ENDIF
+    ENDIF
+    ;
+    IF (iSrcMagNo>=1)AND(iSrcMagNo<=giNumRealMag)AND(iSrcPotNo>=1)
+      ;
+      IF (($TC_MPP4[iSrcMagNo,iSrcPotNo] B_AND 'B100')<>0)
+        ;
+        ;Quellplatz des EntladeWz's reserviert
+        ;
+        ;Platzreservierung und AltPlatz loeschen
+        $TC_MPP4[iSrcMagNo,iSrcPotNo]=($TC_MPP4[iSrcMagNo,iSrcPotNo] B_AND (B_NOT 'B100')) $TC_MPP66[iSrcMagNo,iSrcPotNo]=0
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  STOPRE
+  IF (iTNoLoad>0)
+    ;
+    ;Magazinplatz ist (noch) belegt
+    ;
+    ;DG leer in Grundstellung
+    giMagState=30
+    ;
+    LOG(gbLogTMReset,iFError,sFName,"    After unloading user has selected loading tool T="<<sNameLoad)
+  ELSE
+    ;
+    ;Leerer Magazinplatz in Wz Beladeposition    
+    giMagState=50
+    ;
+    LOG(gbLogTMReset,iFError,sFName,"    no tool in Pot")
+    ;
+    ;Entladen beendet
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+;Status: Wz in Scheibe oder Kette
+;- Beladen / Entladen, wobei das zu entladende Wz wiederbeladen wird
+;- Entladen, wobei das zu entladende Wz entnommen wurde und ein anderes Wz beladen wird
+
+;Folgendes mit Wz (iTNo) auf dem Beladeplatz
+iTNo=iTNoLoad
+
+;Pruefe Werkzeugtyp zu Kollisionsdaten
+ChkDim(1,iTNo,iChkRes)
+IF (iChkRes<0)
+  iAlarmNo=AL_InvalidToolData67 sAlarmParam=sNameLoad
+  GOTOF HandleAlarm
+ENDIF
+
+;Zielplatz
+$TC_TPC9[iTNo]=ITOR(icMagNo*1000)+iLoadPot
+;
+LOG(gbLogTMReset,iFError,sFName,"    target location from $TC_TPC9: Mag/Pot="<<iDstMagNo<<"/"<<iDstPotNo)
+
+OEM_TlData(iTNo,mcGetMeasCut)
+;
+IF (bToolCheckOn)AND(OEM_bSelCheck)
+  ;
+  ;Werkzeug mit Bruchkontrolle
+  ;
+  ;Wz Pruefen
+  ToBreak(2,$TC_TP2[iTNo],$TC_TP1[iTNo],-1,0)
+  ;
+  IF (gbLastToBroken)
+    ;
+    ;Fehler bei Bohrerbruchkontrolle -> Werkzeug zurueck zur Beladeposition bringen
+    ;
+    GetPlDat(0,0,icMagNo,iLoadPot,bcDstIsLoadPlace)
+    ;
+    MovTool(mcTask_ToLoadPos,iTNo,9999,iLoadPlaceNo,iAlarmNo,sAlarmParam)
+    ;
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+STOPRE
+;
+IF (iTNo>0)
+  ;
+  IF ($P_TOOLEXIST[iTNo])
+    ;
+    IF ($TC_TP3[iTNo]>1)OR($TC_TP4[iTNo]>1)OR($TC_TP5[iTNo]>1)OR($TC_TP6[iTNo]>1)OR($TC_TP7[iTNo]>1)OR(NOT bMagIsWM307)
+      ;
+      ;<FestplatzWz> setzen (bei flexibler Kette nur wenn Groesse oder WzPlatzTyp > Standard)
+      TlData(iTNo,mcSetFixPlaceTl)
+    ENDIF
+  ENDIF
+ENDIF
+;
+mcDBB_ToMagPanel=0 mcDBB_ModeFromMagPanel=0 OUT_TMJobActive=FALSE OUT_LoadActiv=FALSE OUT_LoadDone=FALSE OUT_LoadReset=FALSE OUT_LoadEnd=FALSE
+;
+IF (iAlarmNo>0)
+  GOTOF HandleAlarm
+ELSE
+  LOG(gbLogTMReset,iFError,sFName,"$TIMESTAMP$ MagLoad ended without errors")
+  LOG(gbLogTMReset,iFError,sFName," ")
+ENDIF
+;
+MSG("")
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;
+;neg. Quittierung an PLC (Auftraggeber)
+;
+;66xxx-er Alarm: 128..191
+iAcknVal=128
+IF (iAlarmNo==AL_InvalidMissingInput)
+  iAcknVal=129
+ENDIF
+IF (iAlarmNo==AL_DGNotEmpty)
+  iAcknVal=130
+ENDIF
+IF (iAlarmNo==AL_DgNotInBasePos)
+  iAcknVal=131
+ENDIF
+IF (iAlarmNo==AL_HgWithTlNotClamped)
+  iAcknVal=132
+ENDIF
+IF (iAlarmNo==AL_HGNotLowered)
+  iAcknVal=133
+ENDIF
+IF (iAlarmNo==AL_HgPosInvalid)
+  iAcknVal=134
+ENDIF
+IF (iAlarmNo==AL_StopDueToErrors)
+  iAcknVal=135
+ENDIF
+IF (iAlarmNo==AL_HgAtLoadingPosNotEmpty)
+  iAcknVal=136
+ENDIF
+IF (iAlarmNo==AL_WrongTlAtLoadingPos)
+  iAcknVal=137
+ENDIF
+IF (iAlarmNo==AL_TlNotMoved)
+  iAcknVal=138
+ENDIF
+;
+;67xxx-Alarme -> 192..255
+iAcknVal=192
+IF (iAlarmNo==AL_TNoNotAllowed67)
+  iAcknVal=193
+ENDIF
+IF (iAlarmNo==AL_TlInSpDG67)
+  iAcknVal=194
+ENDIF
+IF (iAlarmNo==AL_TlAlreadyLoaded67)
+  iAcknVal=195
+ENDIF
+IF (iAlarmNo==AL_TlAlreadyUnLoaded67)
+  iAcknVal=196
+ENDIF
+IF (iAlarmNo==AL_LoadListNotTarget67)
+  iAcknVal=197
+ENDIF
+IF (iAlarmNo==AL_TLocIsNotFree67)
+  iAcknVal=198
+ENDIF
+IF (iAlarmNo==AL_NoFreeLocFound67)
+  iAcknVal=199
+ENDIF
+IF (iAlarmNo==AL_VerifyTlPosition67)
+  iAcknVal=200
+ENDIF
+IF (iAlarmNo==AL_NoToolInHG67)
+  iAcknVal=201
+ENDIF
+IF (iAlarmNo==AL_WrongTlInHG67)
+  iAcknVal=202
+ENDIF
+IF (iAlarmNo==AL_TlLocBlocked67)
+  iAcknVal=203
+ENDIF
+IF (iAlarmNo==AL_FunctionLocked67)
+  iAcknVal=204
+ENDIF
+;
+;Fehlernummer an PLC
+mcDBB_ToMagPanel=iAcknVal OUT_TMJobActive=TRUE
+;
+WHILE (OUT_TMJobActive)
+  ;Sicherstellen, dass PLC die Flanke erkennen kann
+  G4 F0.2
+ENDWHILE
+;
+;Ablauf beendet
+mcDBB_ToMagPanel=0 mcDBB_ModeFromMagPanel=0 OUT_LoadActiv=FALSE OUT_LoadDone=FALSE OUT_LoadReset=FALSE OUT_LoadEnd=FALSE
+;
+LOG(gbLogTMReset,iFError,sFName,"    because of errors jump to ErrorHandler")
+LOG(gbLogTMReset,iFError,sFName,"    iAlarmNo="<<iAlarmNo<<", sAlarmParam="<<sAlarmParam)
+LOG(gbLogTMReset,iFError,sFName,"    iAcknVal="<<iAcknVal)
+LOG(gbLogTMReset,iFError,sFName,"    user is requested to open magazine loading door and removing tool from HG")
+LOG(gbLogTMReset,iFError,sFName,"$TIMESTAMP$ HgLoad ended with errors")
+;
+; ... dann Alarm absetzen (falls 67xxx)
+IF (iAlarmNo>=67000)AND(iAlarmNo<>iAlarmNoShown)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+; Bediener auffordern, das Wz aus dem HG zu entfernen
+IF (giTNoHg>0)
+  SETAL(AL_UnloadTlFromHg67,"")
+ENDIF
+;
+; ... dann erst RESET-pflichtigen Alarm absetzen
+IF (iAlarmNo>=66000) AND (iAlarmNo<=66999) AND (iAlarmNo<>iAlarmNoShown)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+RET

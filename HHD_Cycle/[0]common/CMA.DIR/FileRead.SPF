@@ -1,0 +1,212 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     FileRead.SPF
+;# Task:      Wert aus NCFile Lesen
+;# Version:   V06.00.06
+;# Date:      29.10.2017 / Simons
+;# Control:   840D
+;# TM:        All
+;# NBHSeries: All
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 29.10.2017 / Simons
+; - DISPLOF
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.06 - 06.01.2017 / Simons
+; - Neuversionierung
+; - bReadLine eingefuehrt
+;
+; V06.00.03 - 09.05.2016 / Simons
+; - ProtoTyp
+;
+;------------------------------------
+;
+; Beschreibung:
+;--------------
+;
+; Das Programm sucht im angegebenen
+; NCFile "sName" ab der ersten Zeile
+; nach dem Begriff "sItem"
+;
+; - Gesucht wird vom Fileanfang aus
+; - Es wird immer der erste gefundene
+;   Eintrag ausgewertet.
+; - Die Erkennung ist nicht Case Sensitive.
+; - Gelesen wird ab dem ersten Zeichen
+;   nach dem Startzeichen(, dass kein
+;   Leerzeichen ist,) bis zum Endezeichen
+;   oder bis zum Zeilenende.
+;   Bei iEnd1=0 wird die gesamte Zeile eingelesen
+; - Anfangs- und Endezeichen (2 Paar)
+;   sind parametrierbar (iStart1/2, iEnd1/2)
+;   Vorgegeben wird der ASCII Code
+;   61 : "=" (Default Start)
+;   32 : " " (Default Ende)
+;   44 : ","
+;   34 : """ usw.
+; - Fuehrende und anhaengende Leerzeichen
+;   werden abgeschnitten
+; - "*" als alleiniger Inhalt einer
+;   Zeile ist nicht erlaubt
+;
+; Maximale Groesse: 255*255 Zeilen
+;
+; Beispiel:
+; sItem  = "Version"
+; Im File ... Version = 1234 ...
+; sErgebnis= "1234"
+; Wird der geforderte Begriff nicht
+; gefunden oder es wird ein Fehler
+; erkannt, so ist sErgebnis=""
+;
+;------------------------------------
+
+PROC FileRead(STRING[255] sItem, STRING[255] sName, VAR STRING[255] sErgebnis, INT iMaxLines, INT iStart1, INT iEnd1, INT iStart2, INT iEnd2) DISPLOF
+
+DEF CHAR iSign
+;
+DEF STRING[32] CycName = "FileRead V06.00.06"
+;
+DEF STRING[1] sUnvalidLine="*", sSign
+DEF STRING[255] sAuxArr[255]=REP("*")
+;
+DEF BOOL bReadLine=FALSE, bData, bStart
+;
+DEF INT icMaxBlocks=255, icMaxChar=255, iError=0, iBlockStart=1, iPosNo, iLineNo, iLen, iTrimLen
+
+sErgebnis="" sItem=Toupper(sItem)
+
+IF (sItem=="")OR(NOT ISFILE(sName))
+  ;
+  ;kein Suchbegriff File nicht gefunden
+  RET
+ENDIF
+
+IF (NOT $P_SUBPAR[4])
+  iMaxLines=255
+ENDIF
+;
+IF (NOT $P_SUBPAR[5])
+  iStart1=61 ; =
+ENDIF
+;
+IF (NOT $P_SUBPAR[6])
+  iEnd1=32 ; Leerzeichen
+ELSE
+  bReadLine=(iEnd1==0)
+ENDIF
+
+;Max. "icMaxBlocks" Mal wird der folgende Block eingelesen und nach dem Suchbegriff gesucht
+WHILE (iBlockStart<iMaxLines*icMaxBlocks)
+  ;
+  ;Liest max. "iMaxLines" Zeilen mit max. Laenge von "icMaxChar" aus der Quelle in das Textfeld
+  READ(iError, sName, iBlockStart, iMaxLines, sAuxArr)
+  ;
+  IF (iError==0)OR(iError>=21)
+    ;
+    iLineNo=0
+    WHILE (iLineNo<iMaxLines)
+      ;
+      iPosNo=MATCH(TOUPPER(sAuxArr[iLineNo]),sItem)
+      IF (iPosNo>-1)
+        ;
+        ;Begriff gefunden
+        iPosNo=iPosNo+STRLEN(sItem)-1 bStart=FALSE bData=FALSE iLen=(STRLEN(sAuxArr[iLineNo])-1) iTrimLen=-1
+        WHILE (iPosNo<iLen)
+          ;
+          iPosNo=iPosNo+1 sSign=SUBSTR(sAuxArr[iLineNo],iPosNo,1) iSign=sSign
+          ;
+          IF (bStart)
+            ;
+            ;Nutzdaten erwartet
+            ;
+            IF (iSign<>iEnd1)AND(iSign<>iEnd2)
+              ;
+              ;kein Endezeichen
+              ;
+              IF (bData)
+                ;
+                sErgebnis=sErgebnis<<sSign
+                ;
+                IF (iSign<>32)OR(bReadLine)
+                  ;
+                  ;Laenge der Nutzdaten
+                  iTrimLen=STRLEN(sErgebnis)
+                ENDIF
+              ELSE
+                ;
+                IF (iSign<>32)
+                  ;
+                  ;Erstes Nutzzeichen
+                  bData=TRUE sErgebnis=sSign iTrimLen=1
+                ENDIF
+              ENDIF
+              ;
+              IF (iPosNo==iLen)
+                ;
+                ;Zeilenende -> Ende
+                GOTOF ENDE
+              ENDIF
+            ELSE
+              ;
+              IF (bData)
+                ;
+                ;Nutzdaten haben schon begonnen und Trennzeichen erkannt -> Ende
+                GOTOF ENDE
+              ENDIF
+            ENDIF
+          ELSE
+            ;
+            IF (iSign==iStart1)OR(iSign==iStart2)
+              ;
+              ;Nutzdatenanfang
+              bStart=TRUE
+            ELSE
+              ;
+              IF (iSign<>32)
+                ;
+                ;zwischen Begriff und Nutzdatenanfang sind nur Leerzeichen erlaubt -> Abbruch
+                RET
+              ENDIF
+            ENDIF
+          ENDIF
+        ENDWHILE
+      ELSE
+        IF (sAuxArr[iLineNo]==sUnvalidLine)
+          ;
+          ;Ungueltige Zeile -> Ende
+          RET
+        ENDIF
+      ENDIF
+      ;
+      ;naechste Zeile im Block
+      iLineNo=iLineNo+1
+    ENDWHILE
+  ENDIF
+  ;
+  ;naechster Block
+  iBlock=iBlock+iMaxLines
+ENDWHILE
+;
+RET
+
+;====
+ENDE:
+;====
+;
+IF (STRLEN(sErgebnis)>iTrimLen)AND(iTrimLen>-1)
+  ;
+  ;Entfernen der anhaengenden Leerzeichen
+  sErgebnis=SUBSTR(sErgebnis,0,iTrimLen)
+ENDIF
+;
+RET

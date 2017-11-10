@@ -1,0 +1,63 @@
+; DEU
+DATE_1=Datum
+PROGRAM_1=Aktives Programm
+HEADER_1=Fehlende Werkzeuge
+TCDOOR_1=Werkzeugwechseltuer
+CLAMP_1=Klemmen
+UNCLAMP_1=Loesen
+DG_1=Doppelgreifer
+HD_1=Handhabegeraet
+TYPE_1=Typ
+RADIUS_1=Radius
+LENGTH_1=Laenge
+; ENG
+DATE_3=Date
+PROGRAM_3=Active Program
+HEADER_3=Missing Tools
+TCDOOR_3=Tool Change Door
+CLAMP_3=Clamp
+UNCLAMP_3=UnClamp
+DG_3=Doublegripper
+HD_3=Handling Device
+TYPE_3=Typ
+RADIUS_3=Radius
+LENGTH_3=Length
+; CHS
+DATE_8=Date
+PROGRAM_8=Active Program
+HEADER_8=Missing Tools
+LINE_8=18
+TCDOOR_8=Tool Change Door
+CLAMP_8=Clamp
+UNCLAMP_8=UnClamp
+DG_8=Doublegripper
+HD_8=Handling Device
+TYPE_8=Type
+RADIUS_8=Radius
+LENGTH_8=Length
+; HUN
+DATE_18=Date
+PROGRAM_18=Active Program
+HEADER_18=Missing Tools
+TCDOOR_18=Tool Change Door
+CLAMP_18=Clamp
+UNCLAMP_18=UnClamp
+DG_18=Doublegripper
+HD_18=Handling Device
+TYPE_18=Type
+RADIUS_18=Radius
+LENGTH_18=Length
+; RUS
+DATE_57=Date
+PROGRAM_57=Active Program
+HEADER_57=Missing Tools
+TCDOOR_57=Tool Change Door
+CLAMP_57=Clamp
+UNCLAMP_57=UnClamp
+DG_57=Doublegripper
+HD_57=Handling Device
+TYPE_57=Type
+RADIUS_57=Radius
+LENGTH_57=Length
+
+

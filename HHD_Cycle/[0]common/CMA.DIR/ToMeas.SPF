@@ -1,0 +1,272 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToMeas.SPF
+;# Task:      BBK im Magazin
+;# Version:   V06.00.07
+;# Date:      05.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 17.04.2017 / Simons
+; - OEM_TlData(..,x) -> OEM_TlData(..,mc..)
+; - Abfrage auf Wz in Beladeliste
+; - Formale Aenderungen
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+; - MsgBox(...)
+; - G70/71 entfernt
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neuversionierung
+; - Korrektur icMeas/icCheck
+; - mcbDBB_BBKOn.. hinzu
+;
+; V06.00.03 - 27.06.2016 / Simons
+; - Zusammenfassung
+; - Einfuehrung HHDTM
+; - Korrektur Abbruchfunktion
+;
+; V04.00.00 - 20.01.2015 /  Huettner
+; - Vorlage (mit HG)
+;
+; V04.00.01 - 19.11.2014 /  Huettner
+; - Vorlage (ohne HG)
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; - Werkzeug lernen/pruefen
+; - Messeinheit kalibrieren
+; im Kanal 1.
+;
+; Eingangsparameter:
+; ------------------
+; iToDo=
+; 1 - Wz Teachen
+; 2 - Wz Pruefen ("Bruchkontrolle")
+; 4 - Bohrerbruchkontrolle MSC Teachlauf
+;
+; sTName, iTDuploNo =
+; (optional) Angabe des Werkzeuges
+; mit Wz-Bezeichner und DuploNummer
+;
+; Wird angestossen durch die PLC
+; als ASUP, nachdem der Bediener den
+; entsprechenden Softkey im
+; MESSEN-/PRUEFEN-Bild betaetigt hat.
+;
+;------------------------------------
+
+PROC ToMeas (INT iToDo, STRING[32] sTName, INT iTDuploNo) SAVE DISPLOF SBLOF
+
+DEF STRING[32] sCycName="ToMeas V06.00.07", sAlarmParam="", sName="", sMessageNo
+;
+DEF BOOL bMagIsMiksch, bSelMeasNoNewVal, bTlMeasured, bMagIsChain, bDGIsWM307
+;
+DEF INT iAlarmNo=0, icMeas=1, icCheck=2, icMSCTeach=4, icMagNo=1, iTNo, iMagPos, iMeasCutNo
+;
+DEF REAL rPresetValue, rWaitShort
+
+bDGIsWM307=((giDGType B_AND 'B100')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307)) rWaitShort=2*$MN_IPO_CYCLE_TIME
+
+;Abbruch, wenn kein Messeinrichtung vorhanden oder angewaehlt. (STOPRE)
+IF (NOT mcbDBB_TlCheckOn)AND(NOT mcbDBB_TlCheckMagOn) GOTOF ENDE
+
+MsgBox("","CLEAR")
+
+IF (NOT $P_SUBPAR[1])OR(iToDo==0)
+  ;
+  ;Default = Pruefen
+  iToDo=icCheck
+ENDIF
+;
+IF ($P_SUBPAR[2])
+  ;
+  IF (NOT $P_SUBPAR[3])
+    iTDuploNo=1
+  ENDIF
+  ;
+  IF (sTName=="")OR(sTName=="0")
+    iAlarmNo=AL_NoSupport sAlarmParam="sTName="<<sTName
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iTDuploNo<=0)
+    iAlarmNo=AL_NoSupport sAlarmParam="iTDuploNo="<<iTDuploNo
+    GOTOF ENDE
+  ENDIF
+  ;
+  MakeAlarmParam(sName,sTName,<<iTDuploNo)
+  ;
+  iTNo=GETT(sTName,iTDuploNo)
+  IF (iTNo<=0)
+    iAlarmNo=AL_TlNotFound67 sAlarmParam=sName
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF ($A_MYMN[iTNo]==giMagNoLoadList)AND(giMagNoLoadList>0)
+    iAlarmNo=AL_TlInLoadList67 sAlarmParam=sName
+    GOTOF ENDE
+  ENDIF
+ELSE
+  ;
+  iTNo=giMMC_TNo
+  IF (iTNo<=0)
+    ;
+    ;Messeinrichtung wirkt auf Wz ...
+    ;
+    IF (gbWithHG)
+      ;
+      ;... im HG
+      ;
+      iTNo=giTNoHg
+    ELSE
+      ;
+      IF (bMagIsMiksch)
+        ;
+        IF (gbDg2MagSide)
+          ;
+          ;... im DG2
+          ;
+          iTNo=giTNoDg2
+        ELSE
+          ;
+          ;... im DG1
+          ;
+          iTNo=giTNoDg1
+        ENDIF
+      ELSE
+        ;
+        ;... in Scheibe oder Kette
+        ;
+        iMagPos=OUTA_ActPosV1
+        IF (iMagPos>0)
+          iTNo=$TC_MPP6[iCMagNo,iMagPos]
+        ELSE
+          iAlarmNo=PosMissing sAlarmParam=AXSTRING(mcAxV1)
+          GOTOF ENDE
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+  ENDIF
+  ;
+  IF (iTNo<=0)
+    iAlarmNo=AL_NoToolInHG67 sAlarmParam=""
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (NOT $P_TOOLEXIST[iTNo])
+    iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+    GOTOF ENDE
+  ENDIF
+  ;
+  MakeAlarmParam(sName,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+  ;
+ENDIF
+
+;Plausibilitaetsueberpruefung
+IF ($A_MYMN[iTNo]<=0)OR($A_MYMLN[iTNo]<=0)
+  ;zu pruefendes Wz ist ein HandWz (keinem realen Magazin zugeordnet) einfach uebergehen/ignorieren
+  iAlarmNo=AL_IsManualTool67 sAlarmParam=sName
+  GOTOF ENDE
+ENDIF
+
+;Status - Wz Pruefen/Vermessen Lesen
+OEM_TlData(iTNo,mcGetMeasCut)
+;
+iMeasCutNo=RTOI(OEM_iCutNo)
+;
+IF (NOT OEM_bValidMeasCut)
+  ;Wz fuer Messen/Pruefen nicht zugelassen
+  MakeAlarmParam(sAlarmParam,sName,"D"<<$P_TOOLND[iTNo]<<" (D="<<iMeasCutNo<<")",2)
+  iAlarmNo=AL_TlMeasInvalidCutNo67
+  GOTOF ENDE
+ENDIF
+;
+bSelMeasNoNewVal=OEM_bSelMeasNoNewVal bTlMeasured=OEM_bTlMeasured grProbval=0.0
+;
+IF (iToDo==icCheck)AND(NOT bTlMeasured)
+  ;
+  ;Pruefen gefordert aber Werkzeug noch nicht vermessen -> Vermessen
+  iToDo=icMeas
+ENDIF
+;
+IF (iToDo==icMeas)AND(NOT bSelMeasNoNewVal)
+  ;
+  ;Wz soll vermessen und ein neuer Sollwert uebernommen werden -> Sollwert aus den GeoDaten
+  rPresetValue=$TC_DP3[iTNo,iMeasCutNo]+$TC_DP12[iTNo,iMeasCutNo]
+ELSE
+  ;
+  ;Sollwert (OEM_rCheckLen) aus WZ OEM-Daten
+  rPresetValue=OEM_rCheckLen
+ENDIF
+;
+IF (rPresetValue<grMinMeasToolLen)
+  ;
+  ;Werkzeug ohne gueltige Laengenangabe
+  ;
+  IF (iToDo==icCheck)AND(NOT bSelMeasNoNewVal)
+    ;
+    ;Wz soll geprueft und die Uebernahme eines neuen Sollwertes ist erlaubt -> Sollwert aus den
+    ;GeoDaten uebernehmen, anschliessend Vermessen des Wz's
+    ;
+    rPresetValue=$TC_DP3[iTNo,iMeasCutNo]+$TC_DP12[iTNo,iMeasCutNo]
+    ;
+    iToDo=icMeas
+  ENDIF
+  ;
+  IF (rPresetValue<grMinMeasToolLen)
+    iAlarmNo=AL_TlPresetDataInvalid67 sAlarmParam=sName
+    GOTOF ENDE
+  ENDIF
+ENDIF
+;
+IF (giTNoSp>0)AND(giTNoSp==iTNo)
+  ;
+  ;zu pruefendes/zu vermessendes Wz allerdings in der Spindel
+  ;bewusst kein automatisches Ausschleusen: koennte stoeren,
+  ;wenn dieses Wz einerseits aufgrund des Bearbeitungsprogrammes
+  ;noch arbeitet, andererseits z.B. aus dem Bearbeitungsprogramm
+  ;Bohrerbruchkontrolle angestossen wird
+  ;
+  iAlarmNo=AL_TlInSp67 sAlarmParam=sName
+  GOTOF ENDE
+ENDIF
+
+;Abschluss des laufenden Auftrags abwarten
+WHILE (giTaskID<>0)
+  STOPRE
+  G04 F=rWaitShort
+ENDWHILE
+
+;Auftrag an Kanal 2 - WzVermessen/Pruefen (ID=1) aber nicht auf die Beendigung zu warten (State=1)
+;
+giTaskID=1 giTaskOption=0 giTaskState=1 giTaskData[0]=iTNo giTaskData[1]=iMeasCutNo giTaskData[2]=iToDo
+
+;====
+ENDE:
+;====
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+  WHILE (iToDo==icMSCTeach)
+    M0
+    STOPRE
+  ENDWHILE
+ENDIF
+;
+RET

@@ -1,0 +1,233 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetPlDat.SPF
+;# Task:      Platz Daten ermitteln
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: Chain
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neue Versionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 19.10.2016 / Simons
+; - Neue Versionierung
+; - Pruefmodus hinzu
+; - bDstIsLoadPlace hinzu
+;
+; V06.00.04 - 01.09.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.03 - 06.05.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.02 - 09.04.2016 / Simons
+; - Neue Versionierung
+; - giNumPlacesInMag
+;
+; V04.00.00 - 25.03.2015 / Huettner
+; - Grundversion
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Generierung der Platzdaten fuer die
+; Verfahrbewegungen
+;
+; Magazin 1:  32/60/90 Plaetze
+;
+; Unterstuetzte Magazine
+; ----------------------
+;                   Artikel-Nr:
+;
+;NBH 5   / Direktbeladung   / Kette 32       / Lmax=500 / Dmax=165 : AD.xxxx.xxxx
+;NBH 5   / Palettenwechsler / Kette 32       / Lmax=450 / Dmax=165 : AD.0145.9434
+;NBH 5   / Direktbeladung   / Kette 60 + 90  / Lmax=500 / Dmax=165 : AD.xxxx.xxxx
+;NBH 5   / Palettenwechsler / Kette 60 + 90  / Lmax=450 / Dmax=165 : AD.0153.0403
+;NBH 500 / ---------------- / Kette 60 + 90  / Lmax=550 / Dmax=175 : AD.xxxx.xxxx
+;
+; Eingangsparameter:
+; ------------------
+; iMagNo0, iPotNo0: sofern > 0: Uebergabeplatz
+; iMagNo1, iPotNo1: sofern > 0: Beladeplatz
+;
+; Ausgangsparameter:
+; ------------------
+; Ergebnisse in GUD-Arrays
+;
+; Zur Beachtung:
+; a) Die angegebenen Koordinaten-Werte beziehen sich zunaechst auf das
+;    metrische System, Einheit: 1 mm
+;    Sie werden am Ende ueber einen multiplikativen Faktor
+;    in das aktuelle Einheitensystem umgerechnet
+; b) Platz 1 der Kassette wird stets als Kassetten-Nullpunkt betrachtet
+; c) Die Umrechnung vom Kassetten- in das Magazinkoordinatensystem erfolgt durch
+;    eine Linearverschiebung um den Vektor (rCaNPX,rCaNPZ)
+;
+;------------------------------------
+
+
+PROC GetPlDat(INT iMagNo0,INT iPotNo0,INT iMagNo1,INT iPotNo1, BOOL bDstIsLoadPlace) DISPLOF
+
+DEF STRING[32] sCycName="GetPlDat V06.00.06", sResult
+;
+DEF STRING[128] sFName
+;
+DEF INT iCount, iNumPerLine, iTmp1, iTmp2, iError, iMagNo, iPotNo, iIndG1X, iIndG1Z, iIndG2X, iIndG2Z, iPlCount
+;
+DEF REAL rPosV1, rCaNPV1, rDist, rPlaceCount
+
+;Magazintyp Pruefen
+;------------------
+;
+IF (gbTMIsHHD)
+  SETAL(AL_CombNotAllowed,"TM HHD + giMagIdent="<<giMagIdent)
+  GOTOF ENDE
+ENDIF
+;
+IF (giMagIdent<>1459434)AND(giMagIdent<>1530403)
+  SETAL(AL_CycleInvalid,sCycName)
+  GOTOF ENDE
+ENDIF
+;
+IF (NOT $P_SUBPAR[1])AND(NOT $P_SUBPAR[2])AND(NOT $P_SUBPAR[3])AND(NOT $P_SUBPAR[4]) GOTOF ENDE
+
+FOR iCount=0 TO 1
+  ;
+  IF (iCount==0)
+    iMagNo=iMagNo0 iPotNo=iPotNo0
+  ELSE
+    iMagNo=iMagNo1 iPotNo=iPotNo1
+  ENDIF
+  ;
+  IF (iMagNo==0)OR(iPotNo==0)
+    ;
+    ;keine Vorgaben
+    giPlDatBero[iCount]=0 giPlDatFLog[iCount]=0
+    grPlDatPosV1[iCount]=0
+    giPlDatLane1X[iCount]=1 giPlDatLane2X[iCount]=1
+    GOTOF NextLoop
+  ENDIF
+
+  ;Plausibilitaetspruefungen
+  IF (iMagNo<=0)OR(iMagNo>giNumRealMag)
+    ;
+    SETAL(AL_InvalidCaNr, <<iMagNo)
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iPotNo<=0)
+    ;
+    SETAL(AL_InvalidPlNr,<<iPotNo)
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+    ;
+    ;reales Magazin
+    ;
+    IF (iPotNo>giNumPlacesInMag[iMagNo])AND(iPotNo<>999)
+      ;
+      SETAL(AL_InvalidPlNr,<<iPotNo)
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+
+  ;Vorbelegungen
+  ;--------------
+  giPlDatBero[iCount]=0 giPlDatFLog[iCount]=0
+
+  ;Wenn nicht anders definiert, gilt im Folgenden:
+  ;Platz 1 als Scheibennullpunkt, bezogen auf Magazin-Nullpunkt
+
+  CASE iMagNo OF 1 GOTOF Mag1 2 GOTOF Mag2 3 GOTOF Mag3 4 GOTOF Mag4 5 GOTOF Mag5
+  ;
+  SETAL(AL_InvalidCaNr,<<iMagNo)
+  GOTOF ENDE
+
+  ;====
+  Mag1:
+  ;====
+  giPlDatFLog[iCount]=1
+  ;
+  IF (giMagIdent==1530403)
+    ;
+    ;Miksch Kette 60/90 Plaetze
+    ;
+    rCaNPV1=0.0 rDist=48 rPlaceCount=giNumPlacesInMag[1]
+  ENDIF
+  ;
+  IF (giMagIdent==1459434)
+    ;
+    ;Wassermann Kette 32 Plaetze
+    ;
+    rCaNPV1=0.0 rDist=85 rPlaceCount=giNumPlacesInMag[1]
+  ENDIF
+  ;
+  IF (bDstIsLoadPlace)AND(iCount==1)
+    ;Uebertrag
+    rCaNPV1=(rCaNPV1+(rPlaceCount-giMagOffsetLoadPot)*rDist)
+  ENDIF
+  ;
+  ;Koordinaten bezogen auf Kettennullpunkt (9999 -> rG2X=rG1X)
+  rPosV1=(iPotNo-1)*rDist iIndG1X=1 iIndG2X=9999
+  GOTOF common
+
+  ;====
+  Mag2:
+  ;====
+  GOTOF common
+
+  ;====
+  Mag3:
+  ;====
+  GOTOF common
+
+  ;====
+  Mag4:
+  ;====
+  GOTOF common
+
+  ;====
+  Mag5:
+  ;====
+  GOTOF common
+
+  ;======
+  common:
+  ;======
+  ;
+  ;Fuer die Platzkoordinaten gilt:
+  ;- Umrechnung ins Magazinkoordinatensystem (ggf. Koordinatenverschiebung)
+  ;- Umrechnung metrisch <-> nicht-metrisch
+  ;- additive Magazinkorrekturen beruecksichtigen
+  ;
+  grPlDatPosV1[iCount]=rPosV1+rCaNPV1
+  ;
+  IF (grPlDatPosV1[iCount]>=$MA_MODULO_RANGE[mcAxV1])
+    grPlDatPosV1[iCount]=(grPlDatPosV1[iCount]-$MA_MODULO_RANGE[mcAxV1])
+  ENDIF
+  ;
+  ;Fuer die Verfahrgassen gilt: Index ausgeben
+  giPlDatLane1X[iCount]=iIndG1X giPlDatLane2X[iCount]=iIndG2X
+  ;
+  ;========
+  NextLoop:
+  ;========
+ENDFOR
+
+;====
+ENDE:
+;====
+;
+RET

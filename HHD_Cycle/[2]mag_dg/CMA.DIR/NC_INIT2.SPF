@@ -1,0 +1,82 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     NC_INIT2.SPF
+;# Task:      Hochlaufprogramm Kanal 2
+;# Version:   V06.00.07
+;# Date:      08.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: Chain and PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 08.08.2017 / Simons
+; - Neuversionierung
+; - WHENEVER (TRUE) DO -> DO
+;
+; V06.00.06 - 11.04.2016 / Simons
+; - Neuversionierung
+; - SYG_IM[mcSYG_ErrIncCha2] hinzu
+;
+; V06.00.04 - 08.08.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 06.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 03.12.2015 / Simons
+; - Verweilzeit in Warteschleife
+;
+; V06.00.00 - 19.10.2015 / Simons
+; - ProtoTyp
+;
+; V04.00.00 - 25.03.2015 / Huettner
+; - Vorlage
+;-------------------------------------
+
+PROC NC_INIT2
+
+DEF STRING[32] sCycName="NC_INIT2 V06.00.06"
+;
+DEF BOOL bMagIsPickUpDisk
+;
+DEF INT iCount
+
+OUT_StartUpFinished2=FALSE bMagIsPickUpDisk=((giMagType B_AND 'B1')<>0)
+;
+WHILE (NOT OUT_StartUpFinished1)
+  ;
+  ;bis NC_INIT1 fertig ist
+  ;
+  G04 F0.2
+  STOPRE
+ENDWHILE
+
+FOR iCount=1 TO 39
+  CANCEL(iCount)
+  STOPRE
+ENDFOR
+
+;Aktivieren der Synchronaktionen fuer Kanal 2
+;--------------------------------------------
+;
+;Synchronaktionen 1 .. 10 (Kanal 2) von PLC nur in JOG freigegeben
+;
+;DG XT in WzW-Position
+IDS=15 DO OUT_HgInTcPos=(NOT bMagIsPickUpDisk)AND(($A_DBB[14] B_AND 'HF0')=='H10') $A_DBB[47]=($AC_STAT) SYG_IM[mcSYG_ErrIncCha2]=(($A_DBB[6] B_AND 2)<>0)
+
+;Ist(Soll)positionen V-Achse an PLC melden
+IDS=19 DO OUTA_ActPosV1=$AA_ACT_INDEX_AX_POS_NO[mcAxV1] $A_DBR[192]=$AA_IM[mcAxV1]
+
+;Netzausfall: gebildet bei Netzausfall im NC_INIT1
+;Wenn NA erkannt, Setze Merker und Sperre OVR
+IDS=210 WHENEVER ($A_DBB[82]==1) DO $AC_OVR=0 $AA_OVR[mcAxV1]=0
+
+;NC-Initialisierung erfolgreich
+OUT_StartUpFinished2=TRUE
+;
+M30

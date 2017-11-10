@@ -1,0 +1,191 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CYPE_MA.SPF
+;# Task:      PROGEVENT Manager
+;# Version:   V06.00.08
+;# Date:      01.07.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+; Verlauf:
+; --------
+;
+; V06.00.08 - 01.07.2017 / Simons
+; - Neuversionierung
+; - PCReset hinzu
+;
+; V06.00.06 - 12.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 21.09.2016 / Simons
+; - Neuversionierung
+; - Korrektur $A_DBB[52->82]
+;
+; V06.00.03 - 24.06.2016 / Simons
+; - Ausstieg, wenn keine GUD's angelegt sind
+;
+; V06.00.03 - 07.06.2016 / Simons
+; - $A_DBB[52] eingefuehrt
+; - umformatiert
+; - Verweilzeit beim Einstieg, damit
+;   die PLC die Unterbrechung des
+;   Anwenderprogramms rechtzeitig erkennt
+; - Absoluter Aufruf PrSearch
+;
+; V01.01.05 - Mai/Juli 2012 / Balles
+; - Vorlage
+; -----------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Aufruf von Systemzyklen bei
+; - Steuerungshochlauf
+; - NC Start
+; - NC Reset
+; - Start nach Satzsuchlauf
+; -----------------------------------
+
+PROC CYCPE_MA
+
+DEF STRING[32] sCycleName="CycPE_MA V06.00.08"
+
+IF (NOT ISVAR("giTMResetBypass"))
+  ;
+  ;Es existieren keine GUD's (eventuell auch keine MACRO's) -> RESET freigeben, absolute Adressierung
+  OUT_StartUpFinished1=FALSE OUT_StartUpFinished2=FALSE
+  ;
+  SETAL(67009)
+  ;
+  RET
+ENDIF
+;
+IF ($P_CHANNO==1)
+  ;
+  IF ($P_PROG_EVENT<>1)
+    ;
+    ;Nicht im Anwenderprogramm
+    mcDBB_InProg=(mcDBB_InProg B_AND 'B11111110')
+  ENDIF
+  ;
+  ;PLC Zeit zum Erkennen von "mcDBB_InProg" geben
+  G04 F0.1
+  ;
+  ;ProgEvent laeuft
+  mcDBB_InProgEvent=(mcDBB_InProgEvent B_OR 'B1')
+ENDIF
+
+CASE $P_PROG_EVENT OF 1 GOTOF _M1 2 GOTOF _M2 3 GOTOF _M3 4 GOTOF _M4 5 GOTOF _M5 DEFAULT GOTOF _MEND
+
+;=NC-START=
+_M1:
+;==========
+;
+;NC-START
+;
+IF ($P_CHANNO==1)
+  ;
+  IF ISFILE("/_N_CMA_DIR/_N_ChkStart_SPF")
+    CALL "/_N_CMA_DIR/_N_ChkStart_SPF"
+  ENDIF
+  ;
+  ;Im Anwenderprogramm
+  mcDBB_InProg=(mcDBB_InProg B_OR 'B1')
+ENDIF
+;
+IF ($P_CHANNO==2)
+ENDIF
+GOTOF _MEND
+
+;=NC-STOP=
+_M2:
+;=========
+;
+GOTOF _MEND
+
+;=RESET=
+_M3:
+;=======
+;
+IF ($P_CHANNO==1)
+  ;
+  ;ProgEvent RESET
+  mcDBB_InProgEvent=mcDBB_InProgEvent B_OR 'B10'
+  ;
+  IF ISFILE("/_N_CMA_DIR/_N_TMReset_SPF")
+    CALL "/_N_CMA_DIR/_N_TMReset_SPF"
+  ENDIF
+  ;
+  IF ISFILE("/_N_CMA_DIR/_N_PCReset_SPF")
+    CALL "/_N_CMA_DIR/_N_PCReset_SPF"
+  ENDIF
+  ;
+  ;Zuruecksetzen 'Netzausfall erkannt'
+  $A_DBB[82]=0
+ENDIF
+;
+IF ($P_CHANNO==2)
+ENDIF
+GOTOF _MEND
+
+;=HOCHLAUF=
+_M4:
+;==========
+;
+IF ($P_CHANNO==1)
+  ;
+  ; Kanal 1
+  IF ISFILE("/_N_CST_DIR/_N_SAFE_SPF")
+    ;
+    ;Safe.spf Initialisieren
+    CALL "/_N_CST_DIR/_N_SAFE_SPF"
+  ENDIF
+  ;
+  IF ISFILE("/_N_CMA_DIR/_N_NC_INIT1_SPF")
+    ;
+    ;HHD Initialisierung Kanal 1
+    NC_INIT1
+  ENDIF
+ENDIF
+;
+IF ($P_CHANNO==2)
+  ;
+  ;Kanal 2
+  IF ISFILE("/_N_CMA_DIR/_N_NC_INIT2_SPF")
+    ;
+    ;HHD Initialisierung Kanal 2
+    NC_INIT2
+  ENDIF
+ENDIF
+GOTOF _MEND
+
+;=SATZSUCHLAUF=
+_M5:
+;==============
+;
+IF ($P_CHANNO==1)
+  ;
+  ;Im Kanal 1 -> HHD-eigener Handler fuer Satzsuchlauf,
+  mcDBB_InProgEvent=(mcDBB_InProgEvent B_OR 'B100')
+  ;
+  IF ISFILE("/_N_CMA_DIR/_N_PRSEARCH_SPF")
+    ;
+    PrSearch
+  ENDIF
+  ;
+  GOTOF _MEND
+ENDIF
+
+;=ENDE=
+_MEND:
+;======
+;
+IF ($P_CHANNO==1)
+  ;
+  mcDBB_InProgEvent=0
+ENDIF
+
+RET

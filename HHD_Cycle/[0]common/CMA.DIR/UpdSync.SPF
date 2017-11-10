@@ -1,0 +1,124 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     UpdSync.SPF
+;# Task:      Synchronisierbild
+;#            Aktualisieren
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.03 - 13.05.2016 / Simons
+; - Neuversionierung
+; - Einfuehrung Wz an Uebergabeposition
+;
+; V06.00.00 - 21.09.2015 / Simons
+; - Prototyp
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Wird aufgerufen ...
+; .. im Rahmen aus dem HHD-Synchronisierbild heraus ueber die Bedienkette
+;    Softkey <Aktualisieren> -> PLC -> NC-ASUP <To_Manager>
+; .. durch Programmierung (direkten Aufruf) im NC-Programm
+;
+; Laeuft im Kanal 1
+; Ausgangsparameter
+;   globale Anwenderdaten gsSyncRealTName[..], giSyncRealDuploNo[..], giSyncRealMagNo[..], giSyncRealPlNo[..]:
+;   Enthalten die Daten, welches Wz sich nach dem Synchronisieren wo befinden soll
+;   gsSyncRealTName[1], giSyncRealDuploNo[1]: Wz-Name/Duplo-Nr des Wz in der Spindel (9998/1)
+;   gsSyncRealTName[2], giSyncRealDuploNo[2]: Wz-Name/Duplo-Nr des auszuwechselnden Wz im DG (DG2= 9998/2)
+;   gsSyncRealTName[3], giSyncRealDuploNo[3]: Wz-Name/Duplo-Nr des einzuwechselnden Wz im DG (DG1= 9998/3)
+;   gsSyncRealTName[4], giSyncRealDuploNo[4]: Wz-Name/Duplo-Nr des Wz im HG (HG= 9998/4) / Uebergabeposition Kette
+;
+;   gsSyncRealTName[5], giSyncRealDuploNo[5]: Wz-Name/Duplo-Nr des Wz, das sich auf dem durch
+;                                             giSyncRealMagNo[5], giSyncRealPlNo[5] spezifizierten Wz.-Platz befindet
+;   gsSyncRealTName[6], giSyncRealDuploNo[6]: Wz-Name/Duplo-Nr des Wz, das sich auf dem durch
+;                                             giSyncRealMagNo[6], giSyncRealPlNo[6] spezifizierten Wz.-Platz befindet
+;
+;------------------------------------
+
+
+PROC UpdSync
+
+DEF STRING[32] sCycName="UpdSync V06.00.06"
+;
+DEF BOOL bMagIsChain
+;
+DEF INT icMagNo=1, iTNo, iCount, iMaxCount9998
+
+IF (NOT gbMag9998Exist)
+  RET
+ENDIF
+
+bMagIsChain=((giMagType B_AND 'B100')<>0) iMaxCount9998=($TC_MAP7[9998]*$TC_MAP6[9998])
+
+FOR iCount=1 TO iNumSyncArray-1
+  ;
+  STOPRE
+  IF (iCount<=iMaxCount9998)
+    iTNo=$TC_MPP6[9998,iCount]
+    IF (iTNo>0)  ;Wz im Zwischenspeicher
+      gsSyncRealTName[iCount]=$TC_TP2[iTNo] giSyncRealDuploNo[iCount]=$TC_TP1[iTNo] giSyncRealMagNo[iCount]=9998 giSyncRealPlNo[iCount]=iCount
+    ELSE
+      gsSyncRealTName[iCount]="" giSyncRealDuploNo[iCount]=0 giSyncRealMagNo[iCount]=0 giSyncRealPlNo[iCount]=0
+    ENDIF
+  ELSE
+    ;
+    IF (gsSyncTName[iCount]<>"")AND(gsSyncTName[iCount]<>"0")AND(giSyncDuploNo[iCount]>0)
+      ;
+      iTNo=GETT(gsSyncTName[iCount],giSyncDuploNo[iCount])
+      IF (iTNo>0)
+        gsSyncRealTName[iCount]=gsSyncTName[iCount] giSyncRealDuploNo[iCount]=giSyncDuploNo[iCount] giSyncRealMagNo[iCount]=$A_TOOLMN[iTNo] giSyncRealPlNo[iCount]=$A_TOOLMLN[iTNo]
+      ELSE
+        gsSyncRealTName[iCount]="" giSyncRealDuploNo[iCount]=0 giSyncRealMagNo[iCount]=0 giSyncRealPlNo[iCount]=0
+      ENDIF
+    ELSE
+      gsSyncRealTName[iCount]="" giSyncRealDuploNo[iCount]=0 giSyncRealMagNo[iCount]=0 giSyncRealPlNo[iCount]=0
+    ENDIF
+  ENDIF
+  ;
+  ;Eingabefelder nachfuehren
+  gsSyncTName[iCount]=gsSyncRealTName[iCount] giSyncDuploNo[iCount]=giSyncRealDuploNo[iCount]
+  giSyncMagNo[iCount]=giSyncRealMagNo[iCount] giSyncPlNo[iCount]=giSyncRealPlNo[iCount]
+ENDFOR
+
+IF (bMagIsChain)AND(iMaxCount9998<4)
+  ;
+  ;Wz an Uebergabeposition Kette
+  ;
+  iCount=4 iTNo=0
+  IF (OUTA_ActPosV1>0)
+    iTNo=$TC_MPP6[icMagNo,OUTA_ActPosV1]
+  ENDIF
+  ;
+  IF (iTNo>0)
+    gsSyncRealTName[iCount]=$TC_TP2[iTNo] giSyncRealDuploNo[iCount]=$TC_TP1[iTNo] giSyncRealMagNo[iCount]=9998 giSyncRealPlNo[iCount]=iCount
+  ELSE
+    gsSyncRealTName[iCount]="" giSyncRealDuploNo[iCount]=0 giSyncRealMagNo[iCount]=0 giSyncRealPlNo[iCount]=0
+  ENDIF
+  ;
+  ;Eingabefelder nachfuehren
+  gsSyncTName[iCount]=gsSyncRealTName[iCount] giSyncDuploNo[iCount]=giSyncRealDuploNo[iCount]
+  giSyncMagNo[iCount]=giSyncRealMagNo[iCount] giSyncPlNo[iCount]=giSyncRealPlNo[iCount]
+ENDIF
+;
+RET
+

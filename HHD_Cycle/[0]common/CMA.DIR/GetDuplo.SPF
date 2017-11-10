@@ -1,0 +1,141 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetDuplo.SPF
+;# Task:      Freie DuploNr. Suchen
+;# Version:   V06.00.06
+;# Date:      15.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 15.04.2017 / Simons
+; - Neuversionierung
+; - iTNo aus aufrufendem Programm
+; - Wartezeit auf 6s
+;
+; V06.00.05 - 24.10.2016 / Simons
+; - Auffruf GetChipName DBW-Adress-Anpassungen
+;   (V06.00.05 24.09.2016 / Fengler)
+;
+; V06.00.03 - 06.05.2015 / Simons
+; - Neuversionierung
+; - Einfuehrung HHD TM
+;
+; V04.00.01 / 09.10.2015 / Fengler
+; - Vorlage
+;
+; Beschreibung:
+; -------------
+;
+; Einsatz bei Codetraeger
+;
+; Die naechste freie Duplonummer
+; einer Wz-Gruppe ermittleln und
+; an PLC geben
+;
+; DBB[660..691]: WzName
+; DBB[692]: Semaphor (Wz Name)
+; DBB[693]: Frei
+; DBB[694]: Bit0: Wz loeschen
+;           Bit1: keine Duplonummer auf Chip
+;           Bit2: Chip wurde konvertiert
+;           Bit3: WzName bereitgestellt
+;           Bit4: Chip erkannt
+; DBB[695]: Frei
+; DBW[696]: Duplomummer fuer PLC
+; DBW[698]: Duplomummer von PLC(Chip)
+;
+; -----------------------------------
+
+PROC GetDuplo(INT iTNo)
+
+DEF STRING[32] sCycName="GetDuplo V06.00.06", sTName
+;
+DEF BOOL bOk=FALSE, bEnabled
+;
+DEF INT iCount=0, iDupNo=1, iToolCount, iTmpTNo, iWait, iCmd
+;
+DEF REAL rWaitShort
+
+;DuploNo (an PLC) Loeschen
+$A_DBW[696]=0 rWaitShort=(3*$MN_IPO_CYCLE_TIME) iWait=RTOI(6/(rWaitShort+$MN_IPO_CYCLE_TIME))
+
+REPEAT
+  ;
+  ;Warten bis Chip konvertiert ist
+  ;
+  iCmd=$A_DBB[694] bEnabled=((iCmd B_AND 'B100')<>0)
+  ;
+  IF (NOT bEnabled)
+    iCount=iCount+1
+    IF (iCount>iWait)
+      ;
+      ;Fehler beim konvertieren -> Fehlerausgabe PLC
+      ;
+      GOTOF ENDE
+    ENDIF
+    G4 F=rWaitShort
+  ENDIF
+UNTIL (bEnabled)
+
+;Keine Duplonummer auf Chip-> Abbruch
+IF ((iCmd B_AND 'B10')==0) GOTOF ENDE
+
+;Chip WzNamen holen
+GetChipName(sTName,bOk)
+
+;ungueltiger WzName auf Chip -> Abbruch
+IF (NOT bOk) GOTOF ENDE
+
+IF (iTNo>0)
+  ;
+  ;lt WzV ist ein Wz auf dem Schreibleseplatz
+  ;
+  IF ($TC_TP2[iTNo]==sTName)
+    ;
+    ;Gelesen wurde der Name des Wz's, dass im HG ist
+    ;
+    ;DuploNo belassen
+    iDuplo=$TC_TP1[iTNo]
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+;Anzahl Schwesterwerkzeuge
+iToolCount=TOOLGNT(sTName)
+;
+IF (iToolCount<=0)
+  ;
+  ;Wz Gruppe existiert nicht
+  ;
+ELSE
+  ;
+  FOR iCount=1 TO (iToolCount+1)
+    ;
+    ;interne T-Nr des Schwesterwerkzeugs
+    ;
+    iTmpTNo=GETT(sTName,iCount)
+    IF (iTmpTNo<=0)
+      ;
+      ;Wz gibt es noch nicht
+      ;
+      ;Auswahl der kleinsten freien DuploNr
+      iDupNo=iCount
+    ENDIF
+  ENDFOR
+ENDIF
+
+;====
+ENDE:
+;====
+;
+;Ergebnis Bereitstellen
+$A_DBW[696]=iDupNo
+;
+RET

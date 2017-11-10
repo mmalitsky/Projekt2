@@ -1,0 +1,276 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToDisplace.SPF
+;# Task:      WZUmsetzen ueber Spindel
+;# Version:   V06.00.07
+;# Date:      05.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+; - formale Aenderungen
+;
+; V06.00.06 - 19.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.04 - 08.08.2016 / Simons
+;  - ProtoTyp
+;
+; V03.00.00 - Sep 2009 / Huettner
+; - Vorlage TO_TRANS (NBV)
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Werkzeugumsetzen ueber Spindel
+;
+; Betrifft:
+; - PickUp - Scheibe
+; - Kette  - WM307
+;
+; Aufruf: im To_Manager
+;
+; Voraussetzung: MD52270.8 = 0
+;
+; zusaetzlich MD52270 = HE0D
+; - Positionieren ausblenden etc.
+;
+;--------------------------------------
+;
+PROC ToDisplace SAVE
+
+DEF STRING[32] sCycName="ToDisplace V06.00.07", sAlarmParam="", sName=""
+;
+DEF INT iFC8TaskId=1, iFC8TaskIdNo=1, iAlarmNo=0, iTNo, iDstMag, iDstLoc ,iOldMagNo, iOldLocNo, iTmpMagNo, iTmpPotNo
+;
+DEF REAL rc0x001Deg=0.001, rActPosHead
+
+;-10.0--Auftrag-------------------
+; Gewaehltes Wz und Zielplatzdaten
+;---------------------------------
+STOPRE
+iTNo=$AC_TC_TNO iDstMag=$AC_TC_MTN iDstLoc=$AC_TC_LTN giTNoSp=$TC_MPP6[9998,mcLocSp]
+
+;-10.1--Auftrag-
+; Ueberpruefung
+;---------------
+;
+IF (iTNo==-1)
+  ;Ungueltiger Auftrag
+  RET
+ENDIF
+;
+IF (iTNo<=0)
+  ;keins oder ungueltiges Wz
+  iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+  GOTOF HandleAlarm
+ENDIF
+;
+;-20.0--Pruefungen-
+;------------------
+MakeAlarmParam(sName,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+;
+;-20.1--Pruefungen-
+; SpWz Spannen
+;------------------
+IF (giTNoSp>0)AND(mcbDBB_SpClampedNoTl)
+  ;lt. WzV Wz in Spindel, aber <Spindel gespannt ohne Werkzeug>
+  iAlarmNo=AL_TInSpButSpClampedNoTool
+  GOTOF HandleAlarm
+ENDIF
+;
+IF NOT ((mcbDBB_SpClamped)OR(mcbDBB_SpClampedNoTl))
+  ;weder <geklemmt mit Wz> noch <geklemmt ohne Wz>
+  iAlarmNo=AL_SpNotClamped
+  GOTOF HandleAlarm
+ENDIF
+;
+;-20.2--Pruefungen------
+; Schwenkkopf horizontal
+;-----------------------
+IF ((gbSwivHeadExist)OR(gbTiltHeadExist))
+  ;
+  IF (gbSwivHeadExist)
+    rActPosHead=$AA_IM[mcAxC]
+  ENDIF
+  IF (gbTiltHeadExist)
+    rActPosHead=$AA_IM[mcAxA]
+  ENDIF
+  ;
+  IF (rActPosHead<(-rc0x001Deg))OR(rActPosHead>rc0x001Deg)
+    iAlarmNo=AL_AxisANotTcPos
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+
+;-20.3--Pruefungen-
+; Wz Eigenschaften
+;------------------
+IF ($P_TOOLEXIST[iTNo])
+  ;
+  ;Aktueller Ort des Wz's
+  iOldMagNo=$A_TOOLMN[iTNo] iOldLocNo=$A_TOOLMLN[iTNo]
+  ;
+  IF (iOldMagNo==iDstMag)AND(iOldLocNo==iDstLoc)AND(iDstMag>0)AND(iDstLoc>0)
+    ;
+    ;Quelle==Ziel -> positiv quittieren
+    ToAckn(FALSE,iFC8TaskId,iFC8TaskIdNo,iTNo,iTNo,iDstMag,iDstLoc,iDstMag,iDstLoc,1)
+    GOTOF ENDE
+  ENDIF
+  ;
+  ;Nicht zugelassene Umsetzauftraege
+  ;
+  IF (iOldMagNo<=0)OR(iOldLocNo<=0)OR((iOldMagNo==giMagNoLoadList)AND(giMagNoLoadList>0))
+    ;
+    ;Wz ist keinem Magazin zugeordnet oder Wz (noch) in Beladeliste
+    IF (iOldMagNo==giMagNoLoadList)AND(giMagNoLoadList>0)
+      iAlarmNo=AL_TlInLoadList67 sAlarmParam=sName
+    ELSE
+      iAlarmNo=AL_TlNotInMagazine67 sAlarmParam=sName
+    ENDIF
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF ((iOldMagNo==9998)AND(iOldLocNo<>mcLocSp))OR(iOldMagNo==9999)
+    ;
+    ;Nur Wz in Spindel (Quelle) kann umgesetzt werden
+    ;
+    ;Wz von Beladestelle umsetzen
+    IF (iOldMagNo==9998)AND(iOldLocNo<>mcLocSp)
+      iAlarmNo=AL_TlInSpDG67 sAlarmParam=sName
+    ELSE
+      iAlarmNo=AL_TlNotInMagazine67 sAlarmParam=sName
+    ENDIF
+    GOTOF HandleAlarm
+  ENDIF
+ELSE
+  iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+  GOTOF HandleAlarm
+ENDIF
+;
+IF ($A_TOOLMN[iTNo]<=0)OR($A_TOOLMLN[iTNo]<=0)
+  ;Wz ist noch nicht beladen
+  iAlarmNo=AL_TlNotInMagazine sAlarmParam=sName
+  GOTOF HandleAlarm
+ENDIF
+;
+;-20.3--Pruefungen-
+; Zielplatz
+;------------------
+IF (iDstMag==giMagNoLoadList)AND(giMagNoLoadList>0)
+  iAlarmNo=AL_LoadListNotTarget sAlarmParam=<<iDstMag
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iDstMag==9998)OR(iDstMag==9999)
+  iAlarmNo=AL_MoveFromToDgSpNotAllowed
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iDstMag<1)OR(iDstMag>giNumRealMag)
+  iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iDstMag
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iDstLoc<1)OR(iDstLoc>giNumPlacesInMag[iDstMag])
+  iAlarmNo=AL_InvalidTargetPlace sAlarmParam=<<iDstMag<<"/"<<iDstLoc
+  GOTOF HandleAlarm
+ENDIF
+
+
+;-50.0--Auftrag--------------
+; Zielplatz Leerplatzpruefung
+;----------------------------
+;
+iTmpMagNo=iDstMag iTmpPotNo=iDstLoc
+GETFREELOC(iTmpMagNo,iTmpPotNo,iTNo,"-")
+IF (iTmpMagNo<=0)OR(iTmpPotNo<=0)
+  ;Leerplatz nicht geeignet oder nicht frei
+  iAlarmNo=AL_TLocIsNotFree sAlarmParam=<<iDstMag<<"/"<<iDstLoc
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iTmpMagNo>0)AND(iTmpMagNo==giMagNoLoadList)
+  iAlarmNo=AL_LoadListNotTarget sAlarmParam=<<giMagNoLoadList
+  GOTOF HandleAlarm
+ENDIF
+;
+;-50.2--Auftrag-----------
+; Wz holen, auf Zielplatz 
+; bringen und dort ablegen
+;-------------------------
+MsgBox(,,,,mcState2Clear)
+;
+OUT_LoadUnloadActive=TRUE
+;
+IF (giTNoSp>0)AND(giTNoSp<>iTNo)
+  ;
+  ;Wz in Spindel, wobei dieses nicht das umzusetzende Wz ist
+  ;
+  MsgBox(T_LoadTl<<": T = "<<$TC_TP2[giTNoSp]<<"  "<<T_PutTlIntoMag,,,,mcState2WaitForEmptySp)
+  ;
+  TC_BS(mcTaskAS_T0,"0",0)
+  ;
+  OUT_LoadUnloadActive=TRUE
+  ;
+  MsgBox(MSG_WaitForEmptySp,"RESET ErrTime=2.0","(giTNoSp>0)",,mcState2WaitForEmptySp)
+ENDIF
+;
+;-50.3--Auftrag-------
+; Wz von Magazin in Sp
+;---------------------
+IF (giTNoSp==0)
+  ;
+  ;Wz in Sp
+  ;
+  MsgBox(T_UnLoadTl<<": T = "<<$TC_TP2[iTNo]<<" - "<<T_GetTlOutOfMag,"CLEAR",,,mcState2UnloadingActive)
+  ;
+  TC_BS(mcTaskUnLoadInSp,$TC_TP2[iTNo],$TC_TP1[iTNo])
+  ;
+  MsgBox(MSG_MovingToolToSp,"RESET ErrTime=2.0","(giTNoSp>0)AND(giTNoSp<>"<<iTNo<<")",,mcState2PutToolInSp)
+ENDIF
+;
+;Neues Ziel zum Ablegen und fuer den Abbruchfall
+$TC_TPC10[iTNo]=(($TC_TPC10[iTNo] DIV 100000)*100000)+iDstMag*1000+iDstLoc
+;
+;-50.4--Auftrag--------
+; Wz von Sp ins Magazin
+;----------------------
+MsgBox(T_LoadTl<<": T = "<<$TC_TP2[iTNo]<<"  "<<T_PutTlIntoMag,,,,mcState2WaitForEmptySp)
+;
+TC_BS(mcTaskLoad,"0",0)
+;
+MsgBox(MSG_WaitForEmptySp,"RESET ErrTime=2.0","(giTNoSp>0)",,mcState2WaitForEmptySp)
+;
+OUT_LoadUnloadActive=FALSE
+;
+;====
+ENDE:
+;====
+;
+MsgBox("",,,,mcState2Clear)
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+;Vorher negativ quittieren
+ToAckn(FALSE,iFC8TaskId,iFC8TaskIdNo,iTNo,iTNo,0,0,0,0,3)
+;
+MsgBox(<<iAlarmNo,"RESET",,sAlarmParam,mcState2Error)
+;
+RET

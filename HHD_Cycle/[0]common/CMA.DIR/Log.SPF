@@ -1,0 +1,88 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Log.SPF
+;# Task:      Protokollieren
+;# Version:   V06.00.06
+;# Date:      21.04.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: All
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+;
+; V06.00.06 / 21.04.2017 / Simons
+; - Neuversionierung
+; - Formale Aenderungen
+;
+; V06.00.05 / 23.02.2017 / Simons
+; - Neuversionierung
+; - "$TIMESTAMP$" hinzu
+;
+; V06.00.03 / 29.05.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.01 / 08.08.2014 /  Malitsky
+; - Vorlage
+;
+;-------------------------------------
+
+PROC LOG(INT LogOn, INT iFError, STRING[128] sFName, STRING[128] sLogText)
+
+DEF STRING[32] sItem="$TIMESTAMP$", sAux
+;
+DEF INT iStart, iLen, iItemLen
+
+STOPRE
+
+IF (LogOn)
+  ;
+  iItemLen=STRLEN(sItem) iLen=STRLEN(sLogText) iStart=MATCH(TOUPPER(sLogText),sItem)
+  ;
+  IF (iStart>-1)
+    ;
+    sTimeStamp=<<(2000+$A_YEAR)<<"-" sAux=<<$A_MONTH
+    IF (STRLEN(sAux)==1)
+      sAux="0"<<sAux
+    ENDIF
+    sTimeStamp=sTimeStamp<<sAux<<"-" sAux=<<$A_DAY
+    IF (STRLEN(sAux)==1)
+      sAux="0"<<sAux
+    ENDIF
+    sTimeStamp=sTimeStamp<<sAux<<"  " sAux=<<$A_HOUR
+    IF (STRLEN(sAux)==1)
+      sAux="0"<<sAux
+    ENDIF
+    sTimeStamp=sTimeStamp<<sAux<<":" sAux=<<$A_MINUTE
+    IF (STRLEN(sAux)==1)
+      sAux="0"<<sAux
+    ENDIF
+    sTimeStamp=sTimeStamp<<sAux<<":" sAux=<<$A_SECOND
+    IF (STRLEN(sAux)==1)
+      sAux="0"<<sAux
+    ENDIF
+    sTimeStamp=sTimeStamp<<sAux
+    ;     
+    IF (iLen>iStart+iItemLen-1)
+      ;
+      IF (iStart>0)
+        sLogText=SUBSTR(sLogText,0,iStart)<<sTimeStamp<<SUBSTR(sLogText,iStart+iItemLen)
+      ELSE
+        sLogText=sTimeStamp<<SUBSTR(sLogText,iStart+iItemLen)
+      ENDIF
+    ELSE
+      ;
+      IF (iStart>0)
+        sLogText=SUBSTR(sLogText,0,iStart+1)<<sTimeStamp
+      ELSE
+        sLogText=sTimeStamp
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  WRITE(iFError,sFName,sLogText)
+ENDIF
+;
+RET

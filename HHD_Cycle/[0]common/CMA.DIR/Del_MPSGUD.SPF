@@ -1,0 +1,34 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Del_MPSGUD.SPF
+;# Task:      MPS Programme
+;# Version:   V06.00.05
+;# Date:      15.11.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 15.11.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.00 - 28.01.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+PROC Del_MPSGUD
+
+DEF INT iCount
+
+giMPSActivProg=0
+FOR iCount = 1 TO mcMaxWPonPal-1
+   gsMPSProgName[iCount]="" giMPSWorkState[iCount]=0 giMPSWorkStep[iCount]=0
+ENDFOR
+;
+RET
+

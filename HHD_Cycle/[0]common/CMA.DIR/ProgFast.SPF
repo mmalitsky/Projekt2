@@ -1,0 +1,376 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     PogCall.SPF
+;# Task:      Call Machining Program
+;#            with FASTEMS
+;# Version:   V06.00.05
+;# Date:      18.03.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 18.03.2017 / Simons
+;- gbToCheckAtTC zuruecksetzen
+;
+; V06.00.05 - 31.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neuversionierung
+; - ToPrepOptInit hinzu
+;
+; V01.01.02 - Maerz 2016  / Trappmann
+; - Vorlage
+;
+;------------------------------------
+;
+; Fastems-Schnittstelle
+;
+;------------------------------------
+
+PROC ProgFast
+
+DEFINE mcSinglePalNo AS $A_DBB[18]
+DEFINE mcbIsChain AS (($A_DBB[19] B_AND 'B1000')<>0)
+DEFINE mcbIsDirectLoad AS (($A_DBB[19] B_AND 'B10')<>0)
+
+DEF INT iSelPos, iFreePal, iIndex, iHelp, iActPal
+;
+DEF BOOL bNewProg, bWithFastems, bWithPalTransfer, bDirectLoad
+
+;Maschine mit MPS
+CFG_MAN("FASTEMS",sResult)
+bWithFastems=(sResult<>"")
+;
+;Maschine mit Transfereinheit
+CFG_MAN("PAL_TRANS",sResult)
+bWithPalTransfer=(sResult<>"")
+;
+;Maschine mit Kettenwechsler / Machine with direct load to B-axis / Systemprogramm laeuft / kein Einzelpalettenbetrieb / Spannablaeufe GndSt
+bChainChanger=(mcbIsChain) bDirectLoad=(mcbIsDirectLoad) OUT_SysPrgActive=TRUE mcSinglePalNo=0 giClampCycle=0 giClampStatus=0 gbToCheckAtTC=FALSE
+
+;Cycle End
+M93
+
+;******************* WarmUp *************************
+IF (IN_WarmUp)
+  ;
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  ;
+  ActivatePalData
+  ;
+  ;The warm up program will be called as long as the warm up mode is on.
+  WHILE (IN_WarmUp)
+    ;
+    IF (IN_TeststopReq)
+      ;
+      ;Teststop angefordert -> fuer Kanal 1 Teststop
+      TestStop
+    ENDIF
+    ;
+    M94
+    ;
+    ;Loadcase
+    LC_EXEC
+    ;
+    CALL ProgName
+    ;
+    M93
+    ;
+  ENDWHILE
+  ;
+  M30
+ENDIF
+
+;**************** None of the automatic modes are selected***************
+IF (giMMC_PAL[0,0]==0)
+  ;
+  ;Manual mode is default mode !
+  ;
+  IF (NOT IN_APCInPos)
+    ;APC not in Position
+    SETAL(AL_APCNotInBasePos)
+  ENDIF
+  ;
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  ;
+  ActivatePalData
+  ;
+  IF (NOT gbProgExist)
+    ;
+    PROG_RESET(1)
+    ;
+    ;Program is missing
+    giMMC_PAL[1,BufNo]=9
+    ;
+    M30
+  ENDIF
+  ;
+  M94
+  ;
+  ToPrepOptInit(Prog_Path,Prog_Name)
+  ;
+  ;Loadcase
+  LC_EXEC
+  ;
+  CALL PROGNAME
+  ;
+  IF (gbTMIsHHD)
+    ;
+    ;2:Daten des SpiIndexelWz zurueckladen
+    LRSpTDat(2)
+  ENDIF
+  ;
+  M93
+  ;
+  ;SpiIndexle stop
+  M5
+  ;
+  IF (NOT $P_SEARCH)AND(NOT $P_SIM)
+    ;
+    IF (giMMC_PAL[1,BufNo]==1)
+      ;Still released -> Interrupted
+      giMMC_PAL[1,BufNo]=3
+    ELSE
+      IF (giMMC_PAL[1,BufNo]==2)
+        ;Ready -> Increment machining giCOUNTER
+        giCOUNTER[BufNo+20]= giCOUNTER[BufNo+20]+1
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  M30
+ENDIF
+
+;********************  Move Pallet out of Machine *******************
+IF (giMMC_PAL[0,0]==3)AND(NOT bDirectLoad)
+  ;
+  IF (NOT IN_APCInPos)
+    ;APC not in Position
+    SETAL(AL_APCNotInBasePos)
+  ENDIF
+  ;
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  ;
+  IF (NOT $P_SEARCH)AND(NOT $P_SIM)
+    ;
+    IF (giMMC_PAL[1,BufNo]==1)
+      ;Still released -> Interrupted
+      giMMC_PAL[1,BufNo]=3
+    ENDIF
+  ENDIF
+  ;
+  M224
+  ;
+  IF (bWithPalTransfer)
+    ;Palettenuebersetzer in PalettenwechiSelPosition
+    M226
+  ENDIF
+  ;
+  MovePallet(BufNo)
+  M30
+ENDIF
+
+;********************  Fastems Mode*******************
+WHILE (giMMC_PAL[0,0]==1)
+  ;
+  ;Cycle End
+  M93
+  ;
+  ;Wait until pallet change position is valid
+  WHILE (INA_APCPos==0)
+    G04 F0.1
+    STOPRE
+  ENDWHILE
+  ;
+  ;Teststop requested
+  IF (IN_TeststopReq)
+    Teststop
+  ENDIF
+  ;
+  ;Number for pallet in machine
+  BufNo=giPAL_BUFNO[INA_APCPos]
+  H97=giMMC_PAL[1,BufNo]
+  ;
+  ;Direct loading and pallet is unloaded -> Request palletchange
+  IF (bDirectLoad)AND(giMMC_PAL[1,BufNo]==6) GOTOF PalChg
+  ;
+  ;Check if program is known for pallet in machine
+  IF (gsMMC_PROG[BufNo]=="")
+    ;
+    ;Program name in machine not known
+    ;
+    IF (gsMMC_PROG[giPAL_BUFNO[3- INA_APCPos]]=="")OR(bDirectLoad)
+      ;No program for load place or direct loading -> Request program
+      GOTOF PART_REQ
+    ELSE
+      ;
+      ;Program for load place -> Check for request palletchange
+      IF (gsMMC_PROG[giPAL_BUFNO[3-(INA_APCPos)]]==PALCHGPROG)
+        ;Program for load place is request palletchange
+        bNewProg = TRUE
+      ELSE
+        ;Program for load place no request palletchange
+        bNewProg = FALSE
+      ENDIF
+      GOTOF PalChg
+    ENDIF
+  ELSE
+    ;
+    IF (gsMMC_PROG[BufNo]==PALCHGPROG)
+      ;
+      ;Program name in machine known -> Request palletchange
+      bNewProg = TRUE
+      GOTOF PalChg
+    ENDIF
+  ENDIF
+  ;
+  ;Check if pallet released
+  WHILE (giMMC_PAL[1,BUFNO]<>1)
+    SETAL(67031)
+    M0
+  ENDWHILE
+  ;
+  ;Make ProgPath and ProgName
+  ActivatePalData
+  ;
+  ;Pallet number
+  H98=giMMC_Pal[0,BUFNO]
+  ;
+  IF (gbProgExist)
+    ;
+    ;Programm exists -> Call machining program
+    ;
+    M94
+    ;
+    ToPrepOptInit(Prog_Path,Prog_Name)
+    ;
+    ;Loadcase
+    LC_EXEC
+    ;
+    CALL PROGNAME
+    ;
+    IF (gbTMIsHHD)
+      ;
+      ;2:Daten des SpiIndexelWz zurueckladen
+      LRSpTDat(2)
+    ENDIF
+    ;
+    ;Reset of all Frames and Tranformations V01.04.03
+    PROG_RESET(1)
+    ;
+    ;SpiIndexle Stop
+    M5
+    ;
+    giPAL_CHECK=0 ;Piece check is done
+    ;
+    IF (NOT $P_SEARCH)AND(NOT $P_SIM)
+      ;
+      IF (giMMC_PAL[1,BufNo]==1)
+        ;
+        ;Still released -> Interrupted
+        giMMC_PAL[1,BufNo]=3
+      ELSE
+        ;
+        IF (giMMC_PAL[1,BufNo]==2)
+          ;
+          ;Ready -> Increment machining giCOUNTER
+          giCOUNTER[BufNo+20]=giCOUNTER[BufNo+20]+1
+        ENDIF
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    ;Program not available -> Program missing
+    giMMC_PAL[1,BufNo]=9
+  ENDIF
+  ;
+  H97=giMMC_PAL[1,BufNo]
+  ;
+  ;Send status to Fastems
+  ;----------------------
+  ;
+  IF (giMMC_PAL[1,BufNo]==2)
+    ;Fertigmeldung
+    M222
+  ENDIF
+  ;
+  IF (giMMC_PAL[1,BufNo]==9)
+    ;Kein Programm vorhanden
+    M231
+  ENDIF
+  ;
+  IF (giMMC_PAL[1,BufNo]<>2)AND(giMMC_PAL[1,BufNo]<>9)
+    ;sonstiger Status
+    M223
+  ENDIF
+  ;
+  OUT_SysPrgActive=TRUE
+  ;
+  M93
+  ;
+  ;Delete old program
+  gsMMC_PROG[BufNo]="" giMMC_PAL[2,BufNo]=0
+  ;
+  GOTOF PART_REQ
+
+  ;======
+  PalChg:
+  ;======
+  ;
+  ;Pallettransfer in palletchange position
+  M224
+  ;
+  IF (bWithPalTransfer)
+    M226
+  ENDIF
+  ;
+  IF (bNewProg)
+    ;New programm requested
+    M94
+  ENDIF
+  ;
+  ;Palletchange
+  MovePallet(BufNo)
+  ;
+  IF (bDirectLoad)
+    ;Machine with direct loading: request unload / load pallet
+    M230
+  ELSE
+    ;
+    ;No new program
+    IF NOT bNewProg GOTOF ENDE
+    ;
+  ENDIF
+  ;
+  M93
+  ;
+  gsMMC_PROG[1]="" gsMMC_PROG[2]="" giMMC_PAL[2,1]=0 giMMC_PAL[2,2]=0
+  ;
+  STOPRE
+  ;
+  M222
+  ;
+  ;========
+  PART_REQ:
+  ;========
+  ;
+  ;Request new program
+  M221
+  ;
+  STOPRE
+  ;
+  ;====
+  ENDE:
+  ;====
+  ;
+ENDWHILE
+
+M30
+

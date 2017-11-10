@@ -1,0 +1,208 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetFreeLocHHD.SPF
+;# Task:      Leerplatzsuche
+;# Version:   V06.00.08
+;# Date:      18.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 18.08.2017 / Simons
+; - Neuversionierung
+; - IB HHDTM
+;
+; V06.00.05 - 11.04.2017 / Simons
+; - Siemens TM:
+;   - Beladestelle 3 hinzu
+;   - giGetfLoc[0..3] fuer TMReset
+;   - Leerplatzsuche im Magazin bei <=0
+;   - Ausschlussmagazin Sperren
+; - formale Aenderungen
+;
+; V06.00.05 - 21.09.2016 / Simons
+; - Neuversionierung
+; - Vorbesetzung SubPar4 entfernt
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Neu
+;
+; V04.02.00 - 07.04.2016 / Balles
+; - Basisvorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Eingangsparameter:
+; ------------------
+; iTNo: Wz fuer das ein Leerplatz gesucht werden soll
+;
+; iMode:
+;
+; -- HHD TM
+;    <0 -> Keine Alarmausgabe
+;
+; -- SIEMENS
+;    0          : im Magazin (Default)
+;    999801     : fuer Spindel 1
+;    999900 + n : fuer Beladeplatz n
+;
+; Die folgenden Parameter werden nur bei HHD TM, wenn iMode parametriert ist, ausgewertet.
+;
+; iMagNotUsed: Aussschlussmagazin
+; iOptions:    Optionen
+; iJobNo:      Auftragsnummer
+; iSearch:     Suchreihenfolge
+; iSearchDir:  Suchrichtung
+;
+; Ausgangsparameter:
+; ------------------
+; Fuer den gefundenen Leerplatz
+; iMagNo: Magazinnummer
+; iLocNo:  Platznummer
+;
+;------------------------------------
+
+PROC GetFreeLocHHD(VAR INT iMagNo, VAR INT iLocNo, INT iTNo, INT iMode, INT iMagNotUsed, INT iOptions, INT iJobNo, INT iSearch, INT iSearchDir)
+
+DEF STRING[32] sAlarmParam=""
+;
+DEF INT iAlarmNo=0
+
+IF (iTNo<=0)
+  iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+  GOTOF HandleAlarm
+ELSE
+  giGetfLoc[0]=SET(0,0,0,0,0,0)
+ENDIF
+
+IF (gbTMIsHHD)
+  ;
+  IF (NOT $P_SUBPAR[4])
+    ;Aufgabe
+    iMode=0
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[5])
+    ;AusschlussMagazin
+    iMagNotUsed=giMagNoLoadList
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[6])
+    ;Optionsbits
+    iOptions=0
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[7])
+    ;AuftragsKennung
+    iJobNo=0
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[8])
+    ;Suchreihenfolge
+    iSearch=1
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[9])
+    ;Suchrichtung
+    iSearchDir=1
+  ENDIF
+  ;
+  SendWait(mcRGetFreeLoc,<<iJobNo<<"|"<<iOptions<<"|"<<iTNo<<"|"<<iSearch<<"|"<<iSearchDir<<"|"<<iMagNo<<"|"<<iLocNo<<"|"<<iMagNotUsed)
+  ;
+  IF (giMBoxFromMMC[0]>0)AND(giMBoxFromMMC[1]==iTNo)
+    iMagNo=giMBoxFromMMC[2] iLocNo=giMBoxFromMMC[3]
+  ELSE
+    ;
+    iMagNo=0 iLocNo=0 sAlarmParam="(mcRGetFreeLoc)" iAlarmNo=AL_NegTelAckn67
+    ;
+    IF (giMBoxFromMMC[0]>0)
+      iAlarmNo=AL_InvalidAcknData
+    ENDIF
+    GOTOF HandleAlarm
+  ENDIF
+ELSE
+  ;
+  ;--TM Siemens
+  ;
+  ;Kennung <FestplatzWz> temporaer entfernen ...
+  giGetfLoc[0]=iTNo giGetfLoc[1]=$TC_TP8[iTNo] $TC_TP8[iTNo]=(giGetfLoc[1] B_AND (B_NOT 'H40'))
+  ;
+  IF (iMagNotUsed>0)
+    ;
+    ;...und Sperren des auszuschliessenden Magazins    
+    giGetfLoc[2]=iMagNotUsed giGetfLoc[3]=($TC_MAP3[iMagNotUsed]) $TC_MAP3[iMagNotUsed]=(giGetfLoc[3] B_OR 'B10')
+  ENDIF
+  ;
+  IF (giMagNoLoadList>0)
+    ;
+    ;...und Sperren der Ladeliste
+    giGetfLoc[4]=giMagNoLoadList giGetfLoc[5]=$TC_MAP3[giMagNoLoadList] $TC_MAP3[giMagNoLoadList]=(giGetfLoc[5] B_OR 'B10')
+  ENDIF
+  ;
+  CASE iMode OF 999901 GOTOF _L9999 999902 GOTOF _L9999 999903 GOTOF _L9999 999801 GOTOF _L9998
+  ;
+  ;Leerplatzsuche im Magazin
+  GETFREELOC(iMagNo,iLocNo,iTNo,"-")
+  ;
+  GOTOF ENDE
+
+  ;=====
+  _L9998:
+  ;=====
+  ;
+  ;Suche bezogen auf Spindel
+  GETFREELOC(iMagNo,iLocNo,iTNo,"S",1)
+  ;
+  GOTOF ENDE
+
+  ;======
+  _L9999:
+  ;======
+  ;
+  ;Suche bezogen auf Beladeplatz 1,2,3
+  GETFREELOC(iMagNo,iLocNo,iTNo,"L",(iMode-999900))
+
+  ;====
+  ENDE:
+  ;====
+  ;
+  ;Kennungen fuer Wz...
+  $TC_TP8[iTNo]=giGetfLoc[1] giGetfLoc[0]=0
+  ;
+  IF (giGetfLoc[2]>0)
+    ;
+    ;... und Ausschlussmagazin ...
+    $TC_MAP3[giGetfLoc[2]]=giGetfLoc[3] giGetfLoc[2]=0
+  ENDIF
+  ;
+  IF (giGetfLoc[4]>0)
+    ;
+    ;... und Beladeliste ...
+    $TC_MAP3[giGetfLoc[4]]=giGetfLoc[5] giGetfLoc[4]=0
+  ENDIF
+  ;... wiederherstellen,
+  ;
+ENDIF
+;
+STOPRE
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+IF (iMode>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

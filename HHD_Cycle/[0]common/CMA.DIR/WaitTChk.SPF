@@ -1,0 +1,191 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     WaitTChk.SPF
+;# Task:      Auswertung BBK
+;# Version:   V06.00.07
+;# Date:      05.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+; Verlauf:
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - gbPrevToBroken -> gbPrevToBrokenInt
+; - formale Aenderungen
+;
+; V06.00.06 - 04.05.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.00 - 05.10.2015 / Simons
+; - ProtoTyp
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;----------------------------------
+;
+; Beschreibung:
+;--------------
+;
+; Auswerten der Ergebnisse der Werkzeugbruchkontrolle ("Wz pruefen")
+;
+; Eingangsparameter:
+; iErrorMode      0 (WITH_ALARM):    Alarm absetzen (STOP)
+;                 1 (WITHOUT_ALARM): keinen Alarm absetzen
+; iBreakCtrlMode  0: (mechan.) Bohrerbruchkontrolle nach dem
+;                    Ausschleusen des Wz's aus der Spindel
+;                    (Standard-Modus)
+;                 1: (mechan.) Bohrerbruchkontrolle,
+;                    asynchron durch Bearbeitungsprogramm
+;                    angestossen z.Zt nicht implementiert
+;
+; Ausgangsparameter:
+; iIsBroken     <>0: gebrochen
+;                =0: nicht gebrochen
+;
+;
+; Aufrufbeispiel:
+;
+;   DEF INT iIsBroken
+;
+;   iIsBroken=0
+;   WaitTChk(1,0,iIsBroken)
+;   IF iIsBroken
+;     ;Wz ist gebrochen
+;     ;hier kommt die Fehler-Reaktion
+;   ELSE
+;     ;Wz ist i.O.
+;   ENDIF
+;
+;----------------------------------
+
+PROC WaitTChk(INT iErrorMode, INT iBreakCtrlMode, VAR INT iIsBroken)
+
+DEF STRING[32] sCycName="WaitTChk V06.00.07", sAlarmParam=""
+;
+DEF BOOL bTlProbeOn, bTlCheckOn, bTlCheckCasOn
+;
+DEF INT iAlarmNo=0
+;
+DEF REAL rWaitShort
+
+iIsBroken=0 rWaitShort=2*$MN_IPO_CYCLE_TIME bTlProbeOn=(mcbDBB_TlProbeOn) bTlCheckOn=(mcbDBB_TlCheckOn) bTlCheckCasOn=(mcbDBB_TlCheckMagOn)
+
+IF (NOT $P_SUBPAR[1])
+  iErrorMode=WITH_ALARM
+ENDIF
+;
+IF (NOT $P_SUBPAR[2])
+  iBreakCtrlMode=0
+ENDIF
+;
+;Satzsuchlauf/PrgTest/Simulation oder BBK nicht angewaehlt
+IF ($P_SEARCH)OR($P_ISTEST)OR($P_SIM)OR((NOT bTlProbeOn)AND(NOT bTlCheckOn)AND(NOT bTlCheckCasOn))
+  gbLastToBroken=FALSE gbPrevToBroken=FALSE gbPrevToBrokenInt=FALSE
+  GOTOF ENDE
+ENDIF
+;
+IF (iBreakCtrlMode==1)
+  ;Dieser Modus ist z.Zt. nicht implementiert
+  iErrorMode=WITH_ALARM iAlarmNo=AL_InvalidMissingInput sAlarmParam="iBreakCtrlMode="<<iBreakCtrlMode
+  GOTOF ENDE
+ENDIF
+;
+IF (giToNoProb>0)
+  ;
+  IF (NOT $P_TOOLEXIST[giToNoProb])
+    ;
+    ;Das zuletzt zu pruefende Wz existiert nicht mehr -> Abbruch des Pruefens
+    ;
+    giToBreakCtrlState=0 grProbVal=0
+  ELSE
+    ;
+    IF ($A_MYMN[giToNoProb]<=0)OR($A_MYMLN[giToNoProb]<=0)
+      ;
+      ;Wz zwar in Wz-Liste, aber (noch) keinem Magazin zugeordnet (war noch nicht beladen)
+      ;
+      giToBreakCtrlState=0 grProbVal=0
+    ENDIF
+  ENDIF
+ENDIF
+;
+;Es gibt 2 Mechanismen
+;a) In den Schneidendaten ist Bit "Bohrerbruchkontrolle" gesetzt
+;   Wird im Rahmen des WzW (mittels Messeinrichtung) oder unmittelbar nach Ausschleusen
+;   aus der Spindel (mittels einfacher Bohrerbrucheinrichtung) ausgefuehrt
+;b) Vom Bearbeitungsprogramm (NC-Kanal 1) ist Bohrerbruchkontrolle angefordert (giTaskID==1)
+;   Wird in der Leerlaufzeit des Handhabegeraets ausgefuehrt
+;
+IF (iBreakCtrlMode==0)
+  ;
+  IF (giToBreakCtrlState<>0)
+    ;
+    MSG(MSG_ToBreakCtrlRunning)
+    ;
+    WHILE (giToBreakCtrlState<>0)
+      ;Warten solange BBK laeuft
+      STOPRE
+      G04 F=rWaitShort
+    ENDWHILE
+    ;
+    MSG("")
+    ;
+  ENDIF
+  ;
+  ;Hauptzeitparallele BBK
+  ;
+  IF (NOT gbToCheckAtTC)
+    iIsBroken=gbPrevToBrokenInt
+  ELSE
+    iIsBroken=gbLastToBroken
+  ENDIF
+ENDIF
+;
+IF (iIsBroken)
+  ;
+  IF (iErrorMode==WITH_ALARM)
+    ;
+    ;Bedienerruf
+    ;
+    IF (NOT gbToCheckAtTC)
+      SETAL(AL_PrevTlBrokenAsk67)
+    ELSE
+      SETAL(AL_LastTlBrokenAsk67)
+    ENDIF
+    ;
+    M0
+    STOPRE
+    ;
+  ENDIF
+  ;
+  ;Quittierung der Pruefung
+  ;
+  IF (iBreakCtrlMode==0)
+    ;
+    IF (NOT gbToCheckAtTC)
+      ;BBK hauptzeitparallel
+      gbPrevToBrokenInt=FALSE
+    ELSE
+      gbLastToBroken=FALSE
+    ENDIF
+  ENDIF
+ENDIF
+;Fuer Kundenprogramm bereitstellen
+gbPrevToBroken=gbPrevToBrokenInt
+;
+;====
+ENDE:
+;====
+;
+IF (iErrorMode==WITH_ALARM)AND(iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

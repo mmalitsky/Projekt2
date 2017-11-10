@@ -1,0 +1,201 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetMagSt.SPF
+;# Task:      Magazinstatus
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 12.10.2016 / Simons
+; - Neuversionierung
+; - Laufzeitoptimierung
+;
+; V06.00.03 - 07.09.2016 / Simons
+; - Neuversionierung
+; - Korrektur Berechnung Beladeposition
+;
+; V06.00.02 - 09.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesMag
+;
+; V04.00.00 - 07.05.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;  0 = undefiniert
+; 10 = Leerer Magazinplatz in Wechselposition
+; 11 = Werkzeug in Wechselposition
+; 12 = ----
+; 20 = ----
+; 21 = ----
+; 22 = Werkzeug in Position fuer Bohrerbruchkontrolle
+; 30 = Scheibe in Grundstellung
+; 31 = ----
+; 32 = ----
+; 33 = ----
+; 34 = ----
+; 40 = ----
+; 50 = Leerer Magazinplatz in Werkzeugbeladeposition
+; 52 = Werkzeug in Werkzeugbeladeposition
+; 81 = ----
+; 82 = ----
+; 83 = ----
+; 91 = ----
+; 92 = ----
+; 93 = ----
+;
+;------------------------------------
+
+PROC GetMagSt DISPLOF
+
+DEF STRING[32] sCycName="GetMagSt V06.00.06", sAlarmParam=""
+;
+DEF BOOL bDiskAdvanced, bDiskInPos, bDiskRetracted
+;
+DEF INT icMagNo=1, iAlarmNo=0, iAlarmNoShown=0, iMagPos, iCount, iNumPot, iActIndexV
+;
+DEF REAL rActPosV1, rTCPosV1, rLoadPosV1, rDegPerPot
+
+;Anzahl Plaetze / Winkelgrade von Platz zu Platz
+iNumPot=giNumPlacesInMag[icMagNo] rDegPerPot=(360.0/iNumPot) rTCPosV1=grPlDatPosV1[0] rLoadPosV1=grPlDatPosV1[1]
+
+;Istposition Scheibe
+;(STOPRE)
+rActPosV1=$AA_IM[mcAxV1] iMagPos=OUTA_ActPosV1 bDiskAdvanced=mcbDBB_DiskAdvanced bDiskRetracted=mcbDBB_DiskRetracted bDiskInPos=mcbDBB_DiskInPos
+
+;Berechnen der aktuellen Magazinposition
+iActIndexV=(TRUNC(rActPosV1/rDegPerPot)+1)
+IF (iActIndexV>iNumPot)
+  iActIndexV=1
+ENDIF
+
+;Status undefiniert
+giMagState=0
+
+;Plausibilitaetsueberpruefungen
+IF (NOT bDiskAdvanced)AND(NOT bDiskInPos)
+  ;Werkzeugscheibe nicht vorne und nicht in Teilungsposition
+  iAlarmNo=AL_PositionInvalid
+  GOTOF HandleAlarm
+ENDIF
+
+IF (NOT bDiskInPos)
+  ;
+  ;V-Achse in Teilungsposition bringen
+  ;
+  GETD(mcAxV1)
+  ;
+  IF (NOT bDiskAdvanced)
+    ;
+    M_TcDiskAdv1
+    ;
+    bDiskAdvanced=mcbDBB_DiskAdvanced bDiskRetracted=mcbDBB_DiskRetracted
+  ENDIF
+  ;
+  ;V-Achse in naechste Teilungsposition fahren
+  FINEA[mcAxV1] POS[mcAxV1]=CDC(iActIndexV)
+  ;
+  RELEASE(mcAxV1)
+  ;
+  iMagPos=OUTA_ActPosV1 bDiskInPos=mcbDBB_DiskInPos
+ENDIF
+;
+IF (ABS(rActPosV1-rTCPosV1)<=grRange)
+  ;
+  IF ($TC_MPP6[icMagNo,iMagPos]>0)
+    ;
+    IF (NOT bDiskAdvanced)
+      ;
+      M_TcDiskAdv1
+      STOPRE
+    ENDIF
+    ;
+    ;Wz in WzWposition
+    giMagState=11
+    ;
+  ELSE
+    ;
+    IF (NOT bDiskRetracted)
+      ;
+      M_TcDiskRet1
+      STOPRE
+    ENDIF
+    ;
+    ;Leerer Magazinplatz in Wechselposition
+    giMagState=10
+    ;
+  ENDIF
+  ;
+  GOTOF _END
+ENDIF
+;
+IF (NOT bDiskRetracted)
+  ;
+  M_TcDiskRet1
+  STOPRE
+ENDIF
+;
+;Magazin in Grundstellung
+giMagState=30
+;
+IF (ABS(rActPosV1-rLoadPosV1)<=grRange)
+  ;
+  ;Scheibe in Beladeposition
+  ;
+  iMagPos=iMagPos+giMagOffsetLoadPot
+  IF (iMagPos>iNumPot)
+    iMagPos=iMagPos-iNumPot
+  ENDIF
+  ;
+  IF ($TC_MPP6[icMagNo,iMagPos]>0)
+    ;
+    ;Leerer Magazinplatz in Werkzeugbeladeposition
+    giMagState=52
+    ;
+  ELSE
+    ;
+    ;Werkzeug in Werkzeugbeladeposition
+    giMagState=50
+    ;
+  ENDIF
+ENDIF
+
+;====
+_END:
+;====
+;
+IF (giMagState==0)
+  ;
+  ;unbekannter Magazinstatus
+  iAlarmNo=AL_HGNotInValidPos
+  GOTOF HandleAlarm
+ENDIF
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;
+IF (iAlarmNo>0)AND(iAlarmNo<>iAlarmNoShown)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+RET

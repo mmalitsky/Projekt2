@@ -1,0 +1,336 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_TC.SPF
+;# Task:      Einstellungen Magazin
+;# Version:   V06.00.07
+;# Date:      27.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+; Beschreibung:
+;
+; Laden magazinspezifischer
+; Einstellungen fuer alle
+; Werkzeugwechslertypen (DG)
+;
+; Aufgerufen im NC_INIT1.SPF
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 28.08.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 13.02.2017 / Simons
+; - giTCMask.1 fuer D
+;
+; V06.00.05 - 24.11.2016 / Simons
+; - giTCMask.2 fuer WM286
+;
+; V06.00.05 - 20.10.2016 / Simons
+; - giTCMask.9 fuer WM307
+;
+; V06.00.05 - 29.09.2016 / Simons
+; - Neuversionierung
+; - grTCJerkDGRot mit Faktor 0.45
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+; - grMaxTlDG
+; - MTC mit grHor2DGRot/grLowFeedDGRot
+; - HTC042 hinzu
+; - MTC ohne Encoder entfernt
+;
+; V06.00.02 - 12.04.2016 / Simons
+;   Hinzu
+; - fuer giTCMask: "Sp muss, bevor..."
+; - grTCJerkDGRot aus Ruck und KV
+; - grPosWinDGRot
+; - grTlTiltTorqueDG
+; - rTlTiltFactorDG
+; - grLiftWinDGRot
+; - grTCPosFH
+;
+; V06.00.01 - 07.08.2015 / Simons
+;   Hinzu fuer giTCMask:
+; - Ausblendmaske aus NC_INIT1
+; - "Freigabe Fahren der Y Achse.."
+;
+; V06.00.00 - 18.07.2015 / Simons
+; - ProtoTyp / Neu
+;
+;-------------------------------------
+
+DEF STRING[32] sCycName="SET_TC V06.00.07", sTCType, sMNType, sResult
+;
+DEF INT iRelMask
+;
+DEF REAL rcRotToDeg=360.0
+
+;giMaxPrepCount = max. Anzahl ununterbrochener
+;                 WzVorbereitungs-Auftraege
+giMaxPrepCount=1
+
+; giSetHeavyTlDg  = Anwahl immer langsames Drehen
+;                   zu Testzwecken
+; grTCJerkDGRot  = Anpassung TC RechenModel
+; grRelMagDGRot  = Freigabefenster DG fuer Magazin
+; grPosWinDGRot  = "Rast" (einseitig)
+; grTlTiltTorqueDG = Ueberschreitet das WzKippmoment
+;                    diese Grenze, wird die Drehzahl
+;                    abhaengig von der Momenten-
+;                    differenz und grTlTiltFactorDG
+;                    begrenzt.
+; grTlTiltFactorDG = Bewertungsfaktor
+;-------------------------------------------------
+giSetHeavyTlDg=0
+grTCJerkDGRot=0
+grRelMagDGRot=0
+grPosWinDgRot=0
+grTlTiltTorqueDG=1000 ; Abwahl
+grTlTiltFactorDG=0.25
+;
+; Freigabe aus giTCMask
+;----------------------
+; .0 = voreilendes Spannen
+; .1 = voreilendes Loesen
+; .2 = Freigaben durch Sp Gespannt/Geloest Endschalter
+; .3 = Freigaben durch Mag/HG Gespannt oder ScheibenHub Vorn/Hinten Endschalter
+; .4 = Fahren mit geloester Sp
+; .5 = DG Vorpositionieren
+; .6 = Fruehzeitiges Verlassen TC
+; .7 = Freigabe der Spindelvorposition
+; .8 = Freigabe Fahren der Y Achse im Magazinraum (rExit..)
+; .9 = Ergaenzung zu .4 - Kritische Wz werden gespannt uebergeben
+; .10 =
+; .11 =
+; .12 = Defaulteinstellung ist MOVE_XZB sonst MOVE_Z_XB
+; .13 = Teststop bei Halt vor WzW
+; .14 = Kuehlmittel schon im WzW an Hand der WzDaten aktivieren
+; .15 = SpDrehrichtung im WzW an Hand der WzDaten aktivieren
+;
+; Achtung: Eventuell maschinenspezifische Abwahl im Posprogramm
+;--------------------------------------------------------------
+CFG_MAN("PRECLMP",sResult)
+iRelMask=giTCMask
+IF (sResult=="")
+  ;
+  ;kein SonderSpanner -> Abwahl der Funktionen
+  ;
+  iRelMask=giTCMask B_AND 'HFFFFDEF'
+ENDIF
+;
+CFG_MAN("MN",sMNType)
+;
+; Werkzeugwechsel
+;----------------
+; grTcSPos     = Position Spindel
+; grTcSPosG1/2 = 2. Getriebestufe (Kompatibilitaet zu alten Staenden)
+; grTCPosFH    = Position Planzugeinheit
+;
+grTcSPos=0.0
+grTcSPosG1=grTcSPos
+grTcSPosG2=0.0
+grTCPosFH=grInchMetr*0.0
+
+CFG_MAN("TC",sTCType)
+;
+IF (sTCType=="HTC042")
+  ;
+  ; DEFAULT='0001 0100 0111'
+  giTCMask=('B101000111') B_AND (iRelMask)
+  ;
+  IF (gbDGWithEncoder)
+    ;-- Werkzeugwechsler mit Geber (Generation 3)
+    grLightTlDg=2     ;[kg]
+    grHeavyTlDg=20    ;[kg]
+    grMaxDiffTlDg=5   ;[kg]
+    grMidTlDg=6       ;[kg]
+  ENDIF
+  grMaxTlDg=grHeavyTlDG
+  ;
+  ;SpWz voreilend Spannen
+  
+  ;grHor2DGRot    = DG Voreilende Loesposition (15 Grad)
+  ;grLowFeedDGRot = DG minimale "Geschwindigkeit"
+  ;(Empirisch ermittelte Werte)
+  IF (sMNType=="CH")
+    ;
+    ;breitere Rast (12Grad) bei Miksch Kette
+    grHor2DGRot=360-12-15
+    grLowFeedDGRot=0.5
+  ELSE
+    grHor2DGRot=360-8-15
+    grLowFeedDGRot=0.5
+  ENDIF
+  ;
+  grTlTiltTorqueDG=5
+  ;
+  RET
+ENDIF
+;
+IF (sTCType=="MTC050")
+  ;
+  ; DEFAULT='0000 0100 0111'
+  giTCMask=('B1000111') B_AND (iRelMask)
+  ;
+  IF (gbDGWithEncoder)
+    ;-- Werkzeugwechsler mit Geber (Generation 3)
+    grLightTlDg=2     ;[kg]
+    grMaxTlDg=25      ;[kg]
+    grMaxDiffTlDg=5   ;[kg]
+    grMidTlDg=6       ;[kg]
+  ENDIF
+  grHeavyTlDG=grMaxTlDg
+  ;
+  ;SpWz voreilend Spannen
+  grHor2DGRot=330    ;DG Position [Grad]
+  grLowFeedDGRot=0.5 ;DG Mindest Geschwindigkeit [Grad/PLCZyklusZeit]
+  ;
+  grTlTiltTorqueDG=5
+  ;
+  RET
+ENDIF
+;
+IF (sTCType=="MTC350")
+  ;
+  ; DEFAULT='0000 0100 0111'
+  giTCMask=('B1000111') B_AND (iRelMask)
+  ;
+  IF (gbDGWithEncoder)
+    ;-- Werkzeugwechsler mit Geber (Generation 3)
+    grLightTlDg=4     ;[kg]
+    grMaxTlDg=40      ;[kg]
+    grMaxDiffTlDg=5   ;[kg]
+    grMidTlDg=12      ;[kg]
+  ENDIF
+  grHeavyTlDG=grMaxTlDg
+  ;
+  ;SpWz voreilend Spannen
+  grHor2DGRot=330    ;DG Position [Grad]
+  grLowFeedDGRot=0.5 ;DG Mindest Geschwindigkeit [Grad/PLCZyklusZeit]
+  ;
+  grTlTiltTorqueDG=6
+  ;
+  RET
+ENDIF
+;
+IF (sTCType=="WM286")
+  ;
+  ; DEFAULT='0000 0110 1111'
+  giTCMask=('B1101111') B_AND (iRelMask)
+  ;
+  ; TC RechenModel - Naeherung Ruck
+  ;--------------------------------
+  grTCJerkDGRot=$MA_MAX_AX_JERK[mcAxDGRot]*0.45
+  ;
+  ; DG-Achse vertikal
+  grHomePosDGRot=0.0
+  ; DG-Achse horizontal / Uebernahmestellung
+  grHor1DGRot=76.0
+  ; DG-Achse ausgehoben
+  grLiftDGRot=180.0
+  ; Fenster Ausgehoben +-
+  grLiftWinDGRot=50.0
+  ; DG-Achse horizontal / Uebergabestellung
+  grHor2DGRot=284.0
+  ; DG-Vorposition
+  grHomePosWindow=40.0
+  ;
+  grPosWinDgRot=1.0
+  ;
+  ; Geschwindigkeiten [Grad/Min]
+  ;-----------------------------
+  grLowFeedDGRot  =rcRotToDeg*20
+  grMidFeedDGRot  =rcRotToDeg*30
+  grHighFeedDGRot =rcRotToDeg*50
+  grFeedEmptyDGRot=rcRotToDeg*30
+  ;
+  ; Gewichte [kg]
+  ;--------------
+  grMaxTlDg    =40
+  grMidTlDg    =12
+  grLightTlDg  =4
+  grMaxDiffTlDg=0
+  grHeavyTlDG=grMaxTlDg
+  ;
+  RET
+ENDIF
+;
+IF (sTCType=="WM307")
+  ;
+  ; DEFAULT='0011 0101 1101'
+  giTCMask=  ('B1101011101') B_AND (iRelMask)
+  ;
+  grTcSPos=90.0
+  grTcSPosG1=grTcSPos
+  grTcSPosG2=90.0
+  ;
+  ; TC RechenModel - Naeherung Ruck
+  ;--------------------------------
+  grTCJerkDGRot=$MA_MAX_AX_JERK[mcAxDGRot]*0.45
+  ;
+  ; Freigabefenster DG fuer Magazin
+  grRelMagDGRot=17
+  ;
+  ; DG-Achse vertikal
+  grHomePosDGRot=0.0
+  ; DG-Achse horizontal / Uebernahmestellung
+  grHor1DGRot=60.0
+  ; DG-Achse ausgehoben
+  grLiftDGRot=180.0
+  ; Fenster Ausgehoben +-
+  grLiftWinDGRot=70.0
+  ; DG-Achse horizontal / Uebergabestellung
+  grHor2DGRot=300.0
+  ; DG-Vorposition
+  grHomePosWindow=40.0
+  ;
+  grPosWinDgRot=2.0
+  ;
+  ; Geschwindigkeiten [Grad/Min]
+  ;-----------------------------
+  grLowFeedDGRot  =rcRotToDeg*65
+  grMidFeedDGRot  =rcRotToDeg*90
+  grHighFeedDGRot =rcRotToDeg*90
+  grFeedEmptyDGRot=rcRotToDeg*90
+  ;
+  ; Gewichte [kg]
+  ;--------------
+  grMaxTlDg    =12
+  grMidTlDg    =6
+  grLightTlDg  =2
+  grMaxDiffTlDg=0
+  grHeavyTlDg  =7
+  ;
+  grTlTiltTorqueDG=6
+  ;
+  RET
+ENDIF
+;
+IF sTCType=="D"
+  ;
+  ;-- Scheibe
+  ;
+  ; DEFAULT='0000 0100 0010'
+  giTCMask=('B1000010') B_AND (iRelMask)
+  ;
+  grMaxTlDg=10.0  ;[kg]
+  grMidTlDg=4     ;[kg]
+  grHeavyTlDG=grMaxTlDg
+  ;
+  RET
+ENDIF
+;
+RET
+

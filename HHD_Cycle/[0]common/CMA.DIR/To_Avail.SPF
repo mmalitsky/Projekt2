@@ -1,0 +1,186 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     To_Avail.SPF
+;# Task:      Wz Verfuegbarkeit Pruefen
+;# Version:   V06.00.07
+;# Date:      16.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+; Verlauf:
+; --------
+;
+; V06.00.07 - 16.06.2017 / Simons
+; - Neuversionierung
+; - Fehlende Wz'e in gsMissingTools auflisten
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 20.11.2016 / Simons
+; -  mcToAvailMode -> giToAvailMode
+;
+; V06.00.05 - 24.10.2016 / Simons
+; - Neuversionierung
+; - iManTl hinzu
+;
+; V06.00.04 - 31.08.2016 / Simons
+; - Neuversionierung
+; - Mit Magazin-/Platzdaten
+; - Dokumention / Meldungsausgabe
+; - mcToAvailMode hinzu
+;
+; V06.00.02 - 07.05.2016 / Simons
+; - Prototyp fuer Operate
+;
+; V01.00.00 - Juli  2008 / Balles
+; - Vorlage aus HHD WzV (HMI Advanced)
+;
+; -----------------------------------
+;
+; Beschreibung:
+; -------------
+; - Suche nach einem freigegebenen Wz
+;   innerhalb von max. 6 Wz Familien.
+; - Vor dem Aufruf muss die Ergebnisvariable
+;   zurueckgesetzt werden.
+;
+; Das Ergebnis wird in Tool_Missing angezeigt
+; Die Initialisierung erfolgt mit Tool_Missing<=0
+;
+; Funktionsanpassungen: 
+; ---------------------
+;
+; gsProtMissTl <> ""
+; - fehlende Wz'e in Datei auflisten
+;   Der Filename wird entweder direkt in gsProtMissTl vorgegeben
+;   z.B. /_N_MPF_DIR/_N_PROT_TEST_TESTPROGRAM_MPF (in der NC)
+;   oder 
+;   bei gsTlMissTl="WP" aus dem aktiven ProgrammNamen ermittelt.
+;   z.B. als /_N_WKS_DIR/_N_TEST_WPD/_N_MT_TESTPROGRAM_SPF (in der NC)
+; - Initialisierung mit Tool_Missing < 0
+;
+; giToAvailMode
+; .0 zusaetzlich Meldungsausgabe ohne Stop
+;    Initialisierung mit Tool_Missing <=0
+; .1 HandWz'e werden mit beruecksichtigt
+;
+; Ist das erste Zeichen von sWz1 ein "#",
+; dann wird bei negativem Pruefergebnis
+; direkt ein Alarm mit Programm Stopp
+; ausgegeben.
+; Andernfalls wird in den Ergebnisvariablen
+; angezeigt, dass kein freigegebenes
+; Wz in der jeweiligen Wz Familie existiert.
+;
+; Eingangsparameter:
+; ------------------
+;
+; sWz1...sWz6 : Bezeichner der zu pruefenden WzFamilien
+;
+; Ergebnisvariable:
+; -----------------
+; TOOL_MISSING   = 0 -> 'B111111'
+;
+; -----------------------------------
+
+PROC TO_AVAIL(STRING[33] sWz1, STRING[32] sWz2, STRING[32] sWz3, STRING[32] sWz4, STRING[32] sWz5, STRING[32] sWz6) DISPLOF SBLOF
+
+DEF STRING[33] sCycName="To_Avail V06.00.06", sAux="", sTool
+;
+DEF INT iCount=0, iAlarm=1, iNameLen, iManTl, iMessage, iProtFile, iInit, iInitStart, iTmp
+
+iProtFile=(gsProtMissTl<>"") iMessage=((giToAvailMode B_AND 'B1')<>0) iManTl=((giToAvailMode B_AND 'B10')<>0) iInit=(iProtFile*'B10') iInitStart=(iInit) iTmp=(NOT iProtFile) iMessage=(iMessage*'B100000'*iTmp) iProtFile=(iProtFile*'B10000') iManTl=(iManTl*'B100')
+
+IF (TOOL_MISSING<>0)AND(iProtFile==0)AND(iMessage==0)
+  ;
+  ;Bei einem vorherigen Aufruf, wurde schon eine fehlerhafte Wz Familie erkannt -> keine weitere Ueberpruefung
+  RET
+ENDIF
+;
+IF (iProtFile<>0)AND(TOOL_MISSING<=0)
+  ;
+  ;Start der Suche und Initialisierung der Ergebnisvariablen
+  ;
+  IF (gsProtMissTl=="WP")
+    ;
+    IF (giActDeviceNo<0)OR(giActDeviceNo>mcNumExtDevices)
+      ;
+      SETAL(AL_NotAvailable,"DEV"<<giActDeviceNo)
+    ENDIF
+    ;
+    ;Die Liste wird im aktiven Werkstueck mit dem Prefix "MT_" angelegt
+    IF (giActDeviceNo==0)
+      gsProtMissTl=Prog_Path<<"/_N_MT_"<<Prog_Name<<"_SPF"
+    ELSE
+      IF (gbWithEES)
+        gsProtMissTl=gsDeviceName[giActDeviceNo]<<Prog_Path<<"/MT_"<<Prog_Name<<".SPF"
+      ELSE
+        SETAL(AL_CombNotAllowed,"(gsProtMissTl=WP) + (EES=0)")
+      ENDIF
+    ENDIF    
+  ENDIF
+  ;
+  TOOL_MISSING=0 iInit=0
+ENDIF
+;
+WHILE (iCount<5)
+  ;
+  CASE iCount OF 0 GOTOF _WZ1 1 GOTOF _WZ2 2 GOTOF _WZ3 3 GOTOF _WZ4 4 GOTOF _WZ5 5 GOTOF _WZ6 DEFAULT GOTOF _EMPTY
+  _WZ1: sTool=sWz1 iNameLen=STRLEN(sTool)-1
+  IF (iNameLen>-1)
+    ;
+    IF (SUBSTR(sTool,0,1)=="#")
+      ;
+      ;Fehlermeldung soll ausgegeben werden
+      IF (iMessage==0)AND(iProtFile==0)
+        ;
+        ;keine Abwahl der Ausgabe
+        iAlarm=0
+      ENDIF
+      IF (iNameLen>0)
+        sTool=SUBSTR(sTool,1,iNameLen)
+      ELSE
+        sTool=""
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  GOTOF _CHECK
+  _WZ2: sTool=sWz2
+  GOTOF _CHECK
+  _WZ3: sTool=sWz3
+  GOTOF _CHECK
+  _WZ4: sTool=sWz4
+  GOTOF _CHECK
+  _WZ5: sTool=sWz5
+  GOTOF _CHECK
+  _WZ6: sTool=sWz6
+  GOTOF _CHECK
+  _EMPTY:
+  sTool=""
+  ;
+  ;=====
+  _CHECK:
+  ;=====
+  ;
+  IF (sTool<>"")
+    ;
+    ;Pruefung
+    CheckTlData("T="<<sTool, (iManTl B_OR iMessage B_OR iProtFile B_OR iInit B_OR iAlarm B_OR 'B1000'))
+    ;
+    IF (giResult>0)
+      ;
+      ;Kein freigegebenes Wz gefunden
+      TOOL_MISSING=(TOOL_MISSING B_OR RTOI(EXP(iCount*LN(2))))
+    ENDIF
+  ENDIF
+  ;
+  iCount=iCount+1 iInit=iInitStart
+ENDWHILE
+;
+RET

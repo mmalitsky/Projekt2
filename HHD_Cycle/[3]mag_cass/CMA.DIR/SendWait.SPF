@@ -1,0 +1,189 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SendWait.SPF
+;# Task:      Telegramm an MMC mit Warten
+;# Version:   V06.00.08
+;# Date:      17.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+; Verlauf:
+;
+; V06.00.08 - 17.08.2017 / Simons
+; - Neuversionierung
+;
+; V04.02.00 - Maerz 2016/Balles
+; - Vorlage
+;----------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; HHD-Werkzeugverwaltung mit unterlagerter SIEMENS-WzV
+; a) Telegramm an MMC senden
+; b) auf Ergebnis warten
+; c) ggf. a) und b) wiederholen
+;
+; Eingangsparameter:
+; ------------------
+;  iTelNo:        Telegramm-Nummer (stets>0)
+;  sTelDat:       Nutzdaten
+;  iMode:         0= Standard
+;                 1= im Fehlerfalle 67xxx-Alarm statt RESET-pflichtigen 66xxx-Alarms
+;  iMaxWaitTime:  max. Wartezeit (in Sekunden)
+;
+;----------------------------------
+
+PROC SendWait(INT iTelNo, STRING[200] sTelDat, INT iMode, INT iMaxWaitTime)
+
+DEF STRING[32] sCycName="SendWait V06.00.08", sAlarmParam=""
+;
+DEF INT iAlarmNo=0, iRepCount=1, iMaxTime, iWaitCount, iMaxWaitCount, iActMaxWaitCount, iMaxRepCount, iTmpAckn, iTmpTelNo
+DEF REAL rWaitShort
+
+IF (NOT $P_SUBPAR[3])
+  iMode=0
+ENDIF
+;
+IF ($P_SUBPAR[4])
+  ;
+  IF ($P_PROG_EVENT<>3)
+    ;kein Ereignis bzw. Ereignis eingetreten, aber kein RESET-Ereignis
+    iMaxRepCount=5
+  ELSE
+    ;bei RESET-Ereignis reduzierte Wartezeit/Wiederholrate
+    iMaxRepCount=2
+  ENDIF
+  iMaxTime=iMaxWaitTime
+ELSE
+  ;
+  IF ($P_PROG_EVENT<>3)
+    ;kein EVENT-Ereignis eingetreten oder Ereignis eingetreten, aber kein RESET-Ereignis
+    iMaxTime=30 iMaxRepCount=5
+  ELSE
+    ;bei RESET-Ereignis reduzierte Wartezeit/Wiederholrate
+    iMaxTime=5 iMaxRepCount=2
+  ENDIF
+  iMaxWaitTime=iMaxTime
+ENDIF
+;
+IF (giAcknFromMMC<>giReqToMMC)
+  ;
+  ;Vor neuem Telegramm pruefen, ob noch anderes Telegramm unbeantwortet ansteht
+  ;
+  IF ($P_PROG_EVENT<>3)
+    ;
+    ;kein EVENT-Ereignis eingetreten oder Ereignis eingetreten, aber kein RESET-Ereignis
+    ;
+    WaitResp(iMaxWaitTime)
+  ELSE
+    ;
+    ;RESET-Ereignis
+    ;
+    ;warten und ggf. Telegramm wiederholen
+    WaitRep
+  ENDIF
+  ;
+  IF (giAcknFromMMC<>giReqToMMC) GOTOF ENDE
+  ;
+ENDIF
+;
+rWaitShort=(2*$MN_IPO_CYCLE_TIME) iActMaxWaitCount=RTOI(MINVAL(5,iMaxTime)/rWaitShort) iMaxWaitCount=RTOI(iMaxTime/rWaitShort)
+;
+IF (giTelOffset<999)
+  giTelOffset=giTelOffset+1
+ELSE
+  giTelOffset=0
+ENDIF
+iTmpTelNo=iTelNo+giTelOffset
+;
+REPEAT
+  ;
+  IF (iTmpTelNo==giAcknFromMMC)
+    ;
+    ;Telegrammnummer haette die gleiche Nummer wie die Quittierung -> Sie muss nochmals modifiziert werden
+    ;
+    IF (giTelOffset<999)
+      giTelOffset=giTelOffset+1
+    ELSE
+      giTelOffset=0
+    ENDIF
+    iTmpTelNo=iTelNo+giTelOffset
+    ;
+  ENDIF
+  ;
+  ;jetzt erst Telegramm ausloesen
+  giMBoxFromMMC[0]=0 giMBoxFromMMC[1]=0 giMBoxFromMMC[2]=0 giMBoxFromMMC[3]=0 gsMBoxToMMC[0]=sTelDat
+  giReqToMMC=iTmpTelNo
+  ;
+  iWaitCount=0
+  WHILE (giAcknFromMMC<>giReqToMMC)AND(iWaitCount<=iActMaxWaitCount)
+    ;
+    G04 F=rWaitShort
+    ;
+    IF (giAcknFromMMC==(-1)*giReqToMMC)
+      ;
+      ;Telegramm wurde von WzV bestaetigt, Aktion ist aber noch nicht abgeschlossen
+      ;
+      IF (iActMaxWaitCount<>iMaxWaitCount)
+        iActMaxWaitCount=RTOI(iMaxWaitTime/rWaitShort)
+      ENDIF
+    ENDIF
+    ;
+    iWaitCount=iWaitCount+1
+    STOPRE
+    ;
+  ENDWHILE
+  ;
+  ;Status: Quittierung eingetroffen oder Zeitueberlauf
+  ;
+  IF (giAcknFromMMC<>giReqToMMC)
+    ;
+    ;Zeitueberlauf - PCU hat nicht geantwortet
+    ;
+    iRepCount=iRepCount+1
+    IF (iRepCount<=iMaxRepCount)
+      ;
+      ;noch nicht alle Wiederholversuche ausgeschoepft -> modifizierten Befehl nochmals absetzen
+      ;
+      IF (giTelOffset<999)
+        giTelOffset=giTelOffset+1
+      ELSE
+        giTelOffset=0
+      ENDIF
+      iTmpTelNo=iTelNo+giTelOffset
+      ;
+    ENDIF
+  ENDIF
+  ;
+UNTIL (giAcknFromMMC==giReqToMMC)OR(iRepCount>iMaxRepCount)
+;
+;====
+ENDE:
+;====
+;
+;Status: Quittierung eingetroffen oder max. Wartezeit erreicht
+;
+IF (giAcknFromMMC<>giReqToMMC)
+  ;
+  ;trotz Wartens/mehrfacher Wiederholungen keine Quittierung durch MMC
+  ;
+  iTmpAckn=giAcknFromMMC
+  ;
+  IF ($P_PROG_EVENT==3)OR(iMode==1)
+    ;RESET-Ereignis eingetreten
+    iAlarmNo=AL_CommunicationErr67 giAcknFromMMC=giReqToMMC
+  ELSE
+    iAlarmNo=AL_CommunicationErr
+  ENDIF
+  ;
+  LogTrace(sCycName, "No response from tool management: giReqToMMC="<<giReqToMMC<<" <-> giAcknFromMMC="<<iTmpAckn,iAlarmNo)
+  ;
+  SETAL(iAlarmNo, sAlarmParam)
+  ;
+ENDIF
+;
+RET

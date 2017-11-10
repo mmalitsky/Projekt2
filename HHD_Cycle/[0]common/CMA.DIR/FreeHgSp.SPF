@@ -1,0 +1,139 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     FreeHGSp.SPF
+;# Task:      async. Unload HG/DG/SP
+;# Version:   V06.00.06
+;# Date:      17.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 17.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.00 - 27.03.2014 / Huettner
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+
+; ASynchroner Auftrag von Kanal 1 an
+; Kanal 2 - DG/HG/Sp Leerfahren
+;
+;------------------------------------
+
+PROC FreeHgSp(BOOL bAlsoClearSp) DISPLOF
+
+DEF STRING[32] sCycName="FreeHgSp 06.00.06"
+;
+DEF REAL rcWait=0.01
+
+STOPRE
+giTNoSP=$TC_MPP6[9998,mcLocSp]
+IF (gbWithDG)
+  giTNoDg1=$TC_MPP6[9998,mcLocDG1] giTNoDg2=$TC_MPP6[9998,mcLocDG2]
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG]
+ENDIF
+;
+;Alle schon leer -> Ende
+IF (giTNoSp<=0)AND(giTNoDg1<=0)AND(giTNoDg2<=0)AND(giTNoHG<=0) GOTOF ENDE
+
+IF (NOT $P_SUBPAR[1])
+  bAlsoClearSp=true
+ENDIF
+
+IF (giTNoSp>0)AND(bAlsoClearSp)
+  ;
+  IF (OUT_RevCha1Active)
+    ;
+    ;leert DG/HG und legt SpWz ins Magazin
+    TC_BS(mcTaskAS_T0,"0",0)
+  ELSE
+    ;
+    T0 M6
+  ENDIF
+  ;
+  GOTOF DoWait
+ELSE
+  ;
+  IF (giTNoDg1>0)OR(giTNoDg2>0)OR(giTNoHG>0)
+    ;
+    ;im DG/HG befindet sich ein Wz
+    ;
+    IF (NOT OUT_RevCha1Active)
+      ;
+      ;Sp Entladen anstossen
+      T0
+    ENDIF
+    ;
+    IF (gbPrepActiv)
+      ;
+      WHILE (NOT gbPrepDone)
+        G4 F=rcWait
+        STOPRE
+      ENDWHILE
+      ;
+      ;ToPrep -> Warteschleife beenden
+      gbPrepReset=TRUE
+      ;
+      WHILE (gbPrepActiv)
+        ;Warten solange ToPrep die Warteschleife noch nicht beendet hat
+        G4 F=rcWait
+        STOPRE
+      ENDWHILE
+    ENDIF
+    ;
+    gbPrepDone=FALSE
+    ;
+    ;Asynchrones Leerfahren von HG/DG ins Magazin
+    MovASync("0")
+    ;
+    GOTOF DoWait
+  ELSE
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+;======
+DoWait:
+;======
+;
+;falls Aufruf von FreeHgSp aus Kanal 2: kein Warten auf Vollzug, da ja der Kanal 2 der Ausfuehrende ist
+;falls Aufruf aus HOME-Prg: kein Warten (sonst Selbstblockade)
+;
+IF ($P_CHANNO==2)OR(OUT_RevCha1Active)OR(OUT_RevCha2Active) GOTOF ENDE
+;
+LOOP
+  ;
+  ;Auf Ausfuehrung durch Kanal 2 warten
+  ;
+  STOPRE
+  ;
+  IF (bAlsoClearSp)
+    IF ((giTNoSp<=0)AND(giTNoDg1<=0)AND(giTNoDg2<=0)AND(giTNoHG<=0)) GOTOF ENDE
+  ELSE
+    IF ((giTNoDg1<=0)AND(giTNoDg2<=0)AND(giTNoHG<=0)) GOTOF ENDE
+  ENDIF
+  ;
+  G4F0.1
+  ;
+ENDLOOP
+;
+;====
+ENDE:
+;====
+;
+RET
+

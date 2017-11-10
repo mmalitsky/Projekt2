@@ -1,0 +1,217 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CUST_832.SPF
+;# Task:      Adaptation for CYCLE832
+;# Version:   V06.00.07
+;# Date:      14.07.2017 / Simons
+;# Control:   840D
+;# TM:        All
+;# NBHSeries: All
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 14.07.2017 / Simons
+; - Neuversionierung
+; - "logic for compatibility if you upgrade software" entfernt, da in CYCLE832 nicht mehr verwendet
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - Reibkompensation geaendert,
+;   gsForceFrictComp_832 hinzu
+; - formale Aenderungen
+;
+; V06.00.04 - 22.08.2016 / Simons
+; - Neuversionierung
+;
+; V03.02.01 - 21.01.2016 /  Schaaf
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Technologie-Anpassung fuer CYCLE832 (HSC)
+; - fuer NBH-Maschinen mit HMI Operate
+; - Reibwertkompensation variabel aktivier-/deaktivierbar
+;
+; SIEMENS Vorlage:
+; VERSION: 04.05.48.04 ;DATE: 2013-07-30
+; CHANGE : 04.05.47.00 ;DATE: 2013-03-19
+;
+; customer cycle to cycle High Speed Settings (CYCLE832)
+; The user can modify marks _M_INIT, and _M_NORM to _M_ROUGH
+;
+; _M_INIT       = Init CYCLE832
+; _M_NORM       = Deselect CYCLE832 (_OFF)
+; _M_FINISH     = Machining Finish  (_FINISH or _ORI_FINISH)
+; _M_SEMIFINISH = Machining Semifinish (_SEMIFIN or _ORI_SEMIFIN)
+; _M_ROUGH      = Machining Rough (_ROUGH or _ORI_ROUGH)
+;
+; Tolerance of orientation see parameter CYCLE832 S_OTOL
+; or _FACTOR for orientation see setting data from SD 55441 to 55443
+; Multi-axis programming see CUST_832 parameter _MOTOL 0=no 1=yes
+;
+;------------------------------------
+
+PROC CUST_832(INT _MCASE, VAR REAL _FACTOR, VAR REAL _FGREF) SBLOF DISPLOF
+
+DEF AXIS aLogicName
+DEF STRING[32] scSepSign=",", sMCType, sAxName
+DEF STRING[128] sCompAxis, sForceFrictComp
+DEF BOOL bEnableFrictComp, bIsIpoAxis, bForceFrictComp, bIsSystemDir, bXYZ_FFWON, bSelectFFW, bFrictCompSelected
+DEF INT icLastIpoAxis=14, _MOTOL=0, iCount
+
+CFG_MAN("MC",sMCType)
+;
+_MCASE=ABS(_MCASE) bIsSystemDir=($P_PATH[$P_STACK]=="/_N_CST_DIR/") sCompAxis="XM YM ZM CM AM BM" sForceFrictComp="" bXYZ_FFWON=((($MA_FFW_MODE[AX1]<>0)AND($MA_FFW_MODE[AX2]<>0)AND($MA_FFW_MODE[AX3]<>0))OR(sMCType=="NBH5S"))
+;
+IF ((_MCASE _DEC2)==2)
+  ;
+  ;M0 ... M4 -> to stay compatible with CYC_832T and Advanced Surface
+  _MOTOL=1 _MCASE=_MCASE - 10
+ENDIF
+N83201 CASE _MCASE OF 0 GOTOF _M_NORM 1 GOTOF _M_FINISH 2 GOTOF _M_SEMIFINISH 3 GOTOF _M_ROUGH 4 GOTOF _M4 10 GOTOF _M_NORM 11 GOTOF _M_FINISH 12 GOTOF _M_SEMIFINISH 13 GOTOF _M_ROUGH 14 GOTOF _M_INIT
+;
+;BEGIN_DO_UPGRADE
+;
+;logic for compatibility if you upgrade software
+IF (NOT bIsSystemDir)
+  ;
+  ;Loeschen aller Feldelemente
+  _SC_CUST_MODE[0]= REP(0)
+  ;
+  _SC_CUST_MODE[0]=_MCASE
+  ;
+  ;Aufruf in CST erzwingen
+  N990 CALL "/_N_CST_DIR/_N_CUST_832_SPF"
+  GOTOF _MEND
+ELSE
+  ;Parameter _MCASE=n incorrectly defined
+  SETAL(61019,"_MCASE="<<_MCASE<<" (CUST_832)")
+ENDIF
+;
+;END_DO_UPGRADE
+;
+RET
+
+;=======
+_M_INIT:
+;=======
+;
+_FGREF=10
+GOTOF _MEND
+
+;=======
+_M_NORM:
+;=======
+;
+bEnableFrictComp=TRUE gbCyc832Act=FALSE bSelectFFW=FALSE
+GOTOF _MEND
+
+;=========
+_M_FINISH:
+;=========
+;
+SOFT
+COMPCAD
+G645
+FIFOCTRL
+UPATH
+DYNFINISH
+;
+bEnableFrictComp=FALSE gbCyc832Act=TRUE bSelectFFW=bXYZ_FFWON
+GOTOF _MEND
+
+;=============
+_M_SEMIFINISH:
+;=============
+;
+SOFT
+COMPCAD
+G645
+FIFOCTRL
+UPATH
+DYNSEMIFIN
+;
+bEnableFrictComp=FALSE gbCyc832Act=TRUE bSelectFFW=bXYZ_FFWON
+GOTOF _MEND
+
+;========
+_M_ROUGH:
+;========
+;
+SOFT
+COMPCAD
+G645
+FIFOCTRL
+UPATH
+DYNROUGH
+;
+bEnableFrictComp=FALSE gbCyc832Act=TRUE bSelectFFW=bXYZ_FFWON
+GOTOF _MEND
+
+;===
+_M4:
+;===
+;
+;Parameter _FACTOR see Setting Data 55441 $SCS_MILL_TOL_FACTOR_ROUGH and following
+GOTOF _MEND
+
+;=====
+_MEND:
+;=====
+;
+;FFW
+;---
+IF (bSelectFFW)
+  FFWON
+ELSE
+  FFWOF
+ENDIF
+;
+;Friction Compensation
+;---------------------
+;
+IF ISVAR("gsForceFrictComp_832")
+  ;
+  IF (gsForceFrictComp_832<>"")
+    ;
+    ;Axis listed in gsForceFrictComp_832 will be compensated
+    ;Separation with "scSepSign"
+    ;
+    ;Example in custom program:
+    ;
+    ; gsForceFrictComp_832 = "X,B"
+    ; CYCLE832(....)
+    ;
+    sForceFrictComp=gsForceFrictComp_832<<scSepSign
+  ENDIF
+ENDIF
+;
+FOR iCount=0 TO icLastIpoAxis
+  ;
+  aLogicName=AXNAME($MN_AXCONF_LOGIC_MACHAX_TAB[iCount]) sAxName=$MN_AXCONF_MACHAX_NAME_TAB[iCount] bFrictCompSelected=($MA_FRICT_COMP_MODE[aLogicName]<>0)
+  ;
+  IF (bFrictCompSelected)
+    ;
+    ;Axis with friction compensation
+    ;  
+    bIsIpoAxis=(MATCH(sCompAxis,SUBSTR(sAxName,0,2))>-1) bForceFrictComp=(MATCH(sForceFrictComp,SUBSTR(sAxName,0,1)<<scSepSign)>-1)
+    ;
+    IF (bIsIpoAxis)
+      ;
+      ;Activate friction compensation
+      $MA_FRICT_COMP_ENABLE[aLogicName]=(bEnableFrictComp)OR(bForceFrictComp)
+    ENDIF
+  ENDIF
+ENDFOR
+;
+NEWCONF
+STOPRE
+;
+RET

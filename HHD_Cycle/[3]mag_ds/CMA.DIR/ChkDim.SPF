@@ -1,0 +1,596 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkDim.SPF
+;# Task:      Plausibilitaetpruefung
+;#            Wz/Platzdaten
+;# Version:   V06.00.07
+;# Date:      18.07.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: DDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 18.07.2017 / Simons
+; - Fehlermeldungen bei Laenge korrigiert
+;
+; V06.00.07 - 19.06.2017 / Simons
+; - Neue Versionierung
+; - AL_MagazineSpecifiedInvalid
+; - Ausssprung Pruefmodus verlagert
+; - AD.0155.1717 hinzu
+; - Einfuehrung Typ 11..15
+;
+; V06.00.06 - 18.05.2017 / Simons
+; - rColLen hinzu
+;
+; V06.00.06 - 27.04.2017 / Simons
+; - Neue Versionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - Neue Versionierung
+; - PruefModus
+;
+; V04.01.00 - 16.09.2016 / Schaaf
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Pruefen, ob Werkzeugdimensionen zum Werkzeugtyp passen
+; Anpassung von Kollisionslaenge, Kollisionsradius und Nachbarplatzbelegung
+;
+; Achtung: Nicht bei HHD TM
+;
+; Eingangsparameter:
+; ------------------
+; iMode:
+; 0 : Nur Pruefen
+; 1 : Anpassung der Werkzeugdaten
+; iTNo: Werkzeugnr. des zu pruefenden Werkzeug
+;
+; Ausgangsparameter:
+; ------------------
+; iChkRes: Pruefergebnis
+; -4 : Kein Werkzeug vorhanden
+; -3 : Falscher Radius
+; -2 : Falsche Laenge
+; -1 : Falscher Werkzeugtyp
+;  0 : Pruefung o.K. ohne Anpassung
+;  1 : Kollisionsdaten angepasst
+;
+;Gueltig fuer folgende Magazinvarianten
+;
+;NBH 6              / Scheibe 60  / Lmax=450 / Dmax=250 : AD.0090.7070
+;NBH 6+             / Scheibe 60  / Lmax=600 / Dmax=250 : AD.xxxx.xxxx
+;NBH 630 - NBH 1000 / Scheibe 60  / Lmax=600 / Dmax=325 : AD.0149.4041 / AD.0155.1717
+;
+;NBH 6              / Scheibe 120 / Lmax=450 / Dmax=250 : AD.0144.8438
+;NBH 6+             / Scheibe 120 / Lmax=600 / Dmax=250 : AD.xxxx.xxxx
+;NBH 630 - NBH 1000 / Scheibe 120 / Lmax=600 / Dmax=325 : AD.0149.4041
+;
+;------------------------------------
+
+PROC ChkDim(INT iMode, INT iTNo, VAR INT iChkRes)
+
+DEF STRING[32] sCycName="ChkDim V06.00.07", sAlarmParam=""
+
+DEF BOOL bChgSize=FALSE, bChgCol=FALSE
+;
+DEF INT iAlarmNo=0, iToolType, iSizeL, iSizeR, iSizeDef, iMagNo, iPotNo, iCount
+;
+DEF REAL rToTol=0.200, rMaxToLen=0, rMaxToRad=0, rColLen, rColRad, rToLen, rToRad
+
+iChkRes=0
+
+;--------------------------
+;Auswerten Magazinvarianten
+;--------------------------
+;
+IF (gbTMIsHHD)
+  iAlarmNo=AL_CombNotAllowed sAlarmParam="TM HHD + giMagIdent="<<giMagIdent
+  GOTOF HandleAlarm
+ENDIF
+;
+CASE giMagIdent OF 907070 GOTOF _AD00907070 1494041 GOTOF _AD01494041 1448438 GOTOF _AD01448438 1551717 GOTOF _AD01494041
+;
+;--------------------------------
+;-- Keine oder falsche giMagIdent
+;
+iAlarmNo=AL_MagazineSpecifiedInvalid sAlarmParam="giMagIdent="<<giMagIdent
+GOTOF HandleAlarm
+;
+;===========
+_AD00907070:
+;===========
+; NBH 6 / Scheibe 60
+; Lmax=450 / Dmax=250
+rMaxToLen = 450.000 rMaxToRad = 250.000
+GOTOF _CHECK
+;
+;===========
+_AD01494041:
+;===========
+; NBH 630 - NBH 1000 / Scheibe 60
+; Lmax=600 / Dmax=325
+rMaxToLen = 600.000 rMaxToRad = 325.000
+GOTOF _CHECK
+;
+;===========
+_AD01448438:
+;===========
+; NBH 6 / Scheibe 120
+; Lmax=450 / Dmax=250
+rMaxToLen = 450.000 rMaxToRad = 250.000
+GOTOF _CHECK
+
+;======
+_CHECK:
+;======
+;
+;Pruefmodus
+;----------
+IF (NOT $P_SUBPAR[1])AND(NOT $P_SUBPAR[2]) GOTOF _END
+;
+;------------------------------
+;Plausibilitaetsueberpruefungen
+;------------------------------
+IF (iTNo>0)
+  ;
+  IF ($P_TOOLEXIST[iTNo])
+    ;
+    ;--------------------------------------
+    ;-- Magazinplatztyp pruefen
+    iToolType=$TC_TP7[iTNo]
+    IF iToolType<=0
+      ;--------------------------------------
+      ;-- Kein Magazinplatztyp angegeben
+      iChkRes=-1
+      GOTOF _END
+    ENDIF
+    ;
+    iMagNo=$A_TOOLMN[iTNo]
+    iPotNo=$A_TOOLMLN[iTNo]
+    iSizeL=$TC_TP3[iTNo]
+    iSizeR=$TC_TP4[iTNo]
+    ;
+    ;-----------------------------------------------
+    ;-- Kollisionslaenge und Werkeuglaenge ermitteln
+    rColLen=$TC_TPC7[iTNo] / grInchMetr
+    rColRad=$TC_TPC8[iTNo] / grInchMetr
+    rToLen=$TC_DP3[iTNo,1]+$TC_DP12[iTNo,1]
+    rToRad=$TC_DP6[iTNo,1]+$TC_DP15[iTNo,1]
+    ;
+    ;-- Maximale Werkzeuggeometrie aus den einzelnen Schneidenndaten
+    IF ($P_TOOLND[iTNo] > 1)
+      FOR iCount=2 TO $P_TOOLND[iTNo]
+        IF (($TC_DP3[iTNo,iCount]+$TC_DP12[iTNo,iCount]) > rToLen)
+          rToLen=$TC_DP3[iTNo,iCount]+$TC_DP12[iTNo,iCount]
+        ENDIF
+        IF (($TC_DP6[iTNo,iCount]+$TC_DP15[iTNo,iCount]) > rToRad)
+          rToRad=$TC_DP6[iTNo,iCount]+$TC_DP15[iTNo,iCount]
+        ENDIF
+      ENDFOR
+    ENDIF
+    rToLen = rToLen / grInchMetr
+    rToRad = rToRad / grInchMetr
+  ELSE
+    ;----------------------------------
+    ;-- Werkzeug existiert nicht (iTNo)
+    iChkRes=-4
+    GOTOF _END
+  ENDIF
+ELSE
+  ;------------------------------
+  ;-- Keine Werkzeug-Id angegeben
+  iChkRes=-4
+  GOTOF _END
+ENDIF
+
+;------------------------
+;Kollisionslaenge pruefen
+;------------------------
+IF (rColLen<=0)
+  ;
+  IF (rToLen>0)
+    ;-- Kollisionslaenge aus max. Werkzeuglaenge
+    rColLen=((TRUNC(rToLen*10)+1)/10)
+    bChgCol=TRUE
+  ELSE
+    ;-- Keine Werkzeuglaenge vorhanden
+    iChkRes=-2
+    GOTOF _END
+  ENDIF
+ELSE
+  ;
+  IF (rColLen+rToTol)<rToLen
+    ;-- Kollisionslaenge < max. Werkzeuglaenge
+    iChkRes=-2
+    GOTOF _END
+  ENDIF
+  ;
+  IF rColLen<rToLen
+    rColLen=((TRUNC(rToLen*10)+1)/10)
+    bChgCol=TRUE
+  ENDIF
+ENDIF
+
+;------------------------
+;Kollisionsradius pruefen
+;------------------------
+IF (rColRad<=0)
+  ;
+  IF (rToRad>0)
+    ;-- Kollisionsradius aus max. Werkzeugradius
+    rColRad=((TRUNC(rToRad*10)+1)/10)
+  ELSE
+    ;-- Kollisionsradius spaeter ermitteln
+    rColRad=-1
+  ENDIF
+  bChgCol=TRUE
+ELSE
+  ;
+  IF ((rColRad+rToTol)<rToRad)
+    ;-- Kollisionsradius < max. Werkzeugradius
+    iChkRes=-3
+    GOTOF _END
+  ENDIF
+  ;
+  IF (rColRad<rToRad)
+    rColRad=((TRUNC(rToRad*10)+1)/10)
+    bChgCol=TRUE
+  ENDIF
+ENDIF
+
+;--------------------------------
+;--Maximale Werkzeugdaten pruefen
+;--------------------------------
+;
+IF (rColLen>(rMaxToLen+rToTol))
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+IF (rColRad>(rMaxToRad+rToTol))
+  iChkRes=-3
+  GOTOF _END
+ENDIF
+
+;----------------------
+; Werkzeugtypen pruefen
+;----------------------
+;
+CASE iToolType OF 1 GOTOF _TYPE1 2 GOTOF _TYPE2 5 GOTOF _TYPE5 11 GOTOF _TYPE1 12 GOTOF _TYPE2 15 GOTOF _TYPE5
+;
+;--------------------------------
+;--Kein Magazinplatztyp angegeben
+iChkRes=-1
+GOTOF _END
+
+;======
+_TYPE1:
+;======
+;
+IF (rColLen > (rMaxToLen+rToTol))
+  ;----------------------------
+  ;-- L>MaxToLen -> Unzulaessig
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+;
+IF (rColLen > (450+rToTol))
+  ;----------------------------
+  ;-- L>450 , Dmax=40 , Rmax=20
+  IF (rColRad < 0)
+    rColRad=20.0
+  ENDIF
+  IF (rColRad > (20.0+rToTol))
+    iChkRes=-3
+    GOTOF _END
+  ENDIF
+ELSE
+  IF (rColLen > (300+rToTol))
+    ;----------------------------
+    ;-- L>300 , Dmax=70 , Rmax=35
+    IF (rColRad < 0)
+      rColRad=35
+    ENDIF
+    IF (rColRad > (35+rToTol))
+      iChkRes=-3
+      GOTOF _END
+    ENDIF
+  ELSE
+    ;-----------------------------
+    ;-- L<300 , Dmax=100 , Rmax=50
+    IF (rColRad < 0)
+      rColRad=50
+    ENDIF
+    IF (rColRad > (50+rToTol))
+      iChkRes=-3
+      GOTOF _END
+    ENDIF
+  ENDIF
+ENDIF
+
+;-------------------------
+;-- Nachbarplaetze pruefen
+;
+IF (iSizeL<>1)
+  iSizeL=1 bChgSize=TRUE
+ENDIF
+IF (iSizeR<>1)
+  iSizeR=1 bChgSize=TRUE
+ENDIF
+;
+GOTOF _SAVE
+
+;======
+_TYPE2:
+;======
+;
+IF (rColLen > (rMaxToLen+rToTol))
+  ;
+  ;----------------------------
+  ;-- L>MaxToLen -> Unzulaessig
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+
+IF (rColLen > (450+rToTol))
+  ;----------------------------------
+  ;--2a) L>450 , Dmax=40  , Rmax=20
+  ;--2b) L>450 , Dmax=125 , Rmax=62.5
+  IF (rColRad < 0)
+    rColRad=62.5
+  ENDIF
+  IF (rColRad > (62.5+rToTol))
+    iChkRes=-3
+    GOTOF _END
+  ENDIF
+  ;
+  ;-- Nachbarplaetze anpassen
+  IF (rColRad > (20+rToTol))
+    iSizeDef=3
+  ELSE
+    iSizeDef=2
+  ENDIF
+ELSE
+  IF (rColLen > (300+rToTol))
+    ;----------------------------------
+    ;--2a) L>300 , Dmax=70  , Rmax=35
+    ;--2b) L>300 , Dmax=125 , Rmax=62.5
+    IF (rColRad < 0)
+      rColRad=62.5
+    ENDIF
+    IF (rColRad > (62.5+rToTol))
+      iChkRes=-3
+      GOTOF _END
+    ENDIF
+    ;-- Nachbarplaetze anpassen
+    IF (rColRad > (35+rToTol))
+      iSizeDef=3
+    ELSE
+      iSizeDef=2
+    ENDIF
+  ELSE
+    IF (rColLen > (180+rToTol))
+      ;----------------------------------
+      ;--2a) L>180 , Dmax=100 , Rmax=50
+      ;--2b) L>180 , Dmax=125 , Rmax=62.5
+      IF (rColRad < 0)
+        rColRad=62.5
+      ENDIF
+      IF (rColRad > (62.5+rToTol))
+        iChkRes=-3
+        GOTOF _END
+      ENDIF
+      ;-- Nachbarplaetze anpassen
+      IF (rColRad > (50+rToTol))
+        iSizeDef=3
+      ELSE
+        iSizeDef=2
+      ENDIF
+    ELSE
+      ;----------------------------------
+      ;--2a) L<180 , Dmax=125 , Rmax=62.5
+      ;--2b) L<180 , Dmax=125 , Rmax=62.5
+      IF (rColRad < 0)
+        rColRad=62.5
+      ENDIF
+      IF (rColRad > (62.5+rToTol))
+        iChkRes=-3
+        GOTOF _END
+      ENDIF
+      ;-- Nachbarplaetze anpassen
+      iSizeDef=2
+    ENDIF
+  ENDIF
+ENDIF
+
+;-------------------------
+;-- Nachbarplaetze pruefen
+;
+IF (iSizeL <> iSizeDef)
+  iSizeL=iSizeDef bChgSize=TRUE
+ENDIF
+IF (iSizeR <> iSizeDef)
+  iSizeR=iSizeDef bChgSize=TRUE
+ENDIF
+;
+GOTOF _SAVE
+
+;======
+_TYPE5:
+;======
+;
+;----------------------------
+;-- L>MaxToLen -> Unzulaessig
+IF (rColLen > (rMaxToLen+rToTol))
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+
+IF (rColLen > (450+rToTol))
+  ;----------------------------------
+  ;--5a) L>450 , Dmax=60  , Rmax=30
+  ;--5b) L>450 , Dmax=125 , Rmax=62.5
+  IF (rColRad < 0)
+    rColRad=62.5
+  ENDIF
+  IF (rColRad > (62.5+rToTol))
+    iChkRes=-3
+    GOTOF _END
+  ENDIF
+  ;-- Nachbarplaetze anpassen
+  IF (rColRad > (30+rToTol))
+    iSizeDef=3
+  ELSE
+    iSizeDef=2
+  ENDIF
+ELSE
+  IF (rColLen > (300+rToTol))
+    ;----------------------------------
+    ;--5a) L>300 , Dmax=125 , Rmax=62.5
+    ;--5b) L>300 , Dmax=200 , Rmax=100
+    IF (rColRad < 0)
+      rColRad=100
+    ENDIF
+    IF (rColRad > (100+rToTol))
+      iChkRes=-3
+      GOTOF _END
+    ENDIF
+    ;-- Nachbarplaetze anpassen
+    IF (rColRad > (62.5+rToTol))
+      iSizeDef=3
+    ELSE
+      iSizeDef=2
+    ENDIF
+  ELSE
+    IF (rColLen > (260+rToTol))
+      ;---------------------------------
+      ;--5a) L>260 , Dmax=200 , Rmax=100
+      ;--5b) L>260 , Dmax=250 , Rmax=125
+      IF (rColRad < 0)
+        rColRad=125
+      ENDIF
+      IF (rColRad > (125+rToTol))
+        iChkRes=-3
+        GOTOF _END
+      ENDIF
+      ;-- Nachbarplaetze anpassen
+      IF (rColRad > (100+rToTol))
+        iSizeDef=3
+      ELSE
+        iSizeDef=2
+      ENDIF
+    ELSE
+      IF (rColLen > (180+rToTol))
+        ;-----------------------------------
+        ;--5a) L>180 , Dmax=200 , Rmax=100
+        ;--5b) L>180 , Dmax=325 , Rmax=162.5
+        IF (rColRad < 0)
+          rColRad=162.5
+        ENDIF
+        IF (rColRad > (162.5+rToTol))
+          iChkRes=-3
+          GOTOF _END
+        ENDIF
+        ;-- Nachbarplaetze anpassen
+        IF (rColRad > (100+rToTol))
+          iSizeDef=3
+        ELSE
+          iSizeDef=2
+        ENDIF
+      ELSE
+        ;--------------------------------------
+        ;--5a) L<180 , Dmax=250 , Rmax=125
+        ;--5b) L<180 , Dmax=325 , Rmax=162.5
+        IF (rColRad < 0)
+          rColRad=162.5
+        ENDIF
+        IF (rColRad > (162.5+rToTol))
+          iChkRes=-3
+          GOTOF _END
+        ENDIF
+        IF (rColRad > (125+rToTol))
+          iSizeDef=3
+        ELSE
+          iSizeDef=2
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+ENDIF
+
+;-------------------------
+;-- Nachbarplaetze pruefen
+;
+IF (iSizeL <> iSizeDef)
+  iSizeL=iSizeDef bChgSize=TRUE
+ENDIF
+IF (iSizeR <> iSizeDef)
+  iSizeR=iSizeDef bChgSize=TRUE
+ENDIF
+
+;=====
+_SAVE:
+;=====
+;
+;------------------------------------------
+;-- Daten in der Werkzeugverwaltung sichern
+;
+IF (iMode>0)
+  ;
+  IF (bChgCol)
+    ;----------------------------
+    ;-- Kollisionsdaten geaendert
+    $TC_TPC7[iTNo]=rColLen * grInchMetr
+    $TC_TPC8[iTNo]=rColRad * grInchMetr
+  ENDIF
+  ;
+  IF (bChgSize)
+    ;---------------------------
+    ;-- Nachbarplaetze geaendert
+    IF (iMagNo>0) AND (iPotNo>0)
+      IF ($TC_MPP6[iMagNo,iPotNo]==iTNo)
+        $TC_MPP6[iMagNo,iPotNo]=0
+        $TC_TP3[iTNo]=iSizeL
+        $TC_TP4[iTNo]=iSizeR
+        $TC_MPP6[iMagNo,iPotNo]=iTNo
+        iChkRes=1
+      ELSE
+        ;
+        GOTOF _END
+      ENDIF
+    ELSE
+      $TC_TP3[iTNo]=iSizeL
+      $TC_TP4[iTNo]=iSizeR
+      iChkRes=1
+    ENDIF
+  ENDIF
+ENDIF
+
+;====
+_END:
+;====
+;
+RET
+
+
+;-----------------
+;-- Alarm ausgeben
+HandleAlarm:
+MSG("")
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+
+RET
+
+

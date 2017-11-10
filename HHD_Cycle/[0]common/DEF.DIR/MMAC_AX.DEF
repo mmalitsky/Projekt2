@@ -1,0 +1,69 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MMAC_BS.DEF
+;# Task:      Macro Definition
+;# Version:   V06.00.08
+;# Date:      01.07.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Herstellerspezifische Makros
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 01.07.2017 / Simons
+; - Einfuehrung Makro fuer YP
+;
+; V06.00.06 - 14.04.2017 / Simons
+; - Neuversionierung
+; - Einschalten der Ruckbegrenzung
+;
+; V06.00.02 - 16.03.2016 / Simons
+; - Einfuehrung Makro fuer U
+;
+; V06.00.01 - 25.07.2015 / Simons
+; - Einfuehrung Makros'fuer X,Y,Z
+;
+; V06.00.00 - 18.07.2015 / Simons
+; - Prototyp / Neu
+;
+; V04.00.00 - November 2014 / Hüttner
+;
+;-------------------------------------
+
+;Kein Fahren ohne Ruckbegrenzung
+DEFINE BRISK AS SOFT
+
+;Achsnamen
+;Adressierung mit Maschinenachsname $MN_AXCONF_MACHAX_NAME_TAB
+;
+DEFINE mcAxX AS AXNAME("X")
+DEFINE mcAxY AS AXNAME("Y")
+DEFINE mcAxZ AS AXNAME("Z")
+DEFINE mcAxA AS AXNAME("A")
+DEFINE mcAxB AS AXNAME("B")
+DEFINE mcAxC AS AXNAME("C")
+DEFINE mcAxSP1 AS AXNAME("CS1")
+
+DEFINE mcAxX1 AS AXNAME("XT1")
+DEFINE mcAxZ1 AS AXNAME("ZT1")
+DEFINE mcAxV1 AS AXNAME("VT1")
+DEFINE mcAxV2 AS AXNAME("VT2")
+DEFINE mcAxDGRot AS AXNAME("CT1")
+DEFINE mcAxFH AS AXNAME("U")
+
+DEFINE mcAxBM1 AS AXNAME("BM1") 
+DEFINE mcAxPalY AS AXNAME("YP1")
+
+M30
+

@@ -1,0 +1,363 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CREA_POS.SPF
+;# Task:      Generiert POS Programm
+;# Version:   V06.00.08
+;# Date:      25.09.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 25.09.2017 / Simons
+; - Wenn falsche Maschinennummer -> CFG Lesen
+;
+; V06.00.08 - 28.07.2017 / Simons
+; - NG hinzu
+;
+; V06.00.08 - 01.07.2017 / Simons
+; - Neuversionierung
+; - APCNC hinzu
+;
+; V06.00.07 - 22.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+; - sMode hinzu
+; - Ersetzt ab V06.00.07 POS_PROG
+;
+; V06.00.06 - 05.05.2017 / Simons
+; - Leerzeichen entfernen hinzu
+; - formale Aenderungen
+;
+; V06.00.06 - 20.12.2016 / Simons
+; - Neuversionierung
+; - Cas nur noch mit HHDTM
+;
+; V06.00.05 - 25.11.2016 / Simons
+; - Option Analogwertgeber Spindel
+;   SP_CLMP_ANA, EES, sHeadType
+;
+; V06.00.05 - 12.10.2016 / Simons
+; - Neuversionierung
+; - MC/MNOptions hinzu
+;
+; V06.00.04 - 29.07.2016 / Simons
+; - Neuversionierung
+; - DEF...
+;
+; V06.00.02 - 13.04.2016 / Simons
+; - HHD/OLD/NEW hinzu
+;
+; V06.00.00 - 16.06.2015 / Simons
+; - ProtoTyp / Neu
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Generiert aus den Templates CFG.SPF
+; in SPF_DIR und POS_MC und POS_MN in
+; CMA_DIR ein PosProgramm in SPF_DIR.
+;
+; Der Name des Posprogramms wird aus
+; gsMachIdent generiert.
+;
+; z.B. "POS_D1009100x001.SPF"
+;      aus
+;      gsMachIdent = "D.1009100.001"
+;
+; In diesem PosProgramm werden spaeter beim
+; Einrichten die Anpassungen gemacht.
+;
+; Das Programm wird neu erstellt, bis
+; CFG.SPF nicht mehr oder das POS_xxx.SPF
+; im SPF._DIR gefunden wird.
+;
+; Nach Erstellung erfolgt der Aufruf
+; des Programms.
+;
+; Aufrufparameter:
+; ----------------
+;
+; sMode = INIT  - Aufruf im NC_INIT1
+;         APP   - Anhaengen der neugenerierten Zeilen
+;                 an das vorhandene PosProgramm
+;         sonst - Neuanlegen
+;
+;-------------------------------------
+
+PROC CREA_POS(STRING[32] sMode)
+
+DEF STRING[32] sCycName="CREA_POS V06.00.08", sAlarmParam="", sAux=",", scSetDir="/_N_CMA_DIR/_N_", scSPFDir="/_N_SPF_DIR/_N_", scSPF="_SPF", sMCType, sMNType, sResult, sHeadType
+;
+DEF STRING[128] sName, sCopyName, sMC, sMN, sCFG
+DEF STRING[200] sMCOptions, sMNOptions
+DEF STRING[255] sMCIdent
+;
+DEF BOOL bIsSPF=FALSE, bReleaseRetry=TRUE, bInit, bNew, bAppend
+;
+DEF INT iAlarmNo=0, iError=0, iCount=0
+
+sMode=TOUPPER(sMode) bInit=(sMode=="INIT") bNew=(sMode=="NEW") bAppend=(sMode=="APPEND") 
+
+sCFG=(scSetDir<<"CFG"<<scSPF)
+IF (NOT ISFILE(sCFG))
+  sCFG=(scSPFDir<<"CFG"<<scSPF) bIsSPF=TRUE
+ENDIF
+
+;=====
+RETRY:
+;=====
+;
+IF (gsMachIdent=="")
+  ;
+  ;Maschinennummer ist noch unbekannt
+  ;
+  IF  ISFILE(sCFG)
+    ;
+    ;CFG.SPF beinhaltet die Maschinennummer
+    FileRead("gsMachIdent",sCFG,sMCIdent)
+    ;Hochkommas entfernen
+    EXECSTRING("gsMachIdent="<<sMCIdent)
+    bReleaseRetry=FALSE
+    ;
+  ELSE
+    iAlarmNo=AL_ProgNotFound67 sAlarmParam="CFG.SPF"
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (gsMachIdent=="")
+    ;Maschinennummer immer noch unbekannt
+    iAlarmNo=AL_MissingMachIdent67 sAlarmParam=""
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+;
+;Name des Posprogramms z.B. "POS_D1009100x001.SPF"
+MC_NAME(gsMachIdent,sResult)
+sName=scSPFDir<<"POS_"<<sResult<<scSPF
+;
+IF ISFILE(sName)
+  ;
+  ;PosProgramm existiert schon
+  ;
+  ;NC_INIT1 -> Aufruf
+  IF (bInit) GOTOF CALL_POSPROG
+  ;
+  IF (bAppend)
+    ;
+    MSG("POS_"<<sResult<<" already exists ! - Append ?")
+    M0
+  ELSE
+    ;
+    IF (bNew)  
+      ;
+      MSG("POS_"<<sResult<<" already exists ! - OVERWRITE ?")
+      M0
+    ELSE
+      ;
+      REPEAT
+        iCount=iCount+1 sCopyName=scSPFDir<<"POS_"<<sResult<<"_"<<iCount<<scSPF
+      UNTIL (NOT ISFILE(sCopyName))
+      ;
+      FILECOPY(iError,sName,sCopyName)
+    ENDIF
+    ;
+    ;vorhandenes PosProgramm Loeschen
+    DELETE(iError,sName)
+  ENDIF
+  ;
+  STOPRE
+  MSG("")
+ELSE
+  ;
+  ;PosProgramm existiert noch nicht
+  ;
+  IF (gsMachIdent<>"")AND(bInit)AND(bReleaseRetry)
+    ;
+    ;Falsche Maschinennummer -> CFG Datei lesen
+    gsMachIdent=""
+    GOTOB RETRY
+  ENDIF
+ENDIF
+
+IF (bInit)
+  ;
+  ;PopUp-Message: Soll ein neues PosProgramm angelegt werden?
+  MsgBox("$89666","CLEAR BSTART")
+  IF (gsMsgBoxResult<>"BSTART")
+    RET
+  ENDIF
+ENDIF
+
+;Konfiguration Maschine und Magazin
+;----------------------------------
+;
+;Maschinentyp
+CFG_MAN("MC",sMCType)
+IF (sMCType=="")
+  iAlarmNo=AL_WrongCFG67 sAlarmParam="MC"
+  GOTOF HandleAlarm
+ENDIF
+
+;MagazinTyp
+CFG_MAN("MN",sMNType)
+IF (sMNType=="")
+  iAlarmNo=AL_WrongCFG67 sAlarmParam="MN"
+  GOTOF HandleAlarm
+ENDIF
+
+;Optionen Maschine
+CFG_MAN("TILTHEAD",sResult)
+IF (sResult=="")
+  CFG_MAN("SWIVELHEAD",sResult)
+  IF (sResult=="")
+    CFG_MAN("BA",sResult)
+    IF (sResult=="")
+      CFG_MAN("NG",sResult)
+      IF (sResult=="")
+        sResult="MC4X"
+      ENDIF
+    ENDIF
+  ENDIF
+ENDIF
+sMCOptions=sResult sHeadType=sResult
+;
+CFG_MAN("SYSTEM",sResult)
+IF (sResult<>"")
+  sMCOptions=sMCOptions<<sAux<<sResult
+ENDIF
+;
+CFG_MAN("SP_CLMP_ANA",sResult)
+IF (sResult<>"")
+  sMCOptions=sMCOptions<<sAux<<sResult
+ENDIF
+;
+CFG_MAN("EES",sResult)
+IF (sResult<>"")
+  sMCOptions=sMCOptions<<sAux<<sResult
+ENDIF
+;
+CFG_MAN("APCNC",sResult)
+IF (sResult<>"")
+  sMCOptions=sMCOptions<<sAux<<sResult
+ENDIF
+
+;Optionen Magazin
+CFG_MAN("TC",sResult)
+sMNOptions=sResult
+
+;Gewaehlte Konfiguration im PosProgramm zusammenstellen
+;------------------------------------------------------
+;
+;Konfiguration aus CFG.SPF
+WRITE(iError,sName,"DEF STRING[32] sResult")
+;
+WRITE(iError,sName,"")
+IF (sMCOptions<>"")
+  WRITE(iError,sName,";Machine  : "<<sMCType<<" - "<<sMCOptions)
+ELSE
+  WRITE(iError,sName,";Machine  : "<<sMCType)
+ENDIF
+IF (sMNOptions<>"")
+  WRITE(iError,sName,";Magazine : "<<sMNType<<" - "<<sMNOptions)
+ELSE
+  WRITE(iError,sName,";Magazine : "<<sMNType)
+ENDIF
+;
+FILECOPY(iError,sCFG,sName,";#",sMNType,sMCType,,TRUE)
+IF (iError<>0)
+  iAlarmNo=AL_CopyError67 sAlarmParam=<<iError
+  GOTOF HandleAlarm
+ENDIF
+;
+sMC=scSetDir<<"POS_MC"<<scSPF
+IF (NOT ISFILE(sMC))
+  iAlarmNo=AL_ProgNotFound67 sAlarmParam=sMCType
+  GOTOF HandleAlarm
+ENDIF
+;
+sMN=scSetDir<<"POS_MN"<<scSPF
+IF (NOT ISFILE(sMN))
+  iAlarmNo=AL_ProgNotFound67 sAlarmParam=sMNType
+  GOTOF HandleAlarm
+ENDIF
+;
+;Vorgaben aus POS_MC
+FILECOPY(iError,sMC,sName,";#",sMCType,sMNType,sMCOptions,TRUE)
+IF (iError<>0)
+  iAlarmNo=AL_CopyError67 sAlarmParam=<<iError
+  GOTOF HandleAlarm
+ENDIF
+;
+;Vorgaben aus POS_MN
+FILECOPY(iError,sMN,sName,";#",sMNType,sMCType,sHeadType<<sAux<<sMNOptions,TRUE)
+IF (iError<>0)
+  iAlarmNo=AL_CopyError67 sAlarmParam=<<iError
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (sMNType=="CAS")
+  ;
+  ;zusaetzliche Vorgaben aus POS_MN
+  ;
+  IF (gbMagWithFixedGuide)
+    sAux=sMNType<<"_OLD"
+  ELSE
+    sAux=sMNType<<"_NEW"
+  ENDIF
+  ;
+  FILECOPY(iError,sMN,sName,";#",sAux,sMCType,sHeadType<<sAux<<sMNOptions,TRUE)
+  IF (iError<>0)
+    iAlarmNo=AL_CopyError67 sAlarmParam=<<iError
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+;
+STOPRE
+;
+IF (bIsSPF)
+  ;
+  ;CFG.SPF -> CMA.DIR
+  FILECOPY(iError,sCFG,(scSetDir<<"CFG"<<scSPF))
+  ;
+  IF (iError==0)
+    DELETE(iError,sCFG)
+  ENDIF
+ENDIF
+;
+IF ISFILE(sName) GOTOF CALL_POSPROG
+;
+;PosProgramm konnte nicht erstellt werden
+MakeAlarmParam(sAlarmParam,scSPFDir,"POS_"<<sResult<<scSPF,3)
+iAlarmNo=AL_WrongCFG67
+;
+;===========
+HandleAlarm:
+;===========
+;
+IF (bInit)
+  OUT_StartUpFinished1=FALSE
+ENDIF
+
+SETAL(iAlarmNo, sAlarmParam)
+;
+LOOP
+  M0
+ENDLOOP
+
+;============
+CALL_POSPROG:
+;============
+;
+;PosProgramm wurde erfolgreich erstellt
+;
+;Vorbesetzung einlesen
+CALL sName
+;
+RET

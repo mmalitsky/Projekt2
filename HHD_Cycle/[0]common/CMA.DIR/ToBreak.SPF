@@ -1,0 +1,860 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ToBreak.SPF
+;# Task:      BBK im Magazin
+;# Version:   V06.00.08
+;# Date:      20.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: ALL
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 20.08.2017 / Simons
+; - Neuversionierung
+; - iChkRes, mcDBB_TlCheckCMD hinzu
+; - OEM_TLData mit angepasster Funktion
+; - Nur bei Fehler alle gi... Loeschen
+; - Save entfernt
+; - formale Aenderungen
+;
+; V06.00.07 - 23.06.2017 / Simons
+; - Einfuehrung MakeAlarmParam
+; - Belegung Aktualisieren korrigiert
+; - giTlInSp beim Ablegen ins Magazin zuruecksetzen
+;
+; V06.00.07 - 14.05.2017 / Simons
+; - Neuversionierung
+; - gbPrevToBroken -> gbPrevToBrokenInt
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop-> grSyncPickupDrop
+; - Tldata(...)
+; - Formale Aenderungen
+;
+; V06.00.05 - 01.03.2017 / Simons
+; - Formale Aenderungen
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - Neuversionierung
+; - TM HHD (V04.02.01 / 06.09.2016, Balles)
+; - OEM_...
+; - bei iMode=4 -> Wz ins Magazin bringen
+; - iMode=5,6 hinzu
+;
+; V06.00.04 - 28.08.2016 / Simons
+; - Neuversionierung
+; - Korrigiert ... B_AND 'H40'
+; - Miksch hinzu
+; - mcbDBB_TlCheck... hinzu
+;
+; V06.00.03 - 10.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 16.04.2016 / Simons
+; - Zusammenfassung
+; - Einfuehrung
+;   - HHDTM
+;   - WaitCycEnd
+; - giNumRealMag,giMagNoLoadlist
+;
+; V04.02.00 - 01.03.2016 /  Fengler
+; - Vorlage (mit HG)
+;
+; V04.00.01 - 19.11.2014 /  Huettner
+; - Vorlage (ohne HG)
+;------------------------------------
+;
+;
+; Hauptzeitparallele mechanische Bohrerbruchkontrolle im Magazinraum
+; ------------------------------------------------------------------
+;
+; Fuer Kanal 2:
+; -------------
+; Werkzeug (vom HG/Mag) zur mechanischen Bohrerbruch-Einrichtung bringen,
+; pruefen lassen und wieder auf den Magazinplatz zurueckbringen.
+;
+; Pruefeinheit ist im Magazin angebracht
+; Tastersignal: 0= betaetigt  /  1= nicht betaetigt
+;
+; Eingangsparameter:
+; ------------------
+; iMode=
+; 0: hauptzeitparallele (mechan.) Bohrerbruchkontrolle
+;    unmittelbar nach dem Ausschleusen des Wz aus der Spindel
+;    (Standard-Modus)
+;    gbToCheckAtTC=TRUE: WzW wartet (am Ende), bis ausgeschleustes
+;                        Wz mittels BBK geprueft wurde (s. gbLastToBroken)
+;    gbToCheckAtTC=FALSE: Erst im naechsten WzW wird (ganz am Anfang) das
+;                         Ergebnis des im vorhergegangenen WzW ausgeschleusten
+;                         und anschl. auf Bohrerbruch geprueften Wz betrachtet
+; 1: hauptzeitparallele (mechan.) Bohrerbruchkontrolle,
+;    aus dem Bearbeitungsprogramm heraus angestossen
+; 2: Wz lernen (automatisch, wenn noch nicht erfolgt)
+; 3: Wz lernen und ablegen, falls Fehler beim Lernen
+; 4: Bohrerbruchkontrolle MSC Teachlauf
+; 5: wie 3 nur ohne Chip vergleichen
+; 6: wie 2 nur ohne Wz Ablegen
+;
+; sTName,iTDuploNo = Angabe des Werkzeuges  mit Wz-Bezeichner und DuploNummer
+; iBreakCutNo      = Nummer der auf Bohrerbruch zu pruefenden Schneide
+; iUnloadMag       = Nummer des Magazins, wohin das gebrochene Wz entladen werden soll
+;                    0: kein Entladen (d.h. Wz auf alten Platz)
+;                   >0: Auf Entladekassette
+;
+; Wird angestossen durch
+; - Zyklus ToPrep (Kanal 2) unmittelbar nach dem Werkzeugwechsel
+; - indirekt aus dem Bearbeitungsprogramm (Kanal 1) ueber das
+;   Systemprogramm Sys_Cha2.spf (Kanal 2)
+;
+; Zur Beachtung:
+;  - Es koennen keine Handwerkzeuge auf Bohrerbruch geprueft werden, weil diesen
+;    die Zuordnung zu einem (realen) Magazin fehlt. Fuer diese muesste das Wz erst
+;    in die Spindel eingewechselt, dann vom HG geholt, geprueft und wieder ueber die
+;    Spindel ausgewechselt werden. Hauptzeitparallel laesst sich dies nicht bewerk-
+;    stelligen
+;
+;------------------------------------
+
+PROC ToBreak (INT iMode, STRING[32] sTName, INT iTDuploNo, INT iBreakCutNo, INT iUnloadMag) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="ToBreak V06.00.08", sAlarmParam="", sAlarmParamBBK=""
+;
+DEF BOOL bIsBroken=FALSE, bReset=FALSE, bResetAll=FALSE, bTmp, bTakeBack, bToolCheckOn, bDoCheck, bNoTlInHG, bNoTlInDG, bMeasTlInMag, bSelMeasNoNewVal, bTlMeasured, bEnabled
+DEF BOOL bDGIsWM307, bMagIsChain, bMagIsPickUpDisk, bMagIsMiksch, bMagIsCas, bChipCompare, bNoTakeBack
+;
+DEF INT iTNo=0, iAlarmNoShown=0, iAlarmNo=0, iAlarmNoBBK=0, iSrcMagNo=0, iSrcPotNo=0, icMeas=1, icCheck=2, icMSCTeach=4, icMagNo=1
+DEF INT iToDo, iCount, iTmp, iTmpMagNo, iTmpPotNo, iIsFixedPlace, iTNoProb, iTNoMag, iMagPos, iActMagNo, iActPotNo, iTransLoc, iChkRes, iTNoChip
+;
+DEF REAL rLength
+
+;Konfiguration
+bDGIsWM307=((giDGType B_AND 'B100')<>0) bMagIsCas=((giMagType B_AND 'B1000010')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsPickUpDisk=((giMagType B_AND 'B1')<>0) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307))
+;
+;Bestimmung des Skalierungssystems
+IF ($MN_SCALING_SYSTEM_IS_METRIC)
+  G71
+ELSE
+  G70
+ENDIF
+
+IF (iMode==0)
+  ;
+  IF (NOT gbToCheckAtTC)
+    ;
+    gbPrevToBrokenInt=FALSE
+  ELSE
+    gbLastToBroken=FALSE
+  ENDIF
+  bReset=TRUE
+ENDIF
+;
+IF (iMode==5)
+  iMode=3 bChipCompare=FALSE
+ENDIF
+;
+IF (iMode==6)
+  iMode=2 bNoTakeBack=TRUE
+ENDIF
+;
+IF (iMode==2)
+  gbLastToBroken=FALSE
+ENDIF
+
+;Statusbits (mcDBB_TlCheckCMD)an PLC bzw. NC-Synchronaktionen Messeinrichtung nicht vorhanden/nicht angewaehlt (mcDBB_TlCheckCMD=1 -> BBK aktiv)
+;(STOPRE)
+IF (bMagIsCas)
+  bToolCheckOn=(mcbDBB_TlCheckMagOn) mcDBB_TlCheckCMD=(bToolCheckOn)
+ELSE
+  bToolCheckOn=(mcbDBB_TlCheckOn) mcDBB_TlCheckCMD=(bToolCheckOn)
+ENDIF
+;
+IF (NOT bToolCheckOn) GOTOF ENDE
+
+IF ($P_SUBPAR[1])AND($P_SUBPAR[2])
+  ;
+  IF (NOT $P_SUBPAR[3])
+    iTDuploNo=1
+  ENDIF
+  ;
+  IF (sTName=="")OR(sTName=="0")
+    iAlarmNo=AL_InvalidMissingInput sAlarmParam="sTName="<<sTName
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (iTDuploNo<=0)
+    iAlarmNo=AL_InvalidMissingInput sAlarmParam="iTDuploNo="<<iTDuploNo
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  iTNo=GETT(sTName,iTDuploNo)
+  IF (iTNo<=0)
+    MakeAlarmParam(sAlarmParam,sTName,<<iTDuploNo)
+    iAlarmNo=AL_TlNotFound
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[4])
+    iBreakCutNo=1
+  ENDIF
+  ;
+  IF (NOT $P_SUBPAR[5])
+    iUnloadMag=0
+  ENDIF
+ELSE
+  ;
+  iMode=0 iTNo=giToNoProb
+  IF (iTNo<=0)
+    bResetAll=TRUE
+    GOTOF ENDE
+  ELSE
+    ;
+    IF (NOT $P_TOOLEXIST[iTNo])
+      ;
+      IF (NOT gbToCheckAtTC)
+        gbPrevToBrokenInt=FALSE
+      ELSE
+        gbLastToBroken=FALSE
+      ENDIF
+      bResetAll=TRUE
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+  sTName=$TC_TP2[iTNo] iTDuploNo=$TC_TP1[iTNo] iBreakCutNo=-1 iUnloadMag=0
+ENDIF
+
+IF (iMode>1)
+  ;
+  IF (iMode==2)OR(iMode==3)
+    ;
+    ;Werkzeug lernen
+    iToDo=icMeas
+  ENDIF
+  ;
+  IF (iMode==4)
+    ;
+    ;MSC Teachen
+    iToDo=icMSCTeach
+  ENDIF
+ELSE
+  ;
+  ;Werkzeug pruefen
+  iToDo=icCheck
+ENDIF
+
+TlData(iTNo)
+;
+IF (TL_Manual)AND(iMode==0)
+  ;
+  ;handwWz und hauptzeitparallel BBK -> Keine Pruefung
+  ;
+  IF (NOT gbToCheckAtTC)
+    gbPrevToBrokenInt=FALSE
+  ELSE
+    gbLastToBroken=FALSE
+  ENDIF
+  bResetAll=TRUE
+  GOTOF ENDE
+ENDIF
+
+;Eigenschaften Wz Pruefen
+OEM_TlData(iTNo,mcGetMeasProp,iBreakCutNo)
+;
+IF (NOT OEM_bValidMeasCut)
+  ;zu pruefende Schneidennummer nicht spezifiziert oder falsch
+  MakeAlarmParam(sAlarmParam,sTName,"D="<<iBreakCutNo,2)
+  iAlarmNo=AL_TlMeasInvalidCutNo
+  GOTOF HandleAlarm
+ENDIF
+;
+;Schneide / PruefLaenge /  Abwahl Kegelreiniger / Werkzeug soll geprueft werden / Wz Vermessen ohne Datenuebernahme / Wz ist vermessen / SollLaenge Pruefen
+iBreakCutNo=OEM_iCutNo rLength=OEM_rCheckLen gbHGNoTapeCl=OEM_bSelHGNoTapeCl bDoCheck=OEM_bSelCheck bSelMeasNoNewVal=OEM_bSelMeasNoNewVal bTlMeasured=OEM_bTlMeasured
+
+;Keine Pruefung
+IF (NOT bDoCheck)
+  bResetAll=TRUE
+  GOTOF ENDE
+ENDIF
+
+IF ((rLength==0.0)OR(NOT bTlMeasured))AND(iToDo<>icMSCTeach)AND(NOT bSelMeasNoNewVal)
+  ;
+  ;Werkzeug muss vermessen werden, Sollwert aus den Geodaten ableiten
+  iToDo=icMeas rLength=$TC_DP3[iTNo,iBreakCutNo]+$TC_DP12[iTNo,iBreakCutNo]
+ENDIF
+;
+IF (rLength<grMinMeasToolLen)
+  MakeAlarmParam(sAlarmParam,sTName,<<iTDuploNo)
+  iAlarmNo=AL_CheckLenInvalid
+  GOTOF HandleAlarm
+ENDIF
+
+IF (iMode==0)
+  ;Wz Pruefen/Messen
+  giToBreakCtrlState=2
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+;Belegung Aktualisieren
+giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0 iTransLoc=0
+IF (gbWithHG)
+  giTNoHg=$TC_MPP6[9998,mcLocHG] iTransLoc=mcLocHG
+ELSE
+  IF (gbWithDG)
+    giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2] iTransLoc=mcLocDG1
+  ENDIF
+ENDIF
+IF (bMagIsChain)OR(bMagIsPickUpDisk)
+  ;Scheibe/Kette
+  iTmp=OUTA_ActPosV1
+  IF (iTmp>0)
+    iTNoMag=$TC_MPP6[icMagNo,iTmp]
+  ENDIF
+ENDIF
+
+IF (bMagIsMiksch)
+  ;
+  IF (iTNo==giTNoSp)OR((iTNo==giTNoDG1)AND(gbDg2MagSide))OR((iTNo==giTNoDG2)AND(NOT gbDg2MagSide))
+    ;
+    ;PruefWz in Sp oder nicht auf Magazinseite
+    MakeAlarmParam(sAlarmParam,sTName,<<iTDuploNo)
+    iAlarmNo=AL_TlNotInMag
+    GOTOF ENDE
+  ENDIF
+  ;
+  ;Wz im DG ist nicht das zu pruefende -> DG Entladen
+  bEnabled=((giTNoDg1>0)AND(giTNoDg1<>iTNo)AND(NOT gbDg2MagSide))OR((giTNoDg2>0)AND(giTNoDg2<>iTNo)AND(gbDg2MagSide))
+ELSE
+  ;
+  IF (gbWithHG)
+    ;
+    IF (iTNo==giTNoSp)OR(iTNo==giTNoDG1)OR(iTNo==giTNoDG2)
+      ;PruefWz in Sp/DG1/DG2
+      MakeAlarmParam(sAlarmParam,sTName,<<iTDuploNo)
+      iAlarmNo=AL_TlNotInMag
+      GOTOF ENDE
+    ENDIF
+    ;
+    ;Wz im HG ist nicht das zu pruefende -> HG Entladen
+    bEnabled=(giTNoHg>0)AND(giTNoHg<>iTNo)
+  ELSE
+    bEnabled=FALSE
+  ENDIF
+ENDIF
+;
+IF (bEnabled)
+  ;
+  ;Falsches Wz im HG/DG -> Im Magazin Ablegen
+  ;
+  PutTool
+ENDIF
+
+;Status
+;------
+bNoTlInDG=(bMagIsMiksch)AND(giTNoDg1<=0)AND(giTNoDg2<=0)
+bNoTlInHG=(gbWithHG)AND(giTNoHg<=0)
+bMeasTlInMag=(NOT gbWithHG)AND(NOT bMagIsMiksch)
+;
+;Im Normalfall bleibt das Wz nach der BBK im HG/DG.
+;
+;Ausnahmen:
+; - kein Werkzeug im DG/HG oder das zu pruefende Wz ist (bereits)im DG/HG
+; - Wz wird eigens zum Messen in HG/DG2 geholt
+; - BBK kalibrieren
+; - iMode=3 und Wz gebrochen
+;
+IF (gbWithHG)
+  bTakeBack=(NOT bNoTakeBack)AND((giTNoHG<=0)OR(giTNoHG<>iTNo)OR(iMode==0))
+ELSE
+  IF (bMagIsMiksch)
+    ;Pruefung nach Einsatz, dann ins Magazin
+    bTakeBack=(NOT bNoTakeBack)AND((giTNoDG2<=0)OR(giTNoDG2<>iTNo)OR(iMode==0))
+  ELSE
+    bTakeBack=FALSE
+  ENDIF
+ENDIF
+;
+IF (bNoTlInDG)OR(bNoTlInHG)OR((bMeasTlInMag)AND(iTNoMag<>iTNo))
+  ;
+  ;zu pruefendes Wz (noch) nicht im HG/DG/Mag
+  ;
+  ;aktuellen realen Platz des zu pruefenden Werkzeugs ermitteln
+  GetTlLoc(0,iTNo, iActMagNo, iActPotNo)
+  ;
+  IF (iActMagNo<=0)OR(iActPotNo<=0)
+    ;Wz ist keinem realen Magazin zugeordnet
+    MakeAlarmParam(sAlarmParam,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+    iAlarmNo=AL_TlNotInMagazine67
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  ;PruefWz ...
+  IF (gbWithHG)
+    ;... in SP/DG1/DG2
+    bTmp=(iActPotNo<>mcLocHG)
+  ELSE
+    IF (bMagIsMiksch)
+      ;... in Sp
+      bTmp=(iActPotNo==mcLocSp)
+    ELSE
+      ;... nicht im Magazin
+      bTmp=TRUE
+    ENDIF
+  ENDIF
+  ;
+  IF (iActMagNo==9998)AND(bTmp)
+    ;Wz auf dem falschen Zwischenspeicherplatz
+    iAlarmNo=AL_MoveFromToDgSpNotAllowed
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+;
+IF (bNoTlInHG)OR(bNoTlInDG)
+  ;
+  ;zu pruefendes Wz (noch) nicht im HG/DG (HG bzw. DG's leer)
+  ;
+  IF (iActMagNo>=1)AND(iActMagNo<=giNumRealMag)
+    ;
+    ;Wz noch auf seinem Magazinplatz
+    ;
+    iSrcMagNo=iActMagNo iSrcPotNo=iActPotNo
+  ELSE
+    ;
+    ;Wz im Speicher 9998/9999
+    ;
+    ;alten Wz-Platz auslesen und iSrcMagNo/iSrcPotNo zuweisen
+    GetTlLoc(1,iTNo,iSrcMagNo,iSrcPotNo)
+  ENDIF
+  ;
+  ;Magazinplatzdaten des zu transportierenden Wz's ermitteln (GetTool / MovTool)
+  GetPlDat(iSrcMagNo,iSrcPotNo,iSrcMagNo,iSrcPotNo)
+  ;
+  IF (iActMagNo>=1)AND(iActMagNo<=giNumRealMag)
+    ;
+    ;Kennungen Lesen
+    OEM_TlData(iTNo)
+    ;
+    gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+    ;
+    ;Magazinplatz anfahren und zu pruefendes Wz greifen
+    GetTool(FALSE, iTNo, iSrcMagNo, iSrcPotNo)
+    ;
+    ToAckn(TRUE,5,2,iTNo,iTNo,9998,iTransLoc,iSrcMagNo,iSrcPotNo,1)
+    ;
+    ;HG geklemmt vorne an Quellmagazinplatz / HG geklemmt vertikal gesenkt an Quellmagazinplatz
+    giMagState=82 grSyncPickupDrop=0
+    ;
+  ENDIF
+  IF (iAlarmNo>0)
+    ;
+    IF (iAlarmNo<67000)
+      ; RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+      SETAL(iAlarmNo,sAlarmParam)
+    ELSE
+      ; zum alten Alarm kein SETAL, da bereits ausgegeben, aber:
+      IF (iAlarmNo==AL_VerifyTlPosition67)
+        ; um STOP auszuloesen
+        SETAL(AL_StopDueToErrors,"")
+      ENDIF
+    ENDIF
+    ; da bereits anzeigt
+    iAlarmNoShown=iAlarmNo
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+;
+IF (bMeasTlInMag)
+  ;
+  ;Wz Pruefung im Magazin
+  ;
+  IF (iTNoMag<>iTNo)
+    ;
+    ;zu pruefendes Wz (noch) nicht in Pruefposition
+    ;
+    ;Platzdaten fuer zu transportierendes Wz
+    GetPlDat(iActMagNo,iActPotNo,0,0)
+    ;
+    ;zu pruefendes Wz in Pruefposition bringen
+    MovTool(mcTaskAS_BBK,iTNo,9998,1,iAlarmNo,sAlarmParam)
+  ELSE
+    ;
+    ;zu pruefendes Wz ist schon in Pruefposition
+    ;
+    IF (bMagIsPickUpDisk)AND(NOT mcbDBB_DiskRetracted)
+      M_TcDiskRet1
+      STOPRE
+    ENDIF
+    ;
+    ;Werkzeug in Position fuer Bohrerbruchkontrolle
+    giMagState=22
+    ;
+  ENDIF
+ENDIF
+
+;Pruefung...
+IF (gbWithHG)
+  ;...im HG
+  giTNoHG=$TC_MPP6[9998,mcLocHG] iTNoProb=giTNoHG
+ELSE
+  ;
+  IF (bMagIsMiksch)
+    ;...im DG
+    IF (gbDg2MagSide)
+      giTNoDG2=$TC_MPP6[9998,mcLocDG2] iTNoProb=giTNoDG2
+    ELSE
+      giTNoDG1=$TC_MPP6[9998,mcLocDG1] iTNoProb=giTNoDG1
+    ENDIF
+  ELSE
+    ;...in Kette
+    iTmp=OUTA_ActPosV1 iTNoMag=0
+    IF (iTmp>0)
+      iTNoMag=$TC_MPP6[icMagNo,iTmp]
+    ENDIF
+    iTNoProb=iTNoMag
+  ENDIF
+ENDIF
+;
+IF (iTNoProb<=0)
+  iAlarmNo=AL_TlNotMoved sAlarmParam="iTNoProb="<<iTNoProb
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (iTNoProb<>iTNo)
+  MakeAlarmParam(sAlarmParam,$TC_TP2[iTNoProb],<<$TC_TP1[iTNoProb])
+  iAlarmNo=AL_WrongTlInHG
+  GOTOF HandleAlarm
+ENDIF
+
+IF (gbWithHG)
+  ;
+  ;Kennungen Lesen
+  OEM_TlData(iTNo)
+  gbHGBigTl=OEM_bBigTlHG gbHGHeavyTl=OEM_bHeavyTlHG gbHGNoTapeCl=OEM_bSelHGNoTapeCl iAlarmNo=0
+  ;
+  ;Wz zur Bruchkontrolle bringen, ggf. vorab mittels Chip Identitaet pruefen
+  IF (iMode>0)AND(mcbDBB_WithTlChipHG)AND(OEM_bSelChip)AND((giOptCodeCarrier B_AND 'B10')<>0)AND(bChipCompare)
+    ;
+    bRWChipStarted=TRUE
+    ;Vergleichen anstossen
+    RWChip(3,iTNo,0,iAlarmNo,sAlarmParam,iTNoChip)
+  ENDIF
+  ;
+  IF (iAlarmNo==0)
+    ;
+    ;Wz zur Pruefposition bringen, ggf. auf Ende des Chip-Lesens/-Vergleichens warten
+    MovTool(mcTaskAS_BBK,iTNo,9998,4,iAlarmNo,sAlarmParam)
+  ENDIF
+ELSE
+  ;
+  IF (bMagIsMiksch)
+    ;
+    ;Wz zur Pruefposition bringen, ggf. auf Ende des Chip-Lesens/-Vergleichens warten
+    MovTool(mcTaskAS_BBK,iTNo,9998,1,iAlarmNo,sAlarmParam)
+  ELSE
+    ;Zu pruefendes Wz ist schon in Pruefposition
+  ENDIF
+ENDIF
+IF (iAlarmNo>0)
+  ;
+  ;allg. Fehler oder Fehler aus RWChip/MovTool
+  ;
+  IF (iAlarmNo==giRWError)AND(bRWChipStarted)AND(bChipCompare)
+    ;
+    ;Fehler aus RWChip
+    ;
+    ; .. Wz auf Platz ablegen + Umspeichern  (iTNo==0 ist moeglich !!)
+    ;keine Fehlerausgabe, weil Alarm lt. Parameterliste in RWChip nicht angezeigt wurde
+    RWDropTool(mcTaskAS_Displace, iTNo, iActMagNo, iActPotNo, FALSE, iAlarmNoBBK, sAlarmParamBBK)
+    iAlarmNoShown=0
+  ELSE
+    ;Fehler aus MovTool
+    iAlarmNoShown=iAlarmNo
+  ENDIF
+  ;
+  GOTOF HandleAlarm
+ENDIF
+
+;------------------------------------------
+; Anfahren und Auswerten Bohrerbrucheinheit
+;------------------------------------------
+IF (bMagIsCas)
+  ;
+  ;Lernen(1)/Pruefen(2)
+  ToChkBut(iToDo, iTNo, rLength, FALSE, bIsBroken, iAlarmNoBBK, sAlarmParamBBK)
+ELSE
+  ;
+  ;Lernen(1)/Pruefen(2)/Kalibrieren(4)
+  ToChkMSC(iToDo, iTNo, rLength, FALSE, bIsBroken, iAlarmNoBBK, sAlarmParamBBK)
+ENDIF
+;
+STOPRE
+;
+IF (iAlarmNoBBK>=67000)
+  ;67xxx gleich anzeigen, 66xxx erst spaeter, um Wz noch zuvor abzulegen
+  SETAL(iAlarmNoBBK,sAlarmParamBBK)
+  iAlarmNoBBK=0
+ENDIF
+;
+IF (iMode==0)
+  ;
+  IF (bIsBroken)
+    ;
+    IF (NOT gbToCheckAtTC)
+      gbPrevToBrokenInt=TRUE
+    ELSE
+      gbLastToBroken=TRUE
+    ENDIF
+  ENDIF
+  ;
+  ;BBK beendet
+  giToBreakCtrlState=0 bReset=FALSE
+ENDIF
+;
+IF (iMode==2)AND(bIsBroken)
+  gbLastToBroken=TRUE
+ENDIF
+;
+IF (iMode==3)
+  ;
+  ;Bruch -> Werkzeug ablegen
+  ;
+  bTakeBack=(bIsBroken)
+ENDIF
+;
+IF (iMode==4)
+  ;
+  ;Kalibrieren -> immer ablegen
+  ;
+  bTakeBack=TRUE
+ENDIF
+;
+IF (bTakeBack)AND((gbWithHG)OR(bMagIsMiksch))
+  ;
+  ;Werkzeug auf den Magazinplatz bringen
+  ;-------------------------------------
+  ;
+  ;Kennungen lesen
+  OEM_TlData(iTNo)
+  ;
+  iSrcMagNo=0 iSrcPotNo=0
+  ;
+  IF ((bIsBroken)OR(OEM_bTlDefect))AND(iUnloadMag>=1)AND(iUnloadMag<=giNumRealMag)
+    ;
+    ;Wz ist defekt, gesperrt oder gebrochen und soll ins Entlademagazin gebracht werden
+    ;
+    iTmpMagNo=iUnloadMag iTmpPotNo=0
+    ;
+    ;Ablageplatzsuche (negativer Wert in iMode -> bei TM HHD ohne Alarmausgabe)
+    GetFreeLocHHD(iTmpMagNo,iTmpPotNo,iTNo,-1)
+    ;
+    IF (iTmpMagNo>=1)AND(iTmpMagNo<=giNumRealMag)AND(iTmpPotNo>=1)
+      ;
+      ;passender Platz gefunden
+      ;
+      ;bisherigen Platz ermitteln und ...
+      GetTlLoc(2,iTNo, iSrcMagNo, iSrcPotNo)
+      ;
+      IF (iSrcMagNo>=1)AND(iSrcMagNo<=giNumRealMag)AND(iSrcPotNo>=1)
+        ;
+        ;... fuer spaeteres Wiederbeladen Wz-Daten eintragen
+        $TC_TPC9[iTNo]=ITOR(iSrcMagNo*1000+iSrcPotNo)
+      ENDIF
+      ;
+      iSrcMagNo=iTmpMagNo iSrcPotNo=iTmpPotNo
+    ELSE
+      iSrcMagNo=0 iSrcPotNo=0
+    ENDIF
+  ENDIF
+  ;
+  IF (iSrcMagNo==0)AND(iSrcPotNo==0)
+    ;
+    ;- Wz gebrochen oder defekt und kein Entladen ins Magazin angewaehlt
+    ;- Wz gebrochen und Entladen in Entlademagazin angewaehlt aber dort kein Leerplatz gefunden
+    ;- Wz nicht gebrochen
+    ;
+    ;Quellplatz aus $TC_TPC10 bzw. EigentuemerMag/Platz
+    GetTlLoc(3,iTNo, iSrcMagNo, iSrcPotNo)
+    ;
+    ;Festplatz Wz
+    TlData(iTNo)
+    ;
+    iIsFixedPlace=Tl_FixPlace
+    ;
+    ;Platzpruefung, ggf. Leerplatzsuche
+    ChkTlLoc(iIsFixedPlace,iTNo,iSrcMagNo,iSrcPotNo,iTmpMagNo,iTmpPotNo,iAlarmNo,sAlarmParam)
+    IF (iAlarmNo>0) GOTOF HandleAlarm
+    ;
+    iSrcMagNo=iTmpMagNo iSrcPotNo=iTmpPotNo
+  ENDIF
+  ;
+  IF (iSrcMagNo<1)OR(iSrcMagNo>giNumRealMag)
+    iAlarmNo=AL_InvalidTargetPlace sAlarmParam=<<iScrMagNo<<"/"<<iScrPotNo
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  ;Platzdaten fuer abzulegendes Werkzeug
+  GetPlDat(0,0,iSrcMagNo,iSrcPotNo)
+  ;
+  IF (bMagIsCas)
+    ;
+    ;Warten auf <Cassette vorhanden/freigegeben>
+    ChkSwitch(1,iSrcMagNo,iSrcPotNo,1,iChkRes)
+    ;
+    IF (mcbDBB_WithTlChipHG)
+      ;
+      ;Kennungen Lesen
+      OEM_TlData(iTNo)
+      ;
+      IF (OEM_bSelChip)AND(giWaitRWChip<=0)
+        ;
+        ;Wz mit Chip/kein Schreib-/Leseauftrag mehr aktiv
+        ;
+        IF ((giOptCodeCarrier B_AND 'B100')<>0)
+          ;
+          ;immer schreiben
+          ;
+          RWChip(2,iTNo,0,iAlarmNo,sAlarmParam,iTNoChip)
+        ELSE
+          IF (bIsBroken)OR(iSrcMagNo==1)
+            ;
+            ;Wz gebrochen oder in Schublade -> Schreiben starten
+            ;
+            RWChip(2,iTNo,0,iAlarmNo,sAlarmParam,iTNoChip)
+          ENDIF
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  ;Wz auf Magazinplatz bringen
+  MovTool(mcTaskAS_Displace,iTNo,iSrcMagNo,iSrcPotNo,iAlarmNo,sAlarmParam)
+  ;
+  IF (iAlarmNo==0)
+    ;
+    IF (gbWithHG)
+      iTransLoc=mcLocHG
+    ELSE
+      ;
+      IF (bMagIsMiksch)AND(gbDg2MagSide)
+        iTransLoc=mcLocDG2
+      ELSE
+        iTransLoc=mcLocDG1
+      ENDIF
+    ENDIF
+    ;
+    ;WzV Abgleich - Zielplatz
+    ToAckn(TRUE,5,2,iTNo,iTNo,iSrcMagNo,iSrcPotNo,9998,iTransLoc,1)
+    ;
+    ;Leeres HG/DG in Grundstellung
+    giMagState=30 grSyncPickupDrop=0 gbDg2MagSide=FALSE
+    ;
+    IF (gbWithHG)
+      ;
+      giTNoHg=$TC_MPP6[9998,mcLocHG] gbHGBigTl=FALSE gbHGHeavyTl=FALSE gbHGNoTapeCl=FALSE
+      ;
+      IF (giTNoHg==0)
+        ;
+        ;WzW und kein Wz im HG (ehemaliges SpWz wurde abgelegt)
+        ;
+        giTlInSp=0
+      ENDIF
+    ELSE
+      giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (iAlarmNo>0)
+  iAlarmNoShown=iAlarmNo
+  GOTOF HandleAlarm
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (iMode==0)
+  ;
+  MakeAlarmParam(sAlarmParam,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+  ;
+  IF (gbErrMsgOnToCheck)
+    ;
+    IF (gbPrevToBrokenInt)
+      iAlarmNo=AL_PrevTlBroken67
+    ENDIF
+    ;
+    IF (gbLastToBroken)
+      iAlarmNo=AL_LastTlBroken67
+    ENDIF
+  ENDIF
+ELSE
+  ;
+  IF (bIsBroken)
+    ;
+    IF (iMode==2)OR(iMode==3)
+      iAlarmNo=AL_TlOutOfRange67
+    ELSE
+      iAlarmNo=AL_LastTlBroken67
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (iAlarmNo<=0)
+  iAlarmNo=iAlarmNoBBK sAlarmParam=sAlarmParamBBK
+ENDIF
+
+;===========
+HandleAlarm:
+;===========
+;
+;HMI - WzPruefen aktualisieren
+IF (gbWithHG)
+  giMMC_TNo=giTNoHg
+ELSE
+  IF (bMagIsMiksch)
+    ;
+    IF (gbDg2MagSide)
+      giMMC_TNo=giTNoDg2
+    ELSE
+      giMMC_TNo=giTNoDg1
+    ENDIF
+  ELSE
+    giMMC_TNo=iTNoMag
+  ENDIF
+ENDIF
+;
+IF (giMMC_TNo>0)
+  gsMMC_TName=$TC_TP2[giMMC_TNo] giToDuplo=$TC_TP1[giMMC_TNo] giMMC_DuploNo=giToDuplo
+ELSE
+  gsMMC_TName="" giToDuplo=0 giMMC_DuploNo=giToDuplo
+ENDIF
+;
+mcDBB_TlCheckCMD=0
+;
+;Kegelreiniger AUS
+M_TlTapeCleanOff0
+;
+IF (bReset)AND(NOT bResetAll)
+  ;giToNoProb etc. unveraendert (werden in TC_BS.SPF abgefragt)
+  giToBreakCtrlState=0 bResetAll=(iAlarmNo>0)
+ENDIF
+;
+IF (bResetAll)
+  giToBreakCtrlState=0 giToNoProb=0 giToDuplo=0 giToProbMag=0 giToProbPot=0 giProbVal=0 grProbVal=0
+ENDIF
+;
+IF (iAlarmNo>0)AND(iAlarmNo<>iAlarmNoShown)
+  MSG("")
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

@@ -1,0 +1,153 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SaveOffs.SPF
+;# Task:      Sichern aller Frames
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 12.11.2016 / Simons
+; - Neuversionierung
+; - EES hinzu
+;
+; V06.00.03 - 09.05.2015 / Simons
+; - ProtoTyp
+;
+; V04.00.00 - 28.01.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; Alle "Einstellbaren Nullpunktverschiebungen"
+; G54 - G59, G505 - G599 und der BasisFrame
+; werden in einer Datei mit dem Namen
+; "ZO_" << NC-ProgrammName als SPF gesichert.
+; Die Datei wird im Aufrufpfad abgelegt.
+; Sie ist direkt ausfuehrbar.
+;
+;------------------------------------
+
+PROC SaveOffs(INT iPal) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="SaveOffs V06.00.06"
+;
+DEF STRING[200] sCmdLine
+DEF STRING[128] sPrgName
+DEF STRING[4] sTag, sMonat, sJahr, sStunde, sMinute
+;
+DEF INT iError=0, iCount, iBuf
+
+;Reset sperren
+iBuf=giPAL_BUFNO[$A_INA[2]] OUT_LockReset=TRUE
+;
+;Programmdaten werden gesichert! Bitte nicht abbrechen! Reset gesperrt!
+;--------------------------------MSG(MSG_SavingData)
+;
+;Sicherungsdatei
+IF (giActDeviceNo>0)AND(giActDeviceNo<=mcNumExtDevices)
+  ;
+  ;EES Device
+  ;
+  sPrgName=gsDeviceName[giActDeviceNo]<<"/WKS.DIR/" << gsMMC_PATH[iBuf] << ".WPD/Z" << giMPSActivProg << "_" << gsMMC_PROG[iBuf] << ".SPF"  
+ELSE
+  ;
+  ;NC
+  ;
+  sPrgName="/_N_WKS_DIR/_N_" << gsMMC_PATH[iBuf] << "_WPD/_N_Z" << giMPSActivProg << "_" << gsMMC_PROG[iBuf] << "_SPF"
+ENDIF
+;
+IF ISFILE(sPrgName)
+  ;
+  ;File existiert -> Loeschen
+  DELETE(iError, sPrgName)
+ENDIF
+;
+sCmdLine = ";"
+WRITE(iError, sPrgName, sCmdLine)
+IF (iError<>0) GOTOF FEHLER
+;
+;Erstellungsdatum
+sTag = << $A_DAY
+IF (STRLEN(sTag)==1)
+  sTag = "0" << sTag
+ENDIF
+sMonat = << $A_MONTH
+IF (STRLEN(sMonat)==1)
+  sMonat = "0" << sMonat
+ENDIF
+sJahr = << $A_YEAR
+IF (STRLEN(sJahr)==1)
+  sJahr = "200" << sJahr
+ELSE
+  sJahr = "20" << sJahr
+ENDIF
+sStunde = << $A_HOUR
+IF (STRLEN(sStunde)==1)
+  sStunde = "0" << sStunde
+ENDIF
+sMinute = << $A_sMinute
+IF (STRLEN(sMinute)==1)
+  sMinute = "0" << sMinute
+ENDIF
+;
+sCmdLine=";CREATED (dd.mm.yyyy - hh:mm) : " << sTag << "." << sMonat << "." << sJahr <<  " - " << sStunde << ":" << sMinute
+WRITE(iError, sPrgName, sCmdLine)
+IF (iError<>0) GOTOF FEHLER
+;
+sCmdLine = ";"
+WRITE(iError, sPrgName, sCmdLine)
+IF (iError<>0) GOTOF FEHLER
+;
+;Programmierbare Frames
+iCount=1 iError=0
+WHILE (iCount<100)
+  STOPRE
+  MSG("Saving of $P_UIFR[ " << iCount << "]")
+  sCmdLine = "$P_UIFR[" << iCount << "]=CTRANS( X, " << $P_UIFR[iCount, X, TR] << ", Y, " << $P_UIFR[ iCount,Y, TR]  << ", Z, " << $P_UIFR [iCount, Z, TR]  << ", B, " << $P_UIFR[ iCount,B , TR] << ")"
+  WRITE(iError, sPrgName, sCmdLine)
+  sCmdLine = "$P_UIFR[" << iCount << "]=CFINE( X, " << $P_UIFR[iCount, X, FI] << ", Y, " << $P_UIFR[ iCount,Y, FI]  << ", Z, " << $P_UIFR [iCount, Z, FI]  << ", B, " << $P_UIFR[ iCount,B , FI] << "):$P_UIFR[" << iCount << "]"
+  WRITE(iError, sPrgName, sCmdLine)
+  IF (iError<>0) GOTOF FEHLER
+  iCount=iCount+1
+ENDWHILE
+;
+;Basisframe
+sCmdLine = "$P_UBFR=CTRANS(X," <<$P_UBFR[X, TR]<< ",Y,"<<$P_UBFR[Y, TR] <<",Z," <<$P_UBFR[Z, TR] <<",B," <<$P_UBFR[B, TR] <<")"
+WRITE(iError, sPrgName, sCmdLine)
+sCmdLine = "$P_UBFR=CFINE(X," <<$P_UBFR[X, FI]<< ",Y,"<<$P_UBFR[Y, FI] <<",Z," <<$P_UBFR[Z, FI] <<",B," <<$P_UBFR[B, FI] <<"):$P_UBFR"
+WRITE(iError, sPrgName, sCmdLine)
+IF (iError<>0) GOTOF FEHLER
+;
+sCmdLine = "M17"
+WRITE(iError, sPrgName, sCmdLine)
+;
+;======
+FEHLER:
+;======
+;
+;Reset freigeben
+OUT_LockReset=FALSE
+;
+MSG("")
+;
+IF (iError<>0)
+  sName="Z" << giMPSActivProg << "_" << gsMMC_PROG[iBuf] << ".SPF"
+  SETAL(AL_WriteError,sName)
+ENDIF
+;
+RET
+

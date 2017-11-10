@@ -1,0 +1,55 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MMAC.DEF
+;# Task:      Macro Definition
+;# Version:   V06.00.06
+;# Date:      12.04.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+;Beschreibung:
+;-------------
+; Herstellerspezifische Makros
+;
+; Achtung:
+; Anzahl begrenzt durch MD 18160
+; (MM_NUM_USER_MACROS)
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 14.04.2017 / Simons
+; - Neuversionierung
+; - MMAC_AL hinzu
+; - MMAC_LC entfernt
+;
+; V01.06.01 - Jan 2014 / Fengler
+; - Vorlage
+;
+;-------------------------------------
+
+IF ISFILE( "/_N_DEF_DIR/_N_MMAC_AX_DEF")
+  CALL "/_N_DEF_DIR/_N_MMAC_AX_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MMAC_BS_DEF")
+  CALL "/_N_DEF_DIR/_N_MMAC_BS_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MMAC_AL_DEF")
+  CALL "/_N_DEF_DIR/_N_MMAC_AL_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MMAC_HHDTM_DEF")
+  CALL "/_N_DEF_DIR/_N_MMAC_HHDTM_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MMAC_CLP_DEF")
+  CALL "/_N_DEF_DIR/_N_MMAC_CLP_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MMAC_PRINT_DEF")
+  CALL "/_N_DEF_DIR/_N_MMAC_PRINT_DEF"
+ENDIF
+M30

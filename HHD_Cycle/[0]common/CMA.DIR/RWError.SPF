@@ -1,0 +1,171 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     RWError.SPF
+;# Task:      Lese-/Schreibfehler
+;# Version:   V06.00.07
+;# Date:      03.06.2017 / Fengler
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.05 - 27.09.2016 / Fengler
+; - Neuversionierung
+; - Aenderungen aus HHD TM
+; - OEM_...
+;
+; V06.00.02 - 06.04.2016 / Simons
+; - Einfuehrung HHD TM
+;
+; V04.00.01 - 26.10.2015 / Fengler
+; - Alarmausgabe auch bei Fehler Bit 0
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Fehlercodes aus der BALLUFF-
+; Auswerteeinheit in NC-Alarm umwandeln
+;
+; Eingangsparameter:
+; bShowAlarm:   Alarm auch anzeigen
+; iRWUnitError: Fehlercode aus der
+;               Balluff-Auswerteeinheit
+; iTNo:         interne T-Nummer
+;               des Werkzeuges
+;
+; Ausgangsparameter:
+; iAlarmNo:    die zum obigen Fehlercode
+;              projektierte NC-Alarmnummer
+; sAlarmParam: Zusatzinfo
+;
+;------------------------------------
+
+PROC RWError(BOOL bShowAlarm, INT iRWUnitError, INT iTNo, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam)
+
+DEF STRING[32] sCycName="RWError V06.00.07", sTName=""
+;
+DEF BOOL bIsDummy=FALSE, bOk=TRUE, bTmp
+;
+DEF INT iTDuploNo=0, iTmp1, iTmp2
+
+iAlarmNo=0 sAlarmParam=""
+
+IF (iRWUnitError==0) GOTOF ENDE
+
+IF (iTNo>0)
+  ;
+  IF ($P_TOOLEXIST[iTNo])
+    ;
+    sTName=$TC_TP2[iTNo]
+    ;
+    bIsDummy=(TOUPPER(sTName)==TOUPPER(DummyTName))
+    IF (NOT bIsDummy)
+      MakeAlarmParam(sAlarmParam,sTName,<<$TC_TP1[iTNo])
+    ENDIF
+  ENDIF
+ELSE
+  ;
+  IF ((iRWUnitError B_AND 32)<>0)
+    ;
+    ;PLC hat festgestellt, dass es im Magazin/DG/SP bereits ein Werkzeug gibt, das den gleichen Namen/DuploNr hat
+    ;wie der vom Chip gelesene Datensatz: Folglich kann PLC auch keine T-Nr. fuer den gelesenen Datensatz an NC uebermitteln
+    ;
+    ;Namen aus dem Chipdatensatz
+    GetChipName(sTName,bOk)
+    ;
+    IF (bOk)
+      ;DuploNo von Chip von PLC
+      iTDuploNo=$A_DBW[698]
+      MakeAlarmParam(sAlarmParam,sTName,<<iTDuploNo)
+    ELSE
+      sTName="" iTDuploNo=0 sAlarmParam=""
+    ENDIF
+  ENDIF
+ENDIF
+
+;allg. Schreib-/Lesefehler
+;-------------------------
+iAlarmNo=AL_TlLockedDueRWError67
+;
+IF ((iRWUnitError B_AND 'B1')<>0)
+  ;
+  ;Wz mit Codetraeger
+  ;
+  ;Wz Kennungen Lesen
+  OEM_TlData(iTNo)
+  ;
+  IF (bIsDummy)OR(NOT OEM_bSelChip)OR(iTNo<=0)
+    iAlarmNo=AL_NoChipOrNoTool67
+  ELSE
+    ;
+    IF (OEM_bSelChip)
+      ;
+      ;lt. Wz-Daten Wz mit Codetraeger
+      ;
+      iAlarmNo=AL_TlWithoutChip67
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (iRWUnitError B_AND 2)
+  ;Bit 1: Fehler beim lesen
+  iAlarmNo=AL_ToTMTransfErr67
+ENDIF
+;
+IF (iRWUnitError B_AND 4)
+  ;Bit 2:  Fehler beim schreiben
+  iAlarmNo=AL_FromTMTransfErr67
+ENDIF
+;
+IF (iRWUnitError B_AND 8)
+  ;Bit 3: Fehler beim Konvertieren
+  iAlarmNo=AL_DataKonversionErr67
+ENDIF
+;
+IF (iRWUnitError B_AND 16)
+  ;Bit 4: -
+  iAlarmNo=AL_IdentSystemErr67
+ENDIF
+;
+IF (iRWUnitError B_AND 32)
+  ;Bit 5: "Vom Chip gelesenes Werkzeug %4 koerperlich im Handhabegeraet,
+  ;datentechnisch aber laut WzV im Magazin/Doppelgreifer/Spindel!"
+  iAlarmNo=AL_ReadToolInMagDGSP67
+ENDIF
+;
+IF (iRWUnitError B_AND 64)
+  ;Bit 6: "Werkzeugbereitstellung %4: Die Werkzeugdaten
+  ;unterscheiden sich von den auf dem Chip gespeicherten Daten"
+  iAlarmNo=AL_DifferentTData67
+ENDIF
+;
+IF (iRWUnitError B_AND 128)
+  ;Bit 7: "Werkzeugdatenserver meldet Fehler oder Timeout
+  ;bei der Kommunikation PLC <-> Werkzeugdatenserver"
+  iAlarmNo=AL_ErrFromTDataSvr67
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (iAlarmNo>0)AND(bShowAlarm)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+RET
+

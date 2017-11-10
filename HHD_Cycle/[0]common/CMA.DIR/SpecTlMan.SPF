@@ -1,0 +1,503 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SpecTlMan.SPF
+;# Task:      SonderWerkzeuge
+;# Version:   V06.00.07
+;# Date:      30.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 30.10.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Zusammenfassung Sonderwerkzeuge
+;
+; V01.01.06 - GroHeCal  Nov. 2012/Fengler
+; - Kalibirierzyklus Wohlhaupter Einstechkopf
+;
+; V01.01.06 - GroHeRetr Nov. 2012 / Fengler
+; - Notzyklus Wohlhaupter Einstechkopf
+;
+; Vxx.xx.xx - Maerz 2016 / Malitsky
+; - Planzugeinheit REFU/HOMEU
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Manager fuer SonderWz'e
+; -----------------------
+;
+; 1 = mcSpecTypeMillHead
+; 2 = mcSpecTypeFacingHead
+; 3 = Reserve
+;(4 = mcSpecTypeProbe)
+; 5 = mcSpecTypeBENZMillHead
+; 6 = mcSpecTypeWhRecessingHead
+;
+; iMode:
+; ------
+;
+; X,Y,Z,B in Position aus Kundenprogramm
+;
+; Vor WzW:
+; --------
+; 0 -> Zeitberechnung zur Bestimmung
+;      der Rueckzugsdauer
+; 1 -> vor Start X in TCPrePos
+; 2 -> bei Fahrt X in TCPrePos
+;
+; Nach WzW:
+; ---------
+; 3 -> SpTlData
+; 4 -> ausserhalb Magazin (TCPrePos)
+;
+; Aufruf im RevCha1
+; -----------------
+; 104 -> am Ende
+; 109 -> am Anfang
+;
+; Ergebnisvariable
+; ----------------
+;
+; grSpecTlRunTime = Laufzeit der Kopfachse
+;
+; giResult =  0 kein Fehler
+;          =  1 Freigabe Planzugachse in TCPOS
+;          >= 66000 Fehlernummer
+; gsResult =  FehlerInfo
+;------------------------------------
+
+PROC SpecTlMan(INT iMode, REAL rProgZPos, BOOL bDoNewConf)
+
+DEF STRING[32] sCycName="SpecTlMan V06.00.07"
+;
+DEF STRING[255] sAux
+;
+DEF BOOL bRelTCPos, bRelWP, bCalibrated, bRescued, bEnabled, bIsGearStep2
+;
+DEF INT icTcCalcTime=0, icTcStartToPrePos=1, icTcMoveToPrePos=2, icSpTlData=3, icTcInPrePos=4, icRevCha1Begin=109, icRevCha1End=104, iCount, iErrCount, iErrTime, iStatus, iSpecTlTypeSp
+;
+DEF REAL rWaitPLC=0.02, rcErrTimeDefault=5, rFHFrame=0, rVelo, rPosWin, rPosTime, rActJerk, rMaxJerk, rMaxVj, rMaxTj, rMoveDist, rBasePosFH, rWaitShort, rc0x1mm, rc0x5mm, rMinPos, rLimPlus, rHome
+;
+;Wohlhaupter Kopf (EK P03.11)
+DEF INT icWhCalibrated='H200', icWhRescued='H1', icWhRescueRounds1=-31, icWhRescueRounds2=6 , icWhRescueRounds3=-4
+DEF REAL rcWhSCalib=600.0, rcWhCalibTime=4, rcWhCalibErrTime=20, rcWhRescueFeed=100
+;FacingHead
+DEF REAL rBasePosFH=0.0*grInchMetr
+
+;-[]-0.0--GndSt-
+;---------------
+giResult=0 gsResult="" grSpecTlRunTime=0 rWaitShort=2*$MN_IPO_CYCLE_TIME iErrTime=RTOI(rcErrTimeDefault/rWaitShort) rc0x1mm=0.1*grInchMetr rc0x5mm=0.5*grInchMetr
+
+;-[]-10.0--Status-
+;-----------------
+IF (NOT $P_SUBPAR[1])
+  ;kein iMode angegeben
+  giResult=AL_InvalidMissingInput gsResult="iMode"
+  RET
+ENDIF
+
+iSpecTlTypeSp=mcDBB_SpecToType bIsGearStep2=((gbIsGearSpindle)AND($AC_SGEAR[$P_MSNUM]==2))
+
+;-[]-200.0--Einstechkopf---
+; mcSpecTypeWhRecessingHead
+;--------------------------
+;
+IF (NOT gbWithRecHead) GOTOF FACING_HEAD
+;
+IF (iMode==icSpTlData)OR(iSpecTlTypeSp<>mcSpecTypeWhRecessingHead) GOTOF FACING_HEAD
+;
+IF (iMode==icTcCalcTime)
+  ;
+  ;-200.1-Einstechkopf-
+  ; Kalibrierdauer
+  ;--------------------
+  grSpecTlRunTime=rcWhCalibTime
+  RET
+ENDIF
+;
+IF (iMode==icTcMoveToPrePos)OR(iMode==icTcInPrePos)OR(iMode==icRevCha1End)
+  ;
+  ;-200.2-Einstechkopf-
+  ; Kalibrieren wenn
+  ; icTcInPrePos     - nach dem Einwechseln in Sp
+  ; icTcMoveToPrePos - immer vor dem Auswechseln
+  ; icRevCha1End     - am Ende von RevCha1
+  ;--------------------
+  iStatus=mcDBW_StaRecHead bRescued=((iStatus B_AND icWhRescued)<>0) bCalibrated=((iStatus B_AND icWhCalibrated)<>0)
+  ;
+  IF (NOT bCalibrated)OR(iMode==icTcMoveToPrePos)
+    ;
+    iErrCount=0
+    REPEAT
+      ;
+      ;-200.3-Einstechkopf-
+      ; Warten bis X und Z in Position sind
+      ;--------------------
+      bRelTCPos=($AA_IM[mcAxX]<=(grTcPrePosX+rc0x5mm)) bRelWP=(($AA_IM[mcAxZ]>=rProgZPos-rc0x5mm)OR(NOT $P_SUBPAR[2])) bEnabled=(bRelTCPos)AND(bRelWP)
+      ;
+      IF (NOT bEnabled)
+        ;
+        iErrCount=(iErrCount+1)
+        ;
+        IF (iErrCount>=iErrTime)
+          ;
+          ;Einstechkopf in Spindel
+          ;
+          IF (NOT bRelTCPos)
+            ;Kalibriervorgang Einstechkopf im Werkzeugwechselbereich gesperrt
+            giResult=AL_RecHeadCalibNotInTC67
+            RET
+          ENDIF
+          ;
+          IF (NOT bRelWP)
+            ;Kalibriervorgang nur ausserhalb des Werkstuecks zulaessig
+            giResult=AL_RecHeadCalibNotInWP67
+            RET
+          ENDIF
+        ENDIF
+        G4 F=rWaitShort
+      ENDIF
+    UNTIL (bEnabled)
+    ;
+    IF (bIsGearStep2)
+      M41
+    ENDIF
+    ;
+    ;-200.4-Einstechkopf--
+    ; Kopf in GndSt fahren
+    ;---------------------
+    M_RecHeadOn M3 S=rcWhSCalib
+    ;
+    ;M5 damit PLC Ende erkennt
+    M5
+    ;
+    REPEAT
+      ;
+      ;-200.5-Einstechkopf------------
+      ; Warten bis Kopf kalibriert ist
+      ;-------------------------------
+      bCalibrated=((mcDBW_StaRecHead B_AND icWhCalibrated)<>0) iErrTime=RTOI(rcWhCalibErrTime/rWaitShort)
+      ;
+      IF (NOT bCalibrated)
+        ;
+        iErrCount=(iErrCount+1)
+        ;
+        IF (iErrCount>=iErrTime)
+          ;Einstechkopf nicht kalibriert
+          giResult=AL_RecHeadNotCalibrated67
+          RET
+        ENDIF
+        G04 F=rWaitPLC
+      ENDIF
+    UNTIL (bCalibrated)
+    ;
+    IF (iMode==icTcMoveToPrePos)
+      ;
+      ;-200.6-Einstechkopf------------------
+      ; Spindel richten, um WzW fortzusetzen
+      ;-------------------------------------
+      IF (bIsGearStep2)
+        SPOSA=ACP(grTcSPosG2)
+      ELSE
+        SPOSA=ACP(grTcSPos)
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  RET
+ENDIF
+;
+IF (iMode==icRevCha1Begin)
+  ;
+  ;-300.0-Einstechkopf----
+  ; Rueckzug nach Stoerung
+  ;-----------------------
+  ;
+  ;Keine Anforderung von PLC
+  IF (NOT mcbDBB_ReqRecHeadRescue) GOTOF FACING_HEAD
+  ;
+  ;Nicht zurueckgezogen
+  mcDBW_StaRecHead=(mcDBW_StaRecHead B_AND (NOT icWhRescued))
+  ;
+  ;Sp wird zur Achse
+  M70
+  ;
+  ;300.1-Einstechkopf-
+  ; Rueckzug
+  ;--------------------
+  CS1=IC(icWhRescueRounds1*360) F=rcWhRescueFeed*360
+  CS1=IC(icWhRescueRounds2*360)
+  CS1=IC(icWhRescueRounds3*360)
+  ;
+  ;-300.2-Einstechkopf-----------------------------
+  ; Bestaetigung von Bediener, dass Position stimmt
+  ;------------------------------------------------
+  MsgBox(<<AL_RecHeadCheck67,"CLEAR M0","TRUE")
+  ;
+  ;Bestaetigung "Rueckzug erfolgt an PLC"
+  mcDBW_StaRecHead=(mcDBW_StaRecHead B_OR icWhRescued)
+  ;
+  ;-300.3-Einstechkopf-
+  ; Sp Achsbetrieb aus
+  ;--------------------
+  M5
+  ;
+  RET
+ENDIF
+;
+RET
+
+;-[]-400.0--Planzugeinheit-
+; mcSpecTypeFacingHead
+;--------------------------
+;
+;===========
+FACING_HEAD:
+;===========
+;
+IF (NOT gbWithFacingHead) GOTOF MILL_HEAD
+;
+; icTcCalcTime      - Zeitberechnung fuer Fahrt in rBasePosFH
+; icTcStartToPrePos - Start Plandrehkopf in rBasePosFH
+; icSpTlData        - Achslimits, Uebersetzungen Aktivieren
+; icTcInPrePos      - Plandrehkopf in GndSt Fahren
+; icRevCha1End      - Plandrehkopf Referenzieren
+;
+IF (iMode==icSpTlData)OR((iMode==icTcStartToPrePos)OR(iMode==icTcInPrePos)OR(iMode==icRevCha1End))AND(iSpecTlTypeSp==mcSpecTypeFacingHead)
+  ;
+  ;-401.1--Plandrehkopf-
+  ; Sollwerte
+  ;---------------------
+  IF (giTNoSp>0)
+    ;
+    IF (gbTMIsHHD)
+      rHome=$TC_TPC24[giTNoSp] rMinPos=($TC_TPC22[giTNoSp]+rHome) rLimPlus=($TC_TPC23[giTNoSp]-$TC_TPC22[giTNoSp]+$TC_TPC24[giTNoSp]) rFHFrame=(rHome-$TC_TPC21[giTNoSp]) iNominator=RTOI($TC_TPC25[giTNoSp]) iDenominator=RTOI($TC_TPC26[giTNoSp])
+    ELSE
+      rHome=$TC_TPC14[giTNoSp] rMinPos=($TC_TPC12[giTNoSp]+rHome) rLimPlus=($TC_TPC13[giTNoSp]-$TC_TPC12[giTNoSp]+$TC_TPC14[giTNoSp]) rFHFrame=(rHome-$TC_TPC11[giTNoSp]) iNominator=RTOI($TC_TPC15[giTNoSp]) iDenominator=RTOI($TC_TPC16[giTNoSp])
+    ENDIF
+  ELSE
+    rLimPlus=$MA_POS_LIMIT_PLUS[mcAxFH] iNominator=1 iDenominator=1
+  ENDIF
+  ;
+  ;-401.1-Planzugeinheit---------------------
+  ; Aufruf in SpTlData oder SpWz ist kein FH
+  ; -> Nur Uebersetzung, Limits aktualisieren
+  ;------------------------------------------
+  IF (iMode==icSpTlData)OR(iSpecTlTypeSp<>mcSpecTypeFacingHead) GOTOF ACT_TRANSM_LIM
+  ;
+  IF (iMode==icRevCha1End)
+    ;
+    ;-401.2-Planzugeinheit-
+    ; Referenzieren
+    ;----------------------
+    IF ($AA_REF[mcAxFH])
+      ;
+      ;Schon referenziert -> Fertig
+      RET
+    ENDIF
+  ENDIF
+  ;
+  IF ($MA_DRIVE_AX_RATIO2_NUMERA[mcAxFH]<>1)OR($MA_DRIVE_AX_RATIO2_DENOM[mcAxFH]<>1)
+    ;
+    ;-401.3-Planzugeinheit---------
+    ; Aktuelle Limits und Uebersetzung
+    ; auf 1:1, um spaeter Referenzieren
+    ; bzw. GndSt Fahren zu koennen
+    ;------------------------------
+    $MA_POS_LIMIT_MINUS2[mcAxFH]=$MA_POS_LIMIT_MINUS[mcAxFH] $MA_POS_LIMIT_PLUS2[mcAxFH]=$MA_POS_LIMIT_PLUS[mcAxFH] $MA_DRIVE_AX_RATIO2_NUMERA[mcAxFH]=1 $MA_DRIVE_AX_RATIO2_DENOM[mcAxFH]=1
+    ;
+    NEWCONF
+    STOPRE
+    ;
+  ENDIF
+  ;
+  IF (iMode==icTcStartToPrePos)
+    ;
+    ;-401.4--Plandzugeinheit------------
+    ; TC_BS startet Achse nach grTCPosFH
+    ;-----------------------------------
+    giResult=1
+    RET
+  ENDIF
+  ;
+  IF (iMode==icTcInPrePos)
+    ;
+    ;-401.5-Planzugeinheit-
+    ; GndSt Fahren
+    ;----------------------
+    G0 G40 G60 G17 G90 G94 G153 AX[mcAxFH]=rHome
+    ;
+    $P_UBFR=CFINE(mcAxFH, (-1)*rMinPos)
+  ENDIF
+  ;
+  IF (iMode==icRevCha1End)
+    ;
+    ;-401.6-Planzugeinheit-
+    ; Referenzieren
+    ;----------------------
+    G74 U0
+  ENDIF
+  ;
+  ;==============
+  ACT_TRANSM_LIM:
+  ;==============
+  ;
+  STOPRE
+  ;
+  ;-401.7-Planzugeinheit----
+  ; gueltiger Arbeitsbereich
+  ;-------------------------
+  $MA_POS_LIMIT_MINUS2[mcAxFH]=$MA_POS_LIMIT_MINUS[mcAxFH] $MA_POS_LIMIT_PLUS2[mcAxFH]=rLimPlus
+  ;
+  IF ((iNominator<>0)AND(iNominator<>$MA_DRIVE_AX_RATIO2_NUMERA[mcAxFH]))OR((iDenominator>0)AND(iDenominator<>$MA_DRIVE_AX_RATIO2_DENOM[mcAxFH]))
+    ;
+    ;-401.8--Plandrehkopf--
+    ; gueltige Uebersetzung
+    ;----------------------
+    bDoNewConf=FALSE $MA_DRIVE_AX_RATIO2_NUMERA[mcAxFH]=iNominator $MA_DRIVE_AX_RATIO2_DENOM[mcAxFH]=iDenominator
+    ;
+    NEWCONF
+    STOPRE
+    ;
+  ENDIF
+  ;
+  ;-401.8-Planzugeinheit-
+  ; Notwendige NPV
+  ;----------------------
+  $P_UBFR=CFINE(mcAxFH, rFHFrame)
+  ;
+  ;-401.9-Planzugeinheit-
+  ; Weiter mit...
+  ;----------------------
+  IF (iMode==icSpTlData)OR(iSpecTlTypeSp<>mcSpecTypeFacingHead) GOTOF MILL_HEAD
+  ;
+  RET
+ENDIF
+;
+IF (iSpecTlTypeSp==mcSpecTypeFacingHead)AND(iMode==icTcCalcTime)
+  ;
+  ;-402.0-Planzugeinheit-
+  ; Zeitberechnung von Istposition auf rBasePosFH
+  ;----------------------
+  rMoveDist=ABS($AA_IM[mcAxFH]-rBasePosFH)
+  ;
+  IF (rMoveDist>0)
+    ;
+    rMaxVelo=$MA_MAX_AX_VELO[mcAxFH]/60 rMaxAccel=$MA_MAX_AX_ACCEL[mcAxFH]*1000 rMaxJerk=$MA_MAX_AX_JERK[mcAxX]*0.7*1000
+    rMaxTj=rMaxAccel/rMaxJerk rMaxVj=0.5*rMaxAccel*rMaxAccel/rMaxJerk rActJerk=rMaxJerk iCount=0
+    ;
+    REPEAT
+      iCount=iCount+1 rVelo=MINVAL(EXP(1/3*LN(rMoveDist*rMoveDist*rActJerk/4)),rMaxVelo)
+      IF (rVelo<2*rMaxVj)
+        rActJerk=rMaxJerk*(1-EXP(grTCJerkRedExp*LN((2*rMaxVj-rVelo)/(2*rMaxVj)))) rPosTime=2*SQRT(rVelo/rActJerk)
+      ELSE
+        rPosTime=rVelo/rMaxAccel+rMaxTj rActJerk=rMaxJerk
+      ENDIF
+    UNTIL (iCount==3)OR(rActJerk==rMaxJerk)
+    ;
+    rPosWin=0.5*rVelo*rPosTime
+    IF (2*rPosWin<rMoveDist)
+      grSpecTlRunTime=2*rPosTime+(rMoveDist-2*rPosWin)/rVelo
+    ELSE
+      grSpecTlRunTime=2*rPosTime
+    ENDIF
+  ENDIF
+  ;
+  RET
+ENDIF
+;
+RET
+
+;=========
+MILL_HEAD:
+;=========
+;
+;-[]-500.0--Fraeskopf---
+; mcSpecTypeMillHead,
+; mcSpecTypeBENZMillHead
+;----------------------
+;
+IF (NOT gbWithMillHead) GOTOF NEXT_TYPE
+;
+IF (iMode==icSpTlData)
+  ;
+  ;Aufruf im SpTlData
+  ;
+  IF (iSpecTlTypeSp==mcSpecTypeBENZMillHead)OR(iSpecTlTypeSp==mcSpecTypeMillHead)
+    ;
+    ;Fraeskopf in Sp
+    ;
+    IF (mcbDBB_SpClamped)
+      ;
+      ;Kopf Klemmen
+      M_MillHeadClamp
+    ENDIF
+  ELSE
+    ;
+    ;Fraeskopfklemmung eingebaut aber kein Kopf in Sp -> Klemmung Loesen
+    ;
+    M_MillHeadUnclamp
+  ENDIF
+  ;
+  GOTOF NEXT_TYPE
+ENDIF
+;
+RET
+
+;=========
+NEXT_TYPE:
+;=========
+;
+;Weitere SonderWz'e
+;
+;=========
+TRANSM_SP:
+;=========
+;
+;-[]-1000.0--Drehzahluebersetzung SpWz-
+;--------------------------------------
+;
+IF (iSpecTlTypeSp==mcSpecTypeBENZMillHead)OR(iSpecTlTypeSp==mcSpecTypeWhRecessingHead)
+  ;
+  IF (gbTMIsHHD)
+    iNominator=RTOI($TC_TPC25[giTNoSp]) iDenominator=RTOI($TC_TPC26[giTNoSp])
+  ELSE
+    iNominator=RTOI($TC_TPC15[giTNoSp]) iDenominator=RTOI($TC_TPC16[giTNoSp])
+  ENDIF
+ELSE
+  iNominator=1 iDenominator=1
+ENDIF
+;
+IF ((iNominator<>0)AND(iNominator<>$MA_DRIVE_AX_RATIO2_NUMERA[mcAxSP1]))OR((iDenominator>0)AND(iDenominator<>$MA_DRIVE_AX_RATIO2_DENOM[mcAxSP1]))
+  ;
+  ;-[]-1001.0--Drehzahluebersetzung SpWz-
+  ;--------------------------------------
+  ;
+  bDoNewConf=TRUE $MA_DRIVE_AX_RATIO2_NUMERA[mcAxSP1]=iNominator $MA_DRIVE_AX_RATIO2_DENOM[mcAxSP1]=iDenominator
+ENDIF
+;
+IF (bDoNewConf)
+  ;
+  ;-[]-1002.0--NewConf-
+  ;--------------------
+  ;
+  ;Aktualisieren der SpWz Uebersetzung oder der Richtdrehzahl (aus SpTlData)
+  ;
+  NEWCONF
+  STOPRE
+  ;
+ENDIF
+;
+RET
+

@@ -1,0 +1,64 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SetBit1.SPF
+;# Task:      Wz Freigabebits Setzen
+;# Version:   V06.00.03
+;# Date:      06.05.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.03 - 06.05.2015 / Simons
+; - Neue Versionierung
+; - giNumPlacesInMag
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Setzt fuer alle Werkzeuge in allen
+; raelen Magazinen das Freigabebit
+; (Bit1) im Werkzeugstatus
+;
+; Aufruf in MDA
+;
+;------------------------------------
+
+PROC SetBit1
+
+DEF INT iTNo, iMag, iLoc, iMag1=0, iLoc1=0
+
+STOPRE
+
+MSG("Fuer alle Werkzeuge im Magazin wird das Freigabebit gesetzt. Bitte warten ... ")
+
+FOR iMag=iMag1 TO giNumRealMag
+  ;
+  STOPRE
+  FOR iLoc=iLoc1 TO giNumPlacesInMag[iMag]
+    ;
+    iTNo=$TC_MPP6[iMag,iLoc]
+    IF (iTNo>0)
+      ;
+      ;Wz auf Platz
+      ;
+      $TC_TP8[iTNo]=$TC_TP8[iTNo] B_OR 'B10'
+    ENDIF
+  ENDFOR
+ENDFOR
+
+STOPRE
+
+MSG("")
+;
+RET

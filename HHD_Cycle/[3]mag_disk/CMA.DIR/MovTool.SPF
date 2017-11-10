@@ -1,0 +1,280 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MovTool.SPF
+;# Task:      Wz Bewegen
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - bFast, rDiskInPos hinzu
+; - WHILE (NOT ...) -> WHENEVER (NOT...) DO RDISABLE
+; - formale Aenderungen
+;
+; V06.00.05 - 05.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 28.08.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 06.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 10.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag,giMagNoLoadList
+;
+; V04.00.00 - 26.03.2015 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Werkzeug bewegen in den Faellen:
+;
+; a) Werkzeug in Vorbereitungsposition bringen
+;    iMagNo==9998 iPotNo==1
+; b) Werkzeug ins Magazin zurueckbringen und ablegen
+;    iMagNo<9998 iMagNo<>giMagNoLoadList iPotNo>0
+; c) Werkzeug zur Handbeladung bringen
+;    iMagNo=9999 iPotNo>0
+; d) Werkzeug zur Bruchkontrolle bringen
+;    iMagNo=9998 iPotNo=4
+;
+; Eingangsparameter:
+; ------------------
+; iToDo: Kennung fuer den Auftrag in der Form xyz
+;        bei FC8 TaskId=
+;        1 - Beladen/Entladen/Umsetzen
+;        2 - Wz vorbereiten/wechseln
+;      4,5 - asynchron umspeichern
+;
+; y : TaskIdNo bei FC8 TaskId=
+;     1 - Nr. Beladestelle
+;     2 - Nr. Spindel
+;   4,5 - Kanal-Nr
+;
+; z: Modus bei FC8 TaskId=
+;    1 - BitNr fuer Beladen - Entladen - Umsetzen
+;    2 - BitNr fuer Vorbereiten
+;  4,5 -
+;
+; 110: Beladen ueber Beladestelle_Hand
+; 111: Entladen ueber Beladestelle_Hand
+; 112: Umsetzen allgemein (= immer Beladestelle_Hand)
+; 113: Positionieren (hier nicht verwendet
+;
+; 120: Beladen ueber Beladestelle Magazin
+; 121: Entladen ueber Beladestelle Magazin
+;
+; 211: Wz-Wechsel
+; 212: Bereitstellung
+;
+; 5xx: asynchrone Umspeichervorgaenge
+; 500: Wz asynchron umsetzen (im Magazin)
+; 501: Leeres HG asynchron bereitstellen (zum Ausschleusen eines SpindelWz)
+;      und SpWz ins Magazin zurueckbringen
+; 51i: Wz in die Spindel bringen (asynchron)
+;      i=0: keine zusaetzliche Aktionen
+;      i=1: Sp-Wz in Mess-/Pruefposition bringen
+;      i=2: Spindel in WzW-Position belassen
+;
+; 600: Wz zur Bruchkontrolle bringen
+;
+; iTNo: WzV-interne T-Nummer des zu bewegenden Wz
+; iMagNo: Magazin-Nummer Ziel
+; iPotNo: Platz-Nummer Ziel
+;
+; Rueckgabeparameter:
+; -------------------
+; iAlarmNo:     Alarmnummer
+; sAlarmParam:  Zusatztext
+;
+; Achtung: das HG enthaelt bereits
+; das zu bewegende (mittels iTNo angesprochene) Wz
+;
+;------------------------------------
+
+PROC MovTool(INT iToDo, INT iTNo, INT iMagNo, INT iPotNo, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam, BOOL bFast)
+
+DEF STRING[32] sCycName="MovTool V06.00.06"
+;
+DEF BOOL bToTC, bToMag, bToBrk, bToLoad, bBalluffActive, bSK, bAxInPos, bDiskAdvanced, bDiskRetracted, bHgHomeReq
+;
+DEF REAL rActPosV1, rVeloV1, rSrcPosV1, rDstPosV1, rDiskInPos
+
+iAlarmNo=0 sAlarmParam="" rVeloV1=360*($MA_POS_AX_VELO[mcAxV1]) rSrcPosV1=grPlDatPosV1[0] rDstPosV1=grPlDatPosV1[1] rDiskInPos=$MA_STOP_LIMIT_FINE[mcAxV1]
+;
+;Plausibilitaetspruefungen
+IF (iTNo<=0)
+  ;
+  iAlarmNo=AL_TNoNotAllowed sAlarmParam=<<iTNo
+  GOTOF ENDE
+ENDIF
+IF (iMagNo<=0)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998)AND(iMagNo<>9999))
+  ;
+  ;Achtung: NewCaNr=9998 und 9999 zulassen (s. Beschreibung Eingangspar.)
+  IF (iMagNo>0)AND(iMagNo==giMagNoLoadList)
+    iAlarmNo=AL_LoadListNotTarget sAlarmParam=<<iMagNo
+  ELSE
+    iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iMagNo
+  ENDIF
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo>0)AND(iMagNo<=giNumRealMag)
+  ;
+  IF (iPotNo<1)OR(iPotNo>giNumPlacesInMag[iMagNo])
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iPotNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+;Status Scheibe
+rActPosV1=$AA_IM[mcAxV1] bHgHomeReq=(IN_HgHome) bAxInPos=($AA_STAT[mcAxV1]==4) bDiskAdvanced=(mcbDBB_DiskAdvanced) bDiskRetracted=(mcbDBB_DiskRetracted)
+
+;Aufgabe Erkennen
+;----------------
+bToMag=((iMagNo>=1)AND(iMagNo<=giNumRealMag))
+bToTC=((iMagNo==9998)AND(iPotNo==1)AND(iToDo<>600))
+bToBrk=(iToDo==600)
+bToLoad=((iMagNo==9999)AND(iPotNo>0))
+
+IF (giMagState==52)
+  ;
+  ;Werkzeug in WzBeladeposition
+  ;
+  IF (NOT bToLoad)
+    ;
+    giMagState=0
+    ;
+    GetMagSt
+  ENDIF
+ENDIF
+
+;=====
+_MOVE:
+;=====
+;
+IF (bToTC)OR(bToBrk)
+  ;
+  IF (ABS(rActPosV1-rSrcPosV1)>rDiskInPos)
+    ;
+    IF (NOT bDiskAdvanced)
+      ;
+      M_TcDiskAdv1
+      ;
+      bDiskAdvanced=TRUE bDiskRetracted=FALSE
+    ENDIF
+    ;
+    GETD(mcAxV1)
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Werkzeug in WzWposition fahren
+    COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rSrcPosV1
+  ENDIF
+ENDIF
+
+IF (bToTC)
+  ;
+  ;HG horizontal im Doppelgreifer mit Wkz geklemmt
+  IF (NOT bDiskAdvanced)
+    M_TcDiskAdv1
+  ENDIF
+  ;
+  STOPRE
+  ;Wz ist in Bereitstellungsposition
+  giMagState=12
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToBrk)
+  ;
+  IF (NOT bDiskRetracted)
+    M_TcDiskRet1
+  ENDIF
+  ;
+  STOPRE
+  ;Werkzeug in Position fuer Bohrerbruchkontrolle
+  giMagState=22
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToLoad)
+  ;
+  IF (ABS(rActPosV1-rDstPosV1)>rDiskInPos)
+    ;
+    IF (NOT bDiskAdvanced)
+      ;
+      M_TcDiskAdv1
+      ;
+      bDiskRetracted=FALSE     
+    ENDIF
+    ;    
+    GETD(mcAxV1)
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Werkzeug in Beladeposition fahren
+    COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rDstPosV1
+  ENDIF
+  ;
+  IF (NOT bDiskRetracted)
+    M_TcDiskRet1
+  ENDIF
+  ;
+  STOPRE
+  ;Wz ist in Beladeposition
+  giMagState=52
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToMag)
+  ;
+  ;Ziel ist ein Platz im Magazin
+  GOTOF ENDE
+ENDIF
+
+iAlarmNo=AL_WayNotSpecified
+
+;====
+ENDE:
+;====
+;
+RELEASE(mcAxV1)
+;
+IF (iAlarmNo>0)
+  ;
+  MSG("")
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET

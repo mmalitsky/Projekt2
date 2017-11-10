@@ -1,0 +1,168 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     WAMon.SPF
+;# Task:      WorkArea Monitoring
+;# Version:   V06.00.07
+;# Date:      19.05.2016  /  Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 19.05.2017 / Simons
+; - Neuversionierung
+; - in IDS=iID+14/15 mit OR($AA_STAT[mcAxB]<2)
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - Neuversionierung
+; - mcDBB_DrivesOK hinzu
+;
+; V06.00.04 - 15.08.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 24.04.2016 / Simons
+; - X-Achsueberwachung aus NC_INIT1
+; - Kollisionsueberwachung Swivelhead(NBH800)
+;
+; V06.00.01 - 30.08.2015 / Simons
+; - mcSYG_WAMON
+;
+; V06.00.00 - 21.06.2015 / Simons
+; - $AC_PARAM[..] -> SYG_RM[iSYG+..]
+; - Prototyp
+;
+; V01.07.00, 20.03.2014/Fengler
+; - Vorlage
+;------------------------------------
+;
+; Arbeitsraumueberwachung
+; -----------------------
+;
+; - X-Achse
+; - Sonderpaletten
+; - Kollisionsueberwachung Schwenkkopf
+;
+; Pallette in Naehe
+; SYG_IM[iSYG]==1 -> Spindel
+; SYG_IM[iSYG]==2 -> Palettenwechsel
+;
+; Maximaler Verfahrweg B-Achse bei
+; SYG_RM[iSYG]   : Fahrweg +
+; SYG_RM[iSYG+1] : Fahrweg -
+; SYG_RM[iSYG+2..4] Rechenparameter
+;
+; Programmstatus ($AC_PROG)
+;
+; 0: abgebrochen (reset)
+; 1: angehalten (stop)
+; 2: laeuft (aktiv)
+; 3: wartend
+; 4: unterbrochen
+;
+;------------------------------------
+
+PROC WAMon
+
+DEFINE mcbNoCmdMinusX AS (($A_DBB[10] B_AND 3)<>2)
+DEFINE mcbNoCmdPlusZ  AS (($A_DBB[9] B_AND 1)==0)
+DEFINE mcbNoCmdMinusZ AS (($A_DBB[9] B_AND 2)==0)
+DEFINE mcbNoCmdPlusB  AS (($A_DBB[72] B_AND 3)<>1)
+DEFINE mcBAxVldPos AS $A_DBB[169]
+
+DEF STRING[32] sCycName="WAMon V06.00.07", sMCType
+;
+DEF INT iCount, iAlarmNo, iMaxCount, iSYG, iID
+;
+DEF REAL rIPO, rFactor, rCalcValue
+
+iSYG=mcSYG_WAMon iID=SyncID_WAMon
+
+FOR iCount=iID TO iID+29
+  CANCEL(iCount)
+  STOPRE
+ENDFOR
+
+CFG_MAN("MC",sMCType)
+
+IF (sMCType<>"NBH1200")
+  ;
+  ; 2. SWLimit nicht aktiv -> Sperre X
+  ;-----------------------------------
+  ;
+  IDS=iID WHENEVER ($AC_PROG<>0)AND($AA_STAT[mcAxX]<>4)AND(NOT OUT_TcActive)AND(OUT_StartUpFinished1)AND(OUT_StartUpFinished2)AND(($A_DBB[7] B_AND 1)==0)AND(($AA_IM[mcAxX]+$AA_DTEB[mcAxX])>($MA_POS_LIMIT_PLUS[mcAxX]+grPARA[0])) DO $AC_OVR=0 SETAL(AL_PosBehindEndSwitch)
+ENDIF
+
+IF ((grWorkarea_MinPos_Z>$MA_POS_LIMIT_MINUS[mcAxZ])OR(grWorkarea_MaxPos_Z<grPalLoadPosZ))
+  ;
+  ; Sonderpalette -> Sperre Z/B
+  ;----------------------------
+  ;
+  ; Im Hochlauf Synchronaktionen Sperren,die auf Antriebe zugreifen.
+  ; Zugriff erst, wenn Antriebe "Bereit" gemeldet sind.
+  ; alle Synchronaktionen sperren,die auf Achsistwerte
+  ; zugreifen ($VA_...)
+  IDS=iID+10 WHENEVER ((NOT OUT_UsrAcknAxisXYZ)OR(NOT mcDBB_DrivesOK)) DO LOCK(iID+12,iID+14,iID+15,iID+16,iID+21,iID+22,iID+23,iID+24,iID+25,iID+26)
+  IDS=iID+11 WHENEVER ((OUT_UsrAcknAxisXYZ)AND(mcDBB_DrivesOK))      DO UNLOCK(iID+12,iID+14,iID+15,iID+16,iID+21,iID+22,iID+23,iID+24,iID+25,iID+26)
+  ;
+  SYG_IM[iSYG]=0 rFactor=(($MA_MAX_AX_ACCEL[mcAxZ])/POT($MA_MAX_AX_VELO[mcAxZ]))
+  ;
+  ;In Spindelnaehe
+  ;
+  IF (grWorkarea_MinPos_Z>$MA_POS_LIMIT_MINUS[mcAxZ])
+    IDS=iID+12 WHENEVER ($VA_IS[mcAxZ]<(grAxisPos[1]/2)) DO $AC_FCT1[1]=(7200000*rFactor) $AC_FCT0[1]=(-grWorkarea_MinPos_Z*(7200000*rFactor)) SYG_IM[iSYG]=1
+    IDS=iID+13 WHENEVER (SYG_IM[iSYG]==1) DO mcBAxVldPos=(($AA_IM[mcAxB]<=grWorkarea_MaxPos_B)OR((ABS($AA_IM[mcAxB]-grWorkarea_VldPos1_B)<=grBAxAllRan)AND(grWorkarea_VldPos1_B>0))OR((ABS($AA_IM[mcAxB]-grWorkarea_VldPos2_B)<=grBAxAllRan)AND(grWorkarea_VldPos2_B>0))OR((ABS($AA_IM[mcAxB]-grWorkarea_VldPos3_B)<=grBAxAllRan)AND(grWorkarea_VldPos3_B>0))OR($AA_IM[mcAxB]>=grWorkarea_MinPos_B))
+    IDS=iID+14 WHENEVER (((grWorkarea_MinPos_Z-$VA_IS[mcAxZ])>$AA_DTEB[mcAxZ])AND($AA_DTEB[mcAxZ]<0)AND(SYG_IM[iSYG]==1)AND((mcBAxVldPos==0)OR($AA_STAT[mcAxB]<2))) DO $AA_OVR[mcAxZ]=0 $AC_OVR=0 SETAL(AL_PosBZ_ProtectedArea)
+    IDS=iID+15 WHENEVER (($VA_IS[mcAxZ]<grWorkarea_MinPos_Z)AND(SYG_IM[iSYG]==1)AND((mcbBAxVldPos==0)OR($AA_STAT[mcAxB]<2))) DO $AA_OVR[mcAxB]=0 $AC_OVR=0 SETAL(AL_PosBZ_ProtectedArea)
+  ELSE
+    IDS=iID+12 WHENEVER ($VA_IS[mcAxZ]<(grAxisPos[1]/2)) DO SYG_IM[iSYG]=0
+  ENDIF
+  ;
+  ;In Paletenwechselnaehe
+  ;
+  IF (grWorkarea_MaxPos_Z<grAxisPos[1])
+    IDS=iID+16 WHENEVER ($VA_IS[mcAxZ]>=(grAxisPos[1]/2)) DO $AC_FCT1[1]=(-7200000*rFactor) $AC_FCT0[1]=(-grWorkarea_MaxPos_Z*(-7200000*rFactor)) SYG_IM[iSYG]=2
+    IDS=iID+17 WHENEVER (SYG_IM[iSYG]==2) DO mcBAxVldPos=(($AA_IM[mcAxB]<=grWorkarea_MaxPos_B)OR($AA_IM[mcAxB]>=grWorkarea_MinPos_B))
+    IDS=iID+18 DO SYG_RM[iSYG]=(grWorkarea_MaxPos_B-$AA_IM[mcAxB]) SYG_RM[iSYG+1]=(grWorkarea_MinPos_B-$AA_IM[mcAxB])
+    IDS=iID+19 WHENEVER (SYG_RM[iSYG]<0) DO SYG_RM[iSYG]=SYG_RM[iSYG]+360
+    IDS=iID+20 WHENEVER (SYG_RM[iSYG+1]>0) DO SYG_RM[iSYG+1]=SYG_RM[iSYG+1]-360
+    IDS=iID+21 WHENEVER ((((grWorkarea_MaxPos_Z-$VA_IS[mcAxZ])<$AA_DTEB[mcAxZ])AND($AA_DTEB[mcAxZ]>0)AND((mcBAxVldPos==0)OR($AA_DTEB[mcAxB]>SYG_RM[iSYG])OR($AA_DTEB[mcAxB]<SYG_RM[iSYG+1])))AND($AC_PROG==2)AND($AA_TYP[mcAxZ]<>3)) DO $AA_OVR[mcAxZ]=0 $AC_OVR=0 SETAL(AL_PosBZ_ProtectedArea)    IDS=iID+22 WHENEVER ((($VA_IS[mcAxZ]>grWorkarea_MaxPos_Z)AND(($AA_DTEB[mcAxB]>SYG_RM[iSYG])OR($AA_DTEB[mcAxB]<SYG_RM[iSYG+1])))AND(($AC_PROG==2)OR($AA_TYP[mcAxB]==3))) DO $AA_OVR[mcAxB]=0 $AC_OVR=0 SETAL(AL_PosBZ_ProtectedArea)
+  ELSE
+    IDS=iID+16 WHENEVER ($VA_IS[mcAxZ]>=(grAxisPos[1]/2)) DO SYG_IM[iSYG]=0
+  ENDIF
+  ;
+  rIPO=(2*$MN_IPO_CYCLE_TIME) $AC_FCTLL[1]=0 $AC_FCTUL[1]=1 $AC_FCT2[1]=0 $AC_FCT3[1]=0
+  ;
+  IDS=iID+23 DO SYG_RM[iSYG+2]=$VA_IS[mcAxZ]+($VA_VACTB[mcAxZ]*rIPO/60)
+  IDS=iID+24 DO SYNFCT(1,SYG_RM[iSYG+3],SYG_RM[iSYG+2]) SYG_RM[iSYG+4]=SYG_RM[iSYG+3]*100
+  IDS=iID+25 WHENEVER ((((mcbNoCmdPlusZ)AND(SYG_IM[iSYG]==1))OR((mcbNoCmdMinusZ)AND(SYG_IM[iSYG]==2)))AND(mcBAxVldPos==0)AND(($AC_PROG<>2)OR($AA_TYP[mcAxZ]==3))) DO $AA_OVR[mcAxZ]=SYG_RM[iSYG+4] $AC_OVR=SYG_RM[iSYG+4]
+  IDS=iID+26 WHENEVER (((($VA_IS[mcAxZ]>grWorkarea_MaxPos_Z)AND(SYG_IM[iSYG]==2)AND($AC_PROG<>2))OR(($VA_IS[mcAxZ]<grWorkarea_MinPos_Z)AND(SYG_IM[iSYG]==1)))AND(mcBAxVldPos==0)) DO $AA_OVR[mcAxB]=0 SETAL(AL_WorkSpaceBZViolation)
+ENDIF
+;
+IF (gbSwivHeadExist)AND(sMCType=="NBH800")
+  ;
+  ; Schwenkkopf - Kollisionsgefahr mit der WzWTuer -> X Sperren
+  ;------------------------------------------------------------
+  ;
+  ;Bei NBH800
+  ;
+  ;Mit 160423_Ueberwachung.xlsx bestimmter Bezugswert
+  rCalcValue=grInchMetr*230.0
+  ;
+  ;Berechnung der maximalen X-Achsposition abhaengig von der C-Achse
+  IDS=iID+27 DO SYG_RM[iSYG+5]=$MA_POS_LIMIT_PLUS[mcAxX]-(SIN($AA_IM[mcAxC])*($MA_POS_LIMIT_PLUS[mcAxX]-rCalcValue))
+  ;
+  ;$A_DBB[10]: Status X1-Achse
+  ;$A_DBB[72]: Status C1-Achse
+  ;
+  ;Vorschub Halt und Alarmmeldung, wenn Schwenkspindel im Kollisionsbereich der Werkzeugwechseltuere
+  IDS=iID+28 WHENEVER ($AA_IM[mcAxC]<-180.0)AND($AC_TRAFO==0)AND((($AA_IM[mcAxX]>SYG_RM[iSYG+5])AND(mcbNoCmdMinusX))OR(($AC_PROG==2)AND((SYG_RM[iSYG+5]-$AA_IM[mcAxX])<$AA_DTEB[mcAxX])AND($AA_DTEB[mcAxX]>0))) DO $AA_OVR[mcAxX]=0 $AC_OVR=0 SETAL(AL_SwivSpCollision)
+  IDS=iID+29 WHENEVER ($AA_IM[mcAxX]>SYG_RM[iSYG+5])AND($AA_IM[mcAxC]<-180.0)AND(mcbNoCmdPlusB) DO $AA_OVR[mcAxC]=0 $AC_OVR=0 SETAL(AL_SwivSpCollision)
+ENDIF
+;
+RET
+

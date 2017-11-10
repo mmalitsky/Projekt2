@@ -1,0 +1,60 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MGUD_BS.DEF
+;# Task:      GUD Definition
+;# Version:   V06.00.08
+;# Date:      11.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;Beschreibung:
+;
+; Globale Anwenderdaten
+; SIEMENS Werkzeugverwaltung   
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 11.08.2017 / Simons
+; - Neuversionierung
+; - MGUD_HHDTM, MGUD_APC hinzu
+;
+; V01.06.02 - Maerz 2014 / Fengler
+; - Vorlage
+;
+;-------------------------------------
+ 
+APR 11 APW 11
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_BS_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_BS_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_CLP_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_CLP_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_PS_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_PS_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_ACC_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_ACC_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_LC_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_LC_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_IT_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_IT_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_APC_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_APC_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_HHDTM_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_HHDTM_DEF"
+ENDIF
+IF ISFILE( "/_N_DEF_DIR/_N_MGUD_PRINT_DEF")
+  CALL "/_N_DEF_DIR/_N_MGUD_PRINT_DEF"
+ENDIF
+M30

@@ -1,0 +1,240 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkMagType.SPF
+;# Task:      Werkzeugtyp bestimmen
+;# Version:   V06.00.07
+;# Date:      03.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: DDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neue Versionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 26.04.2017 / Simons
+; - Neue Versionierung
+; - geaenderte Fehlernummern - wegen
+;   Aufschluesselung im aufrufenden Baustein
+; - formale Aenderungen
+;
+; V06.00.02 - 05.04.2016 / Simons
+; - Neue Versionierung
+;
+; V04.00.00 - 15.04.2015 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Ermittelt den WzTyp aus den Kollisionsdaten des Wz's
+; Verwendung beim Wz-Beladen (Balluff)
+;
+; Achtung: Nicht bei TM HHD
+;
+; Eingangsparameter:
+; iMode: 0=Nur Pruefen
+;        1=Anpassung der Werkzeugdaten
+;
+; iTNo: Werkzeugnr. des zu pruefenden Werkzeug
+;
+; Ausgangsparameter:
+; iChkRes: Pruefergebnis
+; -4 : Kein Werkzeug vorhanden
+; -3 : kein Radius
+; -2 : keine Laenge
+; -1 : Kein zutreffender Platztyp bekannt
+;  0 : Pruefung o.K. ohne Anpassung
+;  1 : Platztyp u./o. Nebenplatzbetr. angepasst
+;
+;------------------------------------
+
+PROC ChkMagType(INT iMode, INT iTNo, VAR INT iChkRes)
+
+DEF STRING[32] sCycName="ChkMagType V06.00.07"
+;
+DEF BOOL bChgSize=FALSE, bChgType=FALSE
+;
+DEF INT iToolType, iSizeL, iSizeR, iSizeDef, iMagNo, iPotNo, iCount, iToolType, iOldToolType
+;
+DEF REAL rToTol=0.200, rColLen, rColRad
+
+iChkRes=0
+
+;Plausibilitaetsueberpruefungen
+;------------------------------
+;
+IF (iTNo>0)
+  ;
+  IF ($P_TOOLEXIST[iTNo])
+    iOldToolType=$TC_TP7[iTNo]
+    iMagNo=$A_TOOLMN[iTNo]
+    iPotNo=$A_TOOLMLN[iTNo]
+    iSizeL=$TC_TP3[iTNo]
+    iSizeR=$TC_TP4[iTNo]
+
+    rColLen=$TC_TPC7[iTNo] / grInchMetr
+    rColRad=$TC_TPC8[iTNo] / grInchMetr
+
+  ELSE
+    iChkRes=-4
+    GOTOF _END
+  ENDIF
+ELSE
+  iChkRes=-4
+  GOTOF _END
+ENDIF
+
+IF (rColLen<=0)
+  ;Keine Kollisionsdaten angegeben
+  iChkRes=-2
+  GOTOF _END
+ENDIF
+IF (rColRad<=0)
+  ;Keine Kollisionsdaten angegeben
+  iChkRes=-3
+  GOTOF _END
+ENDIF
+
+;======
+;TYPE 1
+;======
+IF (rColLen<(300+rToTol))AND(rColRad<( 50.0+rToTol))  GOTOF _TYPE1
+IF (rColLen<(430+rToTol))AND(rColRad<( 35.0+rToTol))  GOTOF _TYPE1
+IF (rColLen<(560+rToTol))AND(rColRad<( 22.5+rToTol))  GOTOF _TYPE1
+
+;======
+;TYPE 2
+;======
+IF (rColLen<(560+rToTol))AND(rColRad<( 62.5+rToTol))  GOTOF _TYPE2
+
+;======
+;TYPE 5
+;======
+IF (rColLen<(260+rToTol))AND(rColRad<(162.5+rToTol))  GOTOF _TYPE5
+IF (rColLen<(300+rToTol))AND(rColRad<(125.0+rToTol))  GOTOF _TYPE5
+IF (rColLen<(450+rToTol))AND(rColRad<(100.0+rToTol))  GOTOF _TYPE5
+IF (rColLen<(600+rToTol))AND(rColRad<( 60.0+rToTol))  GOTOF _TYPE5
+
+;Kein gueltiger Magazinplatztyp gefunden
+iChkRes=-1
+GOTOF _END
+
+;======
+_TYPE1:
+;======
+iToolType=1
+SizeDef=1
+GOTOF _SAVE
+
+;======
+_TYPE2:
+;======
+iToolType=2
+iSizeDef=3
+GOTOF _SAVE
+
+;======
+_TYPE5:
+;======
+iToolType=5
+iSizeDef=2
+IF (rColLen > (450+rToTol))  ; < 600
+  IF (rColRad > (30+rToTol)) ; < 60
+    iSizeDef=3
+  ENDIF
+ELSE
+  IF (rColLen > (300+rToTol))   ;<450
+    IF (rColRad > (75+rToTol))  ;<100
+      iSizeDef=3
+    ENDIF
+  ELSE
+    IF (rColLen > (260+rToTol))   ;<300
+      IF (rColRad > (100+rToTol)) ;<125
+        iSizeDef=3
+      ENDIF
+    ELSE
+      IF (rColLen > 180.2)          ;<260
+        IF (rColRad > (100+rToTol)) ;<162.5
+          iSizeDef=3
+        ENDIF
+      ELSE                          ;<180.2
+        IF (rColRad > (125+rToTol)) ;<162.5
+          iSizeDef=3
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+ENDIF
+
+;=====
+_SAVE:
+;=====
+
+IF (iSizeL <> iSizeDef)
+  iSizeL=iSizeDef
+  bChgSize=TRUE
+ENDIF
+;
+IF (iSizeR <> iSizeDef)
+  iSizeR=iSizeDef
+  bChgSize=TRUE
+ENDIF
+;
+IF (iOldToolType <> iToolType)
+  bChgType=TRUE
+ENDIF
+;
+IF (iMode>0)
+  ;
+  IF (bChgType)OR(bChgSize)
+    ;
+    IF (iMagNo>0)AND(iPotNo>0)
+      ;
+      IF ($TC_MPP6[iMagNo,iPotNo]==iTNo)
+        ;
+        $TC_MPP6[iMagNo,iPotNo]=0
+        ;
+        IF (bChgSize)
+          $TC_TP3[iTNo]=iSizeL
+          $TC_TP4[iTNo]=iSizeR
+        ENDIF
+        ;
+        IF (bChgType)
+          $TC_TP7[iTNo]=iToolType
+        ENDIF
+        ;
+        $TC_MPP6[iMagNo,iPotNo]=iTNo
+        iChkRes=1
+      ELSE
+        GOTOF _END
+      ENDIF
+    ELSE
+      ;
+      IF (bChgType)
+        $TC_TP7[iTNo]=iToolType
+      ENDIF
+      ;
+      IF (bChgSize)
+        $TC_TP3[iTNo]=iSizeL
+        $TC_TP4[iTNo]=iSizeR
+      ENDIF
+      ;
+      iChkRes=1
+    ENDIF
+  ENDIF
+ENDIF
+
+;====
+_END:
+;====
+;
+RET

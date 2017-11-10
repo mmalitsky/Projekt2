@@ -1,0 +1,112 @@
+;VERSION: 01.01.00, Juni 2016/Balles
+;
+;*# *************************************************
+;*#        Variante Cassettenmagazin nbh630ff
+;*# mit HHD-Werkzeugverwaltung unter sinumerikOperate
+;*#        zusaetzliche MMAC's fuer die WzV
+;*# *************************************************
+
+;*# #################################################
+;*#                Globale Makros
+;*#            2-kanalige Ausfuehrung
+;*# #################################################
+
+;*# ------------------------------------------
+;*# Herstellerspezifische Makros
+;*# --- Siemens Werkzeugverwaltung ---
+;*# Achtung:
+;*# Anzahl begrenzt durch MD 18160 (MM_NUM_USER_MACROS)
+;*# ------------------------------------------
+
+;DEFINE XXXX AS 3210
+
+
+;###########################################################
+;Zustandsbitleiste1 NC -> WzV
+DEFINE mcState1MagActive AS 'H1'
+DEFINE mcState1TCActive AS 'H2'
+; AS 'H4'
+; AS 'H8'
+; AS 'H10'
+; AS 'H20'
+; AS 'H40'
+; AS 'H80'
+
+DEFINE mcState1LoadFromMag   AS 'H100'  ;Bit8
+DEFINE mcState1UnloadToMag   AS 'H200'  ;Bit9
+DEFINE mcState1RemoveFromMag AS 'H400'  ;Bit10
+; AS 'H800'
+DEFINE mcState1LoadBySpindle   AS 'H1000' ;Bit12
+DEFINE mcState1UnloadBySpindle AS 'H2000' ;Bit13
+; AS 'H4000'
+; AS 'H8000'
+
+DEFINE mcState1MoveTool AS 'H10000' ; Bit 16
+
+;###########################################################
+;Zustandswort2 NC -> WzV: Nr. fuer Bedienerhinweise an WzV
+;Zahlenwerte sind stets mit der HH-WzV abzugleichen !!
+;Wertebereich 0..999
+;
+DEFINE mcState2Clear AS 0
+DEFINE mcState2Finished AS 1
+DEFINE mcState2Aborted AS 2
+DEFINE mcState2Error AS 3
+DEFINE mcState2PressNCStart AS 4
+DEFINE mcState2WaitForEmptySp AS 5
+DEFINE mcState2WaitForEmptyDG AS 6
+DEFINE mcState2WaitForEmptyHG AS 7
+
+DEFINE mcState2LoadingActive AS 8
+DEFINE mcState2PutToolInSp AS 9
+DEFINE mcState2MovingToolToMag AS 10
+
+DEFINE mcState2UnloadingActive AS 11
+DEFINE mcState2MovingToolToSp AS 12
+DEFINE mcState2GetToolFromSp AS 13
+
+DEFINE mcState2WaitForCassPutIn AS 20
+DEFINE mcState2WaitForCassUnlocked AS 21
+DEFINE mcState2WaitForToolRemoved AS 22
+DEFINE mcState2WaitForToolPutIn AS 23
+
+;bzgl. Chip-Lesen/-Schreiben: Statusinfos
+DEFINE mcState2WaitReadingChip AS 30
+DEFINE mcState2ReadChipRunning  AS 31
+DEFINE mcState2WaitWritingChip AS 32
+DEFINE mcState2WriteChipRunning AS 33
+DEFINE mcState2WaitComparingChip AS 34
+DEFINE mcState2CompChipRunning AS 35
+
+;bzgl. Chip-Lesen/-Schreiben: Fehlerinfos
+DEFINE mcState2ErrNoChipOrNoTool AS 40
+DEFINE mcState2ErrTlLockedDueRWError AS 41
+DEFINE mcState2ErrFromChipToTM AS 42
+DEFINE mcState2ErrFromTMToChip AS 43
+DEFINE mcState2ErrConvertData AS 44
+DEFINE mcState2ErrIdentSystem AS 45
+DEFINE mcState2ErrToolInMagDGSP AS 46
+DEFINE mcState2ErrDifferentTData AS 47
+DEFINE mcState2ErrFromTDataSvr AS 48
+DEFINE mcState2ErrTlIdChangedAfterRW AS 49
+DEFINE mcState2ErrNoDataToWriteToChip AS 50
+DEFINE mcState2ErrResetBitTlWithChip AS 51
+DEFINE mcState2ErrDueDataNoChip AS 52          ;lt. Wz-Daten <Werkzeug ohne Chip>
+DEFINE mcState2ErrTLocNotQualified AS 53  ;Zielplatz %1 nicht geeignet
+
+
+
+;###########################################################
+;Zustandsbitleiste1 WzV -> NC
+DEFINE mcState1ToNCAbortReqByUser AS 1   ;Aufforderung, Auftragsserie vor dem naechsten Teilauftrag zu beenden
+
+;Optionsbits HHD-WzV giOptToolMgmt
+DEFINE mcOptTM_CheckToolTested AS 'H1'
+DEFINE mcOptTM_OnUnloadReservePl AS 'H2'
+
+;Kennungen fuer Datentelegramme NC -> HHD-WzV (R: Request)
+DEFINE mcRGetFreeLoc AS 1000        ;Leerplatzsuche/Kollisionsbetrachtung
+DEFINE mcRPlaceReservation AS 2000  ;einen Platz im Magazin als <fuer ein Werkzeug reserviert> kennzeichnen
+
+M30
+

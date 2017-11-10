@@ -1,0 +1,112 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CheckMagLoad.SPF
+;# Task:      Pruefung der Scheiben-
+;#            /Kettenbeladung
+;# Version:   V06.00.05
+;# Date:      27.09.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+; Verlauf:
+;
+; V06.00.05 - 27.09.2015 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.04 - 06.09.2015 / Simons
+; - Prototyp
+;
+;----------------------------------
+;
+; Beschreibung:
+;--------------
+;
+; Ermittlung von
+; - Gesamtbeladung
+; - max. WzKippmoment
+; - Asym. Beladung (180 Grad/gleitend)
+; bei Scheibenmagazinen mit max. 100
+; Plaetzen.
+;
+; Eingangsparameter:
+; iMagNo -  Magazinummer der Scheibe
+;
+; Ausgangsparameter:
+;
+;----------------------------------
+
+PROC CheckMagLoad (VAR REAL rAsymLoad, VAR INT iResult, VAR STRING[32] sResult, INT iMagNo)
+
+DEF STRING[32] sCycName
+DEF INT iCount, iAsymCount, iLastCount, iTNo, iAsymArea
+DEF REAL rLoadAll, rTmpLoad, rMaxJ
+DEF REAL rPlLoad[201]
+
+sCycName="DiskLoad V06.00.04" sResult="" iResult=0 rLoadAll=0.0 rMaxJ=0.0 rAsymLoad=0.0
+;
+IF (grDiskLoadMax==0)OR(grAsymDiskLoadMax==0) GOTOF ENDE
+;
+IF (NOT $P_SUBPAR[4])
+  iMagNo=1
+ENDIF
+;
+IF (giNumPlacesInMag[iMagNo]>100)
+  ;
+  ;Zuviele Magazinplaetze
+  iResult=AL_NoSupport sResult="MAX. 100 Places"
+  GOTOF ENDE
+ENDIF
+;
+;Belegung und Gesamtgewicht ermitteln
+FOR iCount=1 TO giNumPlacesInMag[iMagNo]
+  ;
+  iTNo=$TC_MPP6[iMagNo,iCount] grResult1=0.0
+  IF (iTNo>0)
+    ;
+    ;Platz belegt
+    ;
+    OEM_TLData(iTNo,22)
+  ENDIF
+  rLoadAll=(rLoadAll+OEM_rWeight) rPlLoad[iCount]=OEM_rWeight rPlLoad[iCount+giNumPlacesInMag[iMagNo]]=OEM_rWeight rMaxJ=MAXVAL(rMaxJ,OEM_rTiltTorque)
+ENDFOR
+;
+iLastCount=TRUNC(giNumPlacesInMag[iMagNo]/2) iAsymArea=TRUNC(giNumPlacesInMag[iMagNo]/2)
+;
+FOR iCount=1 TO iLastCount
+  ;
+  rTmpLoad=0.0
+  FOR iAsymCount=1 TO giNumPlacesInMag[iMagNo]
+    IF (iAsymCount<=iAsymArea)
+      rTmpLoad=rTmpLoad+rPlLoad[iAsymCount+iCount-1]
+    ELSE
+      rTmpLoad=rTmpLoad-rPlLoad[iAsymCount+iCount-1]
+    ENDIF
+  ENDFOR
+  ;
+  rAsymLoad=MAXVAL(ABS(rTmpLoad),rAsymLoad)
+  ;
+ENDFOR
+;
+IF (rLoadAll>0)
+  ;
+  IF (rLoadAll>grDiskLoadMax)
+    sResult=<<rLoadAll<<" > "<<grDiskLoadMax iResult=1
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (rAsymLoad>grAsymDiskLoadMax)
+    sResult=<<rAsymLoad<<" > "<<grAsymDiskLoadMax iResult=2
+    GOTOF ENDE
+  ENDIF
+  ;
+ENDIF
+;
+;====
+ENDE:
+;====
+;
+RET

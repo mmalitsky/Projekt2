@@ -1,0 +1,39 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TC_BS.SPF
+;# Task:      Tool Change
+;# Version:   V06.00.04
+;# Date:      19.08.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+; V06.00.04 - 19.08.2016 / Simons
+; - Neuversionierung
+;
+; V03.02.00 - 19.10.2012 / Malitsky
+; - Vorlage
+;
+;------------------------------------
+
+PROC TestStop(INT iMode)
+
+IF NOT $P_SUBPAR[1]
+  iMode=0
+ENDIF
+
+IF ($P_CHANNO==1)
+  TstStop1(iMode)
+ENDIF
+
+IF ($P_CHANNO==2)
+  TstStop2(iMode)
+ENDIF
+
+RET
+

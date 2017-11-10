@@ -1,0 +1,383 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     REV_CHA2.SPF
+;# Task:      Home Programm Kanal 2
+;# Version:   V06.00.06
+;# Date:      21.04.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: D/D60/D120/CHAIN
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 14.10.2016 / Simons
+; - Neuversionierung
+; - TM HHD (04.02.00 / Juni 2016, Balles)
+; - V1 Achse in Teilungsposition fahren
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+; - Miksch hinzu
+; - TM HHD (04.02.00 / Juni 2016, Balles)
+;
+; V06.00.03 - 29.05.2016 / Simons
+; - Korrektur NC Wechsler
+; - Einfuehrung TM HHD
+; - Entfernen Zwischenschritte MTC
+;
+; V06.00.01 - 14.08.2015 / Simons
+; - WM307 eingefuehrt
+;
+; V06.00.00 - 16.07.2015 / Huettner
+; - ProtoTyp
+;
+; V04.00.00 / 06.02.2015 / Huettner
+; - Vorlage
+; ------------------------------------
+; Beschreibung:
+;
+; Wird aufgerufen
+; - ueber ASUP bei Betaetigen der
+;   HOME-Taste
+;
+; Abfolge:
+;
+; MTC:
+;  NeuWz: HG->DG1->SP
+;  AltWz: SP->DG2->HG
+;
+; WM286:
+;  NeuWz: HG->DG1->SP
+;  AltWz: SP->DG2->HG
+;
+; WM307:
+;  NeuWz: MAG->DG1->SP
+;  AltWz: SP->DG2->MAG
+;
+; PickUpscheibe:
+;  NeuWz: MAG->SP
+;  AltWz: SP->MAG
+;
+;----------------------------
+PROC Rev_Cha2 SBLOF DISPLOF
+
+DEF STRING[32] sCycName="Rev_Cha2 V06.00.06", sAlarmParam=""
+;
+DEF BOOL bMagIsDDisk, bMagIsFlat, bDGIsNcAxis, bMagIsPickUpDisk, bDGIsMTC, bDGIsWM286, bDGIsWM307, bMagIsChain, bWithHead, bMagIsWM307, bMagIsMiksch
+;
+DEF INT icMagNo=1, icWait=0.5, iAlarmNo=0, iDGStatus, iCount, iNextStep, iTNoMag, iMagPos
+;
+DEF REAL rVelo, rFeedV1, rMagPlCount, rMagPlLastPos, rMagPlDist, rTargetPos
+
+;-0.0--GndSt-
+;------------
+gbPrepActiv=FALSE gbPrepDone=FALSE gbQuitSysCha2=FALSE OUT_RevCha2Active=TRUE OUT_ReqLoopEndChan2=FALSE
+
+;-1.0--Konfiguration-
+;--------------------
+bDGIsMTC=((giDGType B_AND 'B1')<>0) bDGIsWM286=((giDGType B_AND 'B10')<>0) bDGIsWM307=((giDGType B_AND 'B100')<>0) bDGIsNcAxis=((bDGIsWM286)OR(bDGIsWM307))
+bMagIsPickUpDisk=((giMagType B_AND 'B1')<>0) bMagIsFlat=((giMagType B_AND 'B1000010')<>0) bMagIsDDisk=((giMagType B_AND 'B10110000')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsWM307=((bMagIsChain)AND(bDGIsWM307)) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307))
+
+;-2.0--Vorbelegungen--
+; Geschwindigkeit beim
+; Freifahren = 3 m/min
+;---------------------
+rVelo=3000*grInchMetr
+;
+IF (gbTMIsHHD)
+
+  ;Zusatzpar. fuer Zyklus MovBlock zuruecksetzen
+  giParaMovBlock[0]=0  giParaMovBlock[1]=0  giParaMovBlock[2]=0  giParaMovBlock[3]=0 giParaMovBlock[4]=0
+  
+  ;Status-/Bedienerrueckmeldungen an WzV:
+  giStateToMMC[0]=0 giStateToMMC[1]=0
+  
+  ;<WzV->NC: Abbruch durch Bediener> zuruecksetzen
+  giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser);
+  
+  ;Quittierungsregister dem Anforderungsregister nachziehen:
+  giAcknFromMMC=giReqToMMC 
+ENDIF
+
+M_NoCycleEnd
+
+IF (bMagIsPickUpDisk)
+  ;
+  ;Neutrale Achse
+  RELEASE(mcAxV1)
+ENDIF
+
+;-10.0-Status-
+;-------------
+IF (grInchMetr<=0)
+  iAlarmNo=AL_ScalingSystemUnknown
+  GOTOF HandleAlarm
+ENDIF
+;
+IF (gbWithHG)AND((giNumLaneX<=0)OR((giNumLaneZ<=0)AND(NOT bMagIsDDisk)))
+  iAlarmNo=AL_NoLaneDataFound
+  GOTOF HandleAlarm
+ENDIF
+
+;-400.0--Schritt 1-
+; Synchronisation
+; mit Kanal 1
+;------------------
+iNextStep=1
+;
+REPEAT
+  STOPRE
+  G4 F=icWait
+UNTIL (giStepHome==iNextStep)
+
+;-400.1--Schritt 1-
+; Aktuelle Belegung
+;------------------
+giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0 iMagPos=0
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG]
+ENDIF
+IF (bMagIsChain)OR(bMagIsPickUpDisk)
+  iMagPos=OUTA_ActPosV1
+  IF (iMagPos>0)
+    iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+  ENDIF
+ENDIF
+
+IF (bDGIsMTC)OR(bDGIsNCAxis)
+  ;
+  ;-400.2--Schritt 1-
+  ;------------------
+  ;
+  IF (gbWithHG)
+    ;
+    IF (giTNoHG>0)
+      ;
+      IF (NOT mcbDBB_HGClamped)
+        M_HgClamp1
+        G04 F=icWait
+      ENDIF
+    ELSE
+      ;
+      IF ((giTNoDG1>0)OR(giTNoDG2>0)OR(OUT_DGRotInBasePos))AND(OUT_HgInTcPos)
+        ;
+        ;Geloestes HG in WzWPosition bereitstellen
+        ;
+        M_HgUnclamp1
+        G04 F=icWait
+        ;
+        IF (bMagIsDDisk)
+          M_HgAdv1
+          G04 F=icWait
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF (bMagIsWM307)
+    ;
+    IF (iTNoMag>0)AND(NOT mcbDBB_ChClamped)
+      M_HgClamp1
+      G04 F=icWait
+    ENDIF
+  ENDIF
+  ;
+  IF (bMagIsMiksch)
+    ;
+    IF (NOT mcbDBB_ChInPos)AND(mcbDBB_DGLinInTCPos)
+      ;
+      rFeedV1=3*360.0 rMagPlCount=$MA_INDEX_AX_DENOMINATOR[mcAxV1] rMagPlLastPos=$MA_MODULO_RANGE[mcAxV1]
+      IF (rMagPlCount>0)
+        rMagPlDist=rMagPlLastPos/rMagPlCount
+      ELSE
+        iAlarmNo=AL_NoSupport sAlarmParam="$MA_INDEX_AX_DENOMINATOR[mcAxV1]=0"
+        GOTOF HandleAlarm
+      ENDIF
+      ;
+      IF (rMagPlLastPos<=0)
+        iAlarmNo=AL_NoSupport sAlarmParam="$MA_MODULO_RANGE[mcAxV1]=0"
+        GOTOF HandleAlarm
+      ENDIF
+      ;
+      ;naechste Teilungsposition
+      rTargetPos=TRUNC($AA_IM[mcAxV1]/rMagPlDist+0.5)*rMagPlDist
+      ;
+      FINEA[mcAxV1] FA[mcAxV1]=rFeedV1 POS[mcAxV1]=DC(rTargetPos)
+      WAITP(mcAxV1)
+    ENDIF
+    ;
+    IF (NOT mcbDBB_DGLinInTCPos)
+      ;
+      ;DG befindet sich noch in der Bereitstellung
+      ;
+      ;DG in Position WzW bringen
+      GetMagSt
+    ENDIF
+  ENDIF
+ENDIF
+
+;-500.0--Schritt 2--------
+; Kanal 1: WzW Freifahren
+;-------------------------
+STOPRE
+giStepHome=2 iNextStep=giStepHome+1
+;
+REPEAT
+  STOPRE
+  G4 F=icWait
+UNTIL (giStepHome==iNextStep)
+
+;-600.0--Schritt 3--------
+; Magazinstatus herstellen
+;-------------------------
+GetMagSt
+;
+IF (gbWithHG)AND(OUT_TcActive)AND(OUT_ComeInTC)AND(NOT gbMagWithFixedGuide)
+  ;
+  ;-610.0--Schritt 3----------
+  ; HG in WzW Position bringen
+  ;---------------------------
+  ;
+  IF (bDGIsMTC)
+    ;
+    IF (OUT_DGRotInTCPos)
+      ;
+      ;DG horizontal
+      ;
+      IF ((mcDBB_PlcStepTC B_AND 'H80')<>0)
+        ;
+        ;SollposDG<>IstposDG
+        ;
+        iDGStatus=1
+      ELSE
+        ;
+        ;SollposDG=IstposDG
+        ;
+        iDGStatus=4
+      ENDIF
+    ELSE
+      ;
+      ;DG nicht horizontal
+      ;
+      iDGStatus=2
+    ENDIF
+    ;
+    ;DG leer und horizontal sowie
+    ;a) im Bereich WzW: HG gehoben/horizontal bzw. vorne und mit Wz HG gespannt / ohne Wz HG geloest
+    ;b) ausserhalb mit Wz HG gespannt, gesenkt/vertikal oder gehoben/horizontal
+    ;   bzw. vorne ohne Wz: HG geloest, gehoben/vertikal bzw. hinten
+    ;
+    IF ((giTNoDg1<=0)AND((iDGStatus==1)OR(iDGStatus==2)))OR((giTNoDg2<=0)AND((iDGStatus==4)OR(iDGStatus==5)))
+      ;
+      ;Kein Wz in DG1/DG2 und das HG steht vor der richtigen DG Seite -> HG kann in WzW-Position fahren
+      FINEA[mcAxX1] FA[mcAxX1]=rVelo POS[mcAxX1]=grHgTcPosX
+    ENDIF
+  ENDIF
+ENDIF
+
+;-700.0--Schritt 4-----------------------
+; an Kanal 1 -> Magazinstatus hergestellt
+;----------------------------------------
+STOPRE
+giStepHome=iNextStep+1 iNextStep=giStepHome+1
+;
+REPEAT
+  STOPRE
+  G4 F=icWait
+UNTIL (giStepHome==iNextStep)
+
+;-800.0--Schritt 5---------------------
+; Sys_Cha2 aufrufen, um Freifahrauftrag
+; aus Kanal 1 abzuarbeiten.
+; Sys_Cha2 wird anschliessend beendet.
+;---------------------------------------
+gbQuitSysCha2=TRUE
+;
+Sys_Cha2
+
+;-810.0--Schritt 5--------------------
+; Bei Magazinbauart mit fester Kulisse
+; muss die Werkzeugwechseltuer noch
+; geschlossen werden. Dabei ist die
+; Kollisionslaenge des Werkzeuges zu
+; beruecksichtigen.
+;-------------------------------------
+IF (gbMagWithFixedGuide)
+  ;
+  IF (giTNoHg>0)
+    ;
+    ;Wz in HG
+    ;
+    ;Wz Kennungen und Kollisionslaenge Lesen
+    OEM_TlData(giTNoHg)
+    ;
+    IF (OEM_rColLen<=grMaxColLenZDoor)AND(OEM_rColLen>0)
+      ;
+      ;HG freigefahren
+      M_TcDoorClose0
+    ENDIF
+  ELSE
+    M_TcDoorClose0
+  ENDIF
+ENDIF
+
+;-840.0--Schritt 5------------
+; Synchronisierung mit Kanal 1
+;-----------------------------
+OUT_RevCha2Active=FALSE
+
+;-1000.0--Ende-
+;--------------
+;
+;====
+ENDE:
+;====
+;
+STOPRE
+;
+;-1000.1--Ende-----
+; Aktuelle Belegung
+;------------------
+giTNoSp=$TC_MPP6[9998,mcLocSp] giMMC_TNo=0
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2] giMMC_TNo=giTNoDg2
+ENDIF
+IF (gbWithHG)
+  giTNoHG=$TC_MPP6[9998,mcLocHG] giMMC_TNo=giTNoHG
+ENDIF
+;
+;-1000.2--Ende-----------------
+; Bild Wz Pruefen aktualisieren
+;------------------------------
+IF (giMMC_TNo>0)
+  gsMMC_TName=$TC_TP2[giMMC_TNo] giToDuplo=$TC_TP1[giMMC_TNo] giMMC_DuploNo=giToDuplo
+ELSE
+  gsMMC_TName="" giMMC_DuploNo=0 giToDuplo=0
+ENDIF
+;
+M30
+
+;-9999.0--Alarme-
+;----------------
+;
+;===========
+HandleAlarm:
+;===========
+;
+OUT_RevCha2Active=FALSE
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+M30

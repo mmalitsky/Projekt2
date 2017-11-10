@@ -1,0 +1,167 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MovePallet.SPF
+;# Task:      Palettenwechsel
+;# Version:   V06.00.08
+;# Date:      01.07.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 01.7.2017 / Simons
+; - Neuversionierung
+; - PalChg - APC mit NC Hubachse
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 26.11.2016 / Simons
+; - Temperaturkompensation Z aus
+;   ($A_DBR[152]) entfernt
+;
+; V06.00.05 - 28.10.2016 / Simons
+; - Temperaturkompensation Z aus
+;   ($A_DBR[152])
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 22.06.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.01 - 14.11.2014 / Trappmann
+; - Vorlage
+;----------------------------------
+;
+;Palettenwechsel
+;
+;----------------------------------
+
+PROC MovePallet(INT iBuf)
+
+DEF STRING[32] sOption
+;
+DEF AXIS axHead
+;
+DEF BOOL bWithHead=FALSE, bDirectLoad, bChainChanger, bAPCInPos, bIsAPCNC
+;
+DEF INT iClampBufNo=0, iPalPos, iActPosAPC
+;
+DEF REAL rc0x01Deg=0.01, rTCPosHead
+
+;Maschine mit Kettenwechsler / Maschine mit Direktbeladung / Spannablauf
+bChainChanger=(($A_DBB[19] B_AND 'B1000')<>0) bDirectLoad=(($A_DBB[19] B_AND 'B10')<>0) iPalPos=(3-INA_APCPos) giClampCycle=0 giClampStatus=0
+CFG_MAN("APCNC",sOption)
+bIsAPCNC=(sOption<>"")
+
+IF (gbSwivHeadExist)
+  rTCPosHead=grTcPosC axHead=mcAxC bWithHead=TRUE
+ENDIF
+
+IF (gbTiltHeadExist)
+  rTCPosHead=grTcPosA axHead=mcAxA bWithHead=TRUE
+ENDIF
+ 
+IF (bWithHead)
+  ;
+  ;Schwenkkopf in horizontaler Stellung?
+  IF (ABS($AA_IM[axHead]-rTcPosHead)>rc0x01Deg)
+    ;C-Achse nicht in Grundstellung
+    SETAL(AL_HeadNotTcPos)
+  ENDIF
+ENDIF
+
+IF (bDirectLoad)
+  M=QU(9)
+ELSE
+  M=QU(90)
+ENDIF
+
+IF (NOT bIsAPCNC)
+  ;
+  IF (bChainChanger)
+    ;
+    iPalPos=iBuf
+    ;
+    G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=grPalLoadPosZ
+  ELSE
+    ;
+    IF (grWorkarea_MaxPos_Z < grPalLoadPosZ)
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grWorkarea_MaxPos_Z) AX[mcAxB]=DC(grPalLoadPosB)
+      Z=(grPalLoadPosZ)
+    ELSE
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 Z=(grPalLoadPosZ) AX[mcAxB]=DC(grPalLoadPosB)
+    ENDIF
+    ;
+    IF (bWithHead)
+      G0 D0 G40 G60 G17 G153 G500 G90 G94 X=grTcPrePosX
+    ENDIF
+  ENDIF
+ENDIF
+
+IF (NOT bDirectLoad)
+  ;
+  ;Swiv  -> M191/M193 Pallet 1/2
+  ;Chain -> M1=191/M2=191 Pallet 1/2
+  ;
+  IF ((giMMC_PAL[3,iBuf] B_AND 'B10')<>0)
+    ;
+    ;Unclamp automatic
+    ;
+    IF (bIsAPCNC)
+      M89 M10 M20
+      PalChg(iPalPos)
+    ELSE
+      IF (bChainChanger)
+        M[iPalPos]=191 M89 M10
+      ELSE    	
+        M=iPalPos+191 M89 M10
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    IF (bIsAPCNC)
+      M10 M20
+      PalChg(iPalPos)
+    ELSE    
+      IF (bChainChanger)
+        M[iPalPos]=191 M10
+      ELSE
+        M=iPalPos+191 M10
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  ;Wait until APC in Position
+  M91
+  ;
+  ;APC status (STOPRE)
+  iActPosAPC=(INA_APCPos) bAPCInPos=(IN_APCInPos)AND((iActPosAPC<>0)OR(bChainChanger))
+
+  IF (bAPCInPos)
+    iClampBufNo=giPAL_BufNo[iActPosAPC]
+  ELSE
+    ;
+    ;APC still running
+    SETAL(AL_APCNotInBasePos)
+  ENDIF
+ELSE
+  ;Spannablauf aendert sich (hier) nicht
+ENDIF
+
+IF (iClampBufNo==1)OR(iClampBufNo==2)
+  ;
+  ;Spannablauf aktualisieren
+  ;
+  iClampBufNo=((iClampBufNo-1)*2) giClampCycle=$A_DBB[420+iClampBufNo] giClampStatus=$A_DBB[421+iClampBufNo]
+ENDIF
+
+RET
+

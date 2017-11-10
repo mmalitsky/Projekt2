@@ -1,0 +1,279 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetTool.SPF
+;# Task:      Wz aus Magazin Holen
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: Chain
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop-> grSyncPickupDrop
+; - WHILE (NOT ...) -> WHENEVER (NOT...) DO RDISABLE
+; - HandleAlarm -> ENDE
+; - formale Aenderungen
+;
+; V06.00.05 - 10.03.2017 / Simons
+; - bFast Hinzu
+; - formale Aenderungen
+;
+; V06.00.05 - 05.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neuversionierung
+; - mcbDBB_DGLinInTCPos hinzu
+;
+; V06.00.03 - 17.05.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.02 - 09.04.2016 / Simons
+; - Neue Versionierung
+; - giNumPlacesInMag
+;
+; V04.00.00 - 18.09.2015 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Leeren Mag.-Platz und auf Position
+; - WzW fahren
+; - Beladestelle fahren
+;
+; Eingangsparameter:
+; ------------------
+; bNoAlarm:   true=Im Fehlerfalle kein Alarm, aber Programmaussprung
+; iTNo:       Werkzeugnummer des zu greifenden Werkzeugs
+; iMagNo:     Magazin-Nummer Ziel
+;              <9998: Leerer Magazinplatz in WzWPosition
+;              =9998: Leeres DG oder leeren Magazinplatz in WzWPosition
+;              =9999: Leerer Magazinplatz in Beladeposition
+; iPotNo:     Platz-Nummer Ziel
+;
+;------------------------------------
+
+PROC GetTool(BOOL bNoAlarm, INT iTNo, INT iMagNo, INT iPotNo, BOOL bFast)
+
+DEF STRING[32] sCycName="GetTool V06.00.06", sAlarmParam=""
+;
+DEF BOOL bToMag, bToTC, bToLoad, bHgHomeReq=FALSE, bMagIsMiksch, bMagIsWM307, bDGIsWM307, bMagIsChain, bAxInPos, bDGLinInTCPos, bChClamped
+;
+DEF INT iAlarmNo=0
+;
+DEF REAL rActPosV1, rSrcPosV1, rDstPosV1, rVeloV1
+
+bDGIsWM307=((giDGType B_AND 'B100')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsWM307=((bMagIsChain)AND(bDGIsWM307)) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307))
+;
+rVeloV1=360*($MA_POS_AX_VELO[mcAxV1]) rSrcPosV1=grPlDatPosV1[0] rDstPosV1=grPlDatPosV1[1]
+
+IF (iMagNo<1)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998)AND(iMagNo<>9999))
+  ;
+  ;Achtung: NewCaNr=9998 und 9999 zulassen (s. Beschreibung Eingangspar.)
+  IF (iMagNo>0)AND(iMagNo==giMagNoLoadList)
+    iAlarmNo=AL_LoadListNotTarget sAlarmParam=<<iMagNo
+  ELSE
+    iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iMagNo
+  ENDIF
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+  ;
+  IF (iPotNo<1)OR(iPotNo>giNumPlacesInMag[iMagNo])
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iPotNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+;Status Kette
+;------------
+rActPosV1=$AA_IM[mcAxV1] bHgHomeReq=(IN_HgHome) bAxInPos=($AA_STAT[mcAxV1]==4) bDGLinInTCPos=(mcbDBB_DGLinInTCPos) bChClamped=(mcbDBB_ChClamped)
+
+IF (bMagIsMiksch)
+  ;
+  IF (giMagState==11)OR(giMagState==31)OR(giMagState>80)
+    ;
+    iAlarmNo=AL_DGNotEmpty
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (bMagIsWM307)
+  ;
+  IF (NOT bChClamped)
+    M_HgClamp1
+  ENDIF
+  ;
+  IF (giMagState==11)
+    ;
+    ;Werkzeug geloest in Kette
+    giMagState=12
+    ;
+  ENDIF
+  ;
+  GETD(mcAxV1)
+  ;
+ENDIF
+
+;Aufgabe Erkennen
+bToMag=((iMagNo>=1)AND(iMagNo<=giNumRealMag))
+bToTC=((iMagNo==9998)AND(iPotNo==1))
+bToLoad=((iMagNo==9999)AND(iPotNo>1))
+
+IF (bToTC)
+  ;
+  IF (bMagIsMiksch)
+    ;
+    IF (giMagState<>10)
+      ;
+      ;DG nicht leer und/oder nicht in WzWPosition
+      ;
+      ;DG in Uebernahmeposition WzW bringen
+      M_DgPos1Wt
+      ;DG zurueck
+      M_DgRet1
+      ;
+    ELSE
+      ;
+      ;DG leer in WzWPosition    
+      ;
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+  IF (bMagIsWM307)
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Kette: Leerplatz(Quellplatz) in WzWPosition fahren
+    COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rSrcPosV1
+  ENDIF
+  ;
+  STOPRE
+  ;DG leer in WzWposition / Leerer Magazinplatz in WzWposition
+  giMagState=10
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToLoad)
+  ;
+  IF (giMagState>0)AND(giMagState<80)
+    ;
+    ;DG nicht in Magazinposition
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Kette Leerplatz(Zielplatz) in BeladePosition fahren
+    COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rDstPosV1
+  ENDIF
+  ;
+  STOPRE
+  ;Leerer Magazinplatz in Beladeposition
+  giMagState=50
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (NOT bMagIsMiksch) GOTOF ENDE
+
+IF (bToMag)
+  ;
+  IF (giMagState==30)OR(giMagState==50)
+    ;
+    ;DG leer
+    ;
+    IF (NOT bAxInPos)OR(NOT bDGLinInTCPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4)OR(NOT mcbDBB_DGLinInTCPos) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Linearachse in WzWPosition
+    ;
+    ;Kette (Quellwz) in WzWPosition fahren
+    COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rSrcPosV1
+  ENDIF
+  ;
+  IF (NOT bHgHomeReq)
+    ;
+    STOPRE
+    grSyncPickupDrop=ITOR(iTNo*100000)+iMagNo*1000+iPotNo
+    ;
+    IF (bFast)
+      ;
+      ;Werkzeug greifen ohne ELSP
+      M_DgPos2
+      ;
+      giMagState=0
+      ;
+    ELSE
+      ;
+      ;Werkzeug greifen mit ELSP
+      M_DgPos2Wt
+      ;
+      STOPRE
+      ;DG an Quellmagazinplatz
+      giMagState=82
+      ;
+    ENDIF
+  ELSE
+    ;
+    STOPRE
+    ;DG leer in Grundstellung
+    giMagState=30
+    ;
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (bMagIsWM307)
+  RELEASE(mcAxV1)
+ENDIF
+;
+IF (bHgHomeReq)
+  ;
+  ;PLC auffordern, $A_IN[..] zurueckzunehmen
+  M_HgHomeFinished0
+  ;Warten bis M-Fkt ausgegeben
+  STOPRE
+  ;
+ENDIF
+
+IF (NOT bNoAlarm)AND(iAlarmNo>0)
+  ;
+  MSG("")
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+  ;
+ENDIF
+;
+RET
+

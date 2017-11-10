@@ -1,0 +1,555 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TMSync.SPF
+;# Task:      WzV Synchronisieren
+;# Version:   V06.00.07
+;# Date:      05.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - Formale Aenderungen
+;
+; V06.00.05 - 13.10.2016 / Simons
+; - Neuversionierung
+; - HG hinzu
+; - Leerplatzsuche angepasst
+;   (04.02.00 /Juli 2016, Balles)
+; - Platzreservierung Loeschen
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - Neuversionierung
+; - giTlInSp, giNextTlInSp
+;
+; V06.00.03 - 29.05.2016 / Simons
+; - Korrektur
+; - giNumPlacesInMag,giNumaRealMag
+; - TM HHD hinzu
+; - WRITE -> Log
+;
+; V06.00.00 - 11.07.2015 / Simons
+; - Umformatiert / Prototyp
+;
+; V04.00.00 - 25.03.2014 / Huettner
+; - Vorlage
+;-------------------------------------
+;
+; Beschreibung:
+;
+; - Ortskennungen der Werkzeuge berichtigen
+;
+;   Wird aufgerufen ...
+;   .. im Rahmen aus dem HHD-Synchronisierbild heraus ueber die Bedienkette
+;      Softkey <Synchronisieren> -> PLC -> NC-ASUP <To_Manager>
+;   .. durch Programmierung (direkten Aufruf) im NC-Programm (zuvor Wertzuweisung an GUD's notwendig!)
+;
+; - Laeuft im Kanal 1
+;
+; Eingangsparameter:
+;
+; globale Anwenderdaten gsSyncTName[..], giSyncDuploNo[..], giSyncMagNo[..], giSyncPlNo[..]:
+; Enthalten die Daten, welches Wz sich nach dem Synchronisieren wo befinden soll
+;
+; Als nicht editierbare, reine Anzeigefelder projektiert:
+; ------------------------------------------------------
+; gsSyncTName[1], giSyncDuploNo[1]: Wz-Name/Duplo-Nr des Wz in der Spindel
+; gsSyncTName[2], giSyncDuploNo[2]: Wz-Name/Duplo-Nr des auszuwechselnden Wz im DG
+; gsSyncTName[3], giSyncDuploNo[3]: Wz-Name/Duplo-Nr des einzuwechselnden Wz im DG
+; gsSyncTName[4], giSyncDuploNo[4]: Wz-Name/Duplo-Nr des Wz im HG
+;
+; Bedienereingabe:
+; ----------------
+; gsSyncTName[5], giSyncDuploNo[5]: Wz-Name/Duplo-Nr des Wz, das sich auf dem durch
+;                                   giSyncMagNo[5], giSyncPlNo[5] spezifizierten Werkzeugplatz befindet
+; gsSyncTName[6], giSyncDuploNo[6]: Wz-Name/Duplo-Nr des Wz, das sich auf dem durch
+;                                   giSyncMagNo[6], giSyncPlNo[6] spezifizierten Werkzeugplatz befindet
+; Ausgangsparameter:
+;
+; iAlarmNo:     Nummer des Alarms (0= fehlerfrei)
+; sAlarmParam:  optionaler Alarm-Zusatztext
+;
+;--------------------------------------------------------------
+
+PROC TMSync(VAR INT iAlarmNo, VAR STRING[32] sAlarmParam) SAVE DISPLOF SBLOF
+
+DEF STRING[32] sCycName="TMSync V06.00.07"
+DEF STRING[128] sFName="/_N_MPF_DIR/_N_LogSync_MPF"
+;
+DEF STRING[128] sLogText1, sLogText2
+;
+DEF BOOL bSync=FALSE, bSearchTemp, bEnableLog=TRUE, bMiksch, bDGIsWM307, bMagIsChain
+;
+DEF INT iUsrIdx=5, iCount, iMaxCount9998, iLastCount, iTmp, iTmp1, iTmp2, iTmp9998, iNewTNo, iTlOpt, iTmpTNo
+DEF INT iOldMagNo, iOldPlNo, iMagNo, iPlNo, iTmpMagNo, iTmpPlNo, iCount1, iCount2, iCount2Max, iFError, iFMaxSize, iFSize
+DEF INT iSyncTNo[iNumSyncArray]
+
+MsgBox(MSG_TMSyncRunning,"CLEAR")
+
+;nur Setzen erlaubt Ausnahme: nach erfolgter Synchronisierung auch Ruecksetzen erlaubt
+OUT_TMSyncActive=TRUE
+;
+IF (giForceTMSync<>0)
+  OUT_ForceTMSync=TRUE
+ENDIF
+
+iAlarmNo=0 sAlarmParam="" gbToAcknRunning=FALSE iMaxCount9998=($TC_MAP6[9998]*$TC_MAP7[9998]) iLastCount=(iNumSyncArray-1) bDGIsWM307=((giDGType B_AND 'B100')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMiksch=((bMagIsChain)AND(NOT bDGIsWM307))
+
+;Protokoll Initialisieren
+IF (ISFILE(sFName))
+  FileSize(iFError, sFName, iFSize)
+  iFMaxSize=($MN_LEN_PROTOCOL_FILE*1024)-1000
+  IF (iFSize >= iFMaxSize) ;max. Laenge durch MD11420 beschraenkt !!
+    DELETE(iFError,sFName)
+  ENDIF
+ENDIF
+Log(bEnableLog,iFError,sFName,"------------ Start of TMSync ----------------")
+Log(bEnableLog,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+
+;Protokollieren von Iststand Bedienereingaben
+Log(bEnableLog,iFError,sFName,"  Report of actual state and user input data:")
+Log(bEnableLog,iFError,sFName,"  OUT_ForceTMSync="<<OUT_ForceTMSync<<",  giForceTMSync= "<<giForceTMSync)
+;
+STOPRE
+;
+FOR iCount=1 TO iMaxCount9998
+  ;
+  ;Zwischenspeicherinhalte
+  iTmp1=$TC_MPP6[9998,iCount]
+  ;
+  iSyncTNo[iCount]=iTmp1  sLogText1="       "
+  IF (iCount==1)
+    sLogText1="  SP:  "
+  ENDIF
+  IF (iCount==2)
+    sLogText1="  DG2: "
+  ENDIF
+  IF (iCount==3)
+    sLogText1="  DG1: "
+  ENDIF
+  IF (iCount==4)
+    sLogText1="  HG: "
+  ENDIF
+  sLogText1="  Data known by tool management " << sLogText1
+  IF (iTmp1>0)
+    sLogText1=sLogText1<<"T="<<$TC_TP2[iTmp1]<<", DuploNo="<<$TC_TP1[iTmp1]
+  ELSE
+    sLogText1=sLogText1<<"no tool"
+  ENDIF
+  Log(bEnableLog,iFError,sFName,sLogText1)
+ENDFOR
+Log(bEnableLog,iFError,sFName,"")
+
+;Pruefung ob aufgrund der Bedienereingaben die Notwendigkeit zur Synchronisation besteht
+Log(bEnableLog,iFError,sFName,"  Evaluating user input .. ")
+;
+bSync=FALSE
+;
+IF (gsSyncTName[iUsrIdx]==gsSyncTName[iUsrIdx+1])AND(giSyncDuploNo[iUsrIdx]==giSyncDuploNo[iUsrIdx+1])
+  ;
+  ;Wenn in beiden Eingabezeilen das Gleiche steht wird die 2. Zeile geloescht
+  gsSyncTName[iUsrIdx+1]=""  giSyncDuploNo[iUsrIdx+1]=0 giSyncMagNo[iUsrIdx+1]=0 giSyncPlNo[iUsrIdx+1]=0
+ENDIF
+
+FOR iCount=iUsrIdx TO iUsrIdx+1
+  ;
+  IF (gsSyncTName[iCount]<>"")AND(gsSyncTName[iCount]<>"0")AND(giSyncDuploNo[iCount]>0)AND(giSyncMagNo[iCount]>0)AND(giSyncPlNo[iCount]>0)
+    ;
+    ;Anwender hat Daten eingetragen
+    ;
+    STOPRE
+    ;
+    iNewTNo=GETT(gsSyncTName[iCount],giSyncDuploNo[iCount]) iSyncTNo[iCount]=iNewTNo
+    IF (iNewTNo>0)
+      ;
+      iOldMagNo=$A_TOOLMN[iNewTNo] iOldPlNo=$A_TOOLMLN[iNewTNo]
+      ;
+      sLogText2="  Tool T="<<$TC_TP2[iNewTNo]<<", DuploNo="<<$TC_TP1[iNewTNo]<<" should be moved from magazine " << iOldMagNo << ", place " << iOldPlNo
+      sLogText2=sLogText2<<" to magazine " << giSyncMagNo[iCount] << ", place " << giSyncPlNo[iCount]
+      Log(bEnableLog,iFError,sFName,sLogText2)
+      ;
+      IF (giSyncMagNo[iCount]==9999)AND(iOldMagNo<=0)
+        ;
+        ;Zielmagazin = Belademagazin oder Wz kommt aus Beladeliste -> Eintrag Loeschen
+        gsSyncTName[iCount]="" giSyncDuploNo[iCount]=0 giSyncMagNo[iCount]=0 giSyncPlNo[iCount]=0
+      ELSE
+        ;
+        IF (iOldMagNo<>giSyncMagNo[iCount])OR(iOldPlNo<>giSyncPlNo[iCount])
+          ;
+          ;mind. 1 Abweichung zwischen aktuellem und realem Datenhaushalt -> Synchronisieren erforderlich
+          bSync=TRUE
+        ENDIF
+      ENDIF
+    ELSE
+      ;
+      ;Bedienereingabe vorhanden aber Wz der WzV nicht bekannt
+      Log(bEnableLog,iFError,sFName,"  Tool T="<<gsSyncTName[iCount]<<", DuploNo="<<giSyncDuploNo[iCount]<<" not known to tool management")
+    ENDIF
+  ELSE
+    iSyncTNo[iCount]=0
+  ENDIF
+ENDFOR
+
+IF (NOT bSync)
+  ;
+  ;kein Synchronisieren erforderlich
+  Log(bEnableLog,iFError,sFName,"  Data entered by user match data set by tool management: no synchronizing necessary")
+  GOTOF ENDE
+ENDIF
+
+;Konsistenzpruefung (z.B.)
+;T1 ist faelschlicherweise auf 9998/1 und soll nach 1/5
+;T2 ist faelschlicherweise auf    1/5 und soll nach 9998/3
+;T1 nach 1/5 umspeichern bringt Fehler, da dort z.Zt. T2
+;
+iTmp1=iUsrIdx iTmp2=iUsrIdx+1 iTmp9998=0 bSearchTemp=FALSE
+IF (iSyncTNo[iTmp1]>0)AND(iSyncTNo[iTmp2]>0)AND(iSyncTNo[iTmp1]<>iSyncTNo[iTmp2])
+  ;
+  IF (giSyncMagNo[iTmp1]==$A_TOOLMN[iSyncTNo[iTmp2]])AND(giSyncPlNo[iTmp1]==$A_TOOLMLN[iSyncTNo[iTmp2]])
+    ;
+    ;Sollplatz Wz1 ist identisch mit Istplatz Wz2 -> Zwischenspeichern erforderlich
+    bSearchTemp=TRUE
+  ELSE
+    IF (giSyncMagNo[iTmp2]==$A_TOOLMN[iSyncTNo[iTmp1]])AND(giSyncPlNo[iTmp2]==$A_TOOLMLN[iSyncTNo[iTmp1]])
+      ;
+      ;Sollplatz Wz2 ist identisch mit dem Istplatz Wz1 -> Zwischenspeichern erforderlich
+      bSearchTemp=TRUE
+    ENDIF
+  ENDIF
+ENDIF
+
+IF (bSearchTemp)
+  ;
+  ;freien Zwischenspeicher suchen, um Wz1 temporaer zwischenzuspeichern
+  FOR iCount=1 TO iMaxCount9998
+    ;
+    IF ($TC_MPP6[9998,iCount]<=0)
+      ;
+      ;kein Wz auf Platz 9998/iCount
+      ;
+      IF ((giSyncMagNo[iTmp1]==9998)AND(giSyncPlNo[iTmp1]==iCount))OR((giSyncMagNo[iTmp2]==9998)AND(giSyncPlNo[iTmp2]==iCount))
+        ;
+        ;Wz1/2 soll auf 9998/iCount umgespeichert werden Suche fortsetzen
+      ELSE
+        ;
+        ;freien Zwischenspeicher gefunden
+        iTmp9998=iCount
+      ENDIF
+    ENDIF
+  ENDFOR
+  ;
+  Log(bEnableLog,iFError,sFName,"  Number of temporary buffer: magazine 9998, place " << iTmp9998)
+  Log(bEnableLog,iFError,sFName,"")
+ENDIF
+
+; Synchronisierung gemaess den Bedienereingaben
+;----------------------------------------------
+
+;Zunaechst fuer beide Wz Eingaben pruefen
+iTmpTNo=0 iTmpMagNo=0 iTmpPlNo=0
+;
+FOR iCount=iUsrIdx TO iUsrIdx+1
+  ;
+  STOPRE
+  ;
+  IF (gsSyncTName[iCount]<>"")AND(gsSyncTName[iCount]<>"0")AND(giSyncDuploNo[iCount]>0)AND(giSyncMagNo[iCount]>0)AND(giSyncPlNo[iCount]>0)
+    ;
+    iSyncTNo[iCount]=GETT(gsSyncTName[iCount],giSyncDuploNo[iCount]) iNewTNo=iSyncTNo[iCount]
+    IF (iNewTNo>0)
+      ;
+      IF (iCount==iUsrIdx)
+        iTmpTNo=iNewTNo iTmpMagNo=giSyncMagNo[iCount] iTmpPlNo=giSyncPlNo[iCount]
+      ENDIF
+      ;
+      ;Kollisionspruefung
+      iTmp1=giSyncMagNo[iCount] iTmp2=giSyncPlNo[iCount]
+      IF (iTmp1<1)OR((iTmp1>giNumRealMag)AND(iTmp1<>9999)AND(iTmp1<>9998))
+        ;
+        ;Magazin 9999 auch zulassen (=entladen)
+        iAlarmNo=AL_InvalidCaNr sAlarmParam=<<giSyncMagNo[iCount]
+        ;
+        Log(bEnableLog,iFError,sFName,sLogText2)
+        Log(bEnableLog,iFError,sFName,"  Invalid magazine number [" <<giSyncMagNo[iCount]<<"]")
+        GOTOF ENDE
+      ENDIF
+      ;
+      iCount2Max=$TC_MAP7[iTmp1]*$TC_MAP6[iTmp1]
+      IF (iTmp1>=1)AND(iTmp1<=giNumRealMag)
+        iCount2Max=MINVAL(iCount2Max,giNumPlacesInMag[iTmp1])
+      ENDIF
+      ;
+      IF (iTmp2>iCount2Max)
+        ;
+        iAlarmNo=AL_InvalidPlNr sAlarmParam=<<giSyncPlNo[iCount]
+        ;
+        Log(bEnableLog,iFError,sFName,sLogText2)
+        Log(bEnableLog,iFError,sFName,"  Invalid destination [magazine " <<giSyncMagNo[iCount]<<", place "<<giSyncPlNo[iCount]<<"]")
+        GOTOF ENDE
+      ENDIF
+      ;
+      ;Hier kein GetFreeLoc, da dies beim Tauschen von 2 Werkzeugen zu einem Fehler fuehren wuerde
+    ELSE
+      ;
+      MakeAlarmParam(sAlarmParam,gsSyncTName[iCount],<<giSyncDuploNo[iCount])
+      iAlarmNo=AL_TlNotFound
+      ;
+      Log(bEnableLog,iFError,sFName,"  T= "<<gsSyncTName[iCount]<<", DuploNo= "<<giSyncDuploNo[iCount]<<": tool not found")
+      GOTOF ENDE
+    ENDIF
+  ELSE
+    iSyncTNo[iCount]=0
+  ENDIF
+ENDFOR
+
+;----------------------------
+; Wz Haushalt richtigstellen:
+;----------------------------
+;
+FOR iCount=iUsrIdx TO iUsrIdx+1
+  ;
+  iNewTNo=iSyncTNo[iCount]
+  ;
+  IF (iNewTNo>0)
+    ;
+    STOPRE
+    iOldMagNo=$A_TOOLMN[iNewTNo] iOldPlNo=$A_TOOLMLN[iNewTNo]
+    ;
+    iTmp1=giSyncMagNo[iCount] iTmp2=giSyncPlNo[iCount]
+    IF (iCount==iUsrIdx)AND(iTmp9998>0)
+      ;
+      ;Wz1 nicht gleich an Wunschplatz, sondern zunaechst auf Zwischenspeicherplatz umspeichern
+      ;
+      IF (iOldMagNo>0)AND(iOldPlNo>0)
+        ;
+        IF (iOldMagNo<>9998)OR(iOldPlNo<>iTmp9998)
+          ;
+          ;Quelle<>Ziel
+          ;
+          sLogText2="  Concerning Tool T="<<gsSyncTName[iCount]<<", DuploNo="<<giSyncDuploNo[iCount]<<": moving from magazine " << iOldMagNo << ", place " << iOldPlNo << " into magazine 9998, place " << iTmp9998
+          Log(bEnableLog,iFError,sFName,sLogText2)
+          ;
+          ;iOldMagNo, iOldPlNo -> Zwischenspeicher
+          ToAckn(true,40,1,iNewTNo,0,9998,iTmp9998,iOldMagNo,iOldPlNo,1)
+        ENDIF
+      ELSE
+        ;
+        ;Wz aus Wz-Liste, d.h. noch nicht beladenes Wz, asynchroner Transfer nicht moeglich, deshalb direkt
+        $TC_MPP6[9998,iTmp9998]=iNewTNo
+        $TC_TPC10[iNewTNo]=0
+      ENDIF
+    ELSE
+      ;
+      IF (iOldMagNo<>iTmp1)OR(iOldPlNo<>iTmp2)
+        ;
+        ;Quelle<>Ziel
+        ;
+        IF (iTmp1>=1)AND(iTmp1<=giNumRealMag)
+          ;
+          IF ($TC_MPP66[iTmp1,iTmp2]<>0)
+            ;
+            ;Reservierung Loeschen
+            iTmp=DELMLRES(iTmp1,iTmp2)
+          ENDIF
+          ;
+          GetFreeLocHHD(iTmp1,iTmp2,iNewTNo,,,1)
+        ELSE
+          ;
+          IF (iTmp1==9998)
+            ;
+            ;Zielplatz ist Zwischenspeicher
+            ;
+            IF (iTmp2>=1)AND(iTmp2<=$TC_MAP7[iTmp1]*$TC_MAP6[iTmp1])
+              ;
+              ;Zwischenspeicher existiert
+              ;
+              IF NOT (($TC_MPP6[iTmp1,iTmp2]==0)OR($TC_MPP6[iTmp1,iTmp2]==iTmpTNo))
+                ;
+                ;Zielplatz reserviert -> ungueltig
+                ;
+                iTmp1=0 iTmp2=0
+              ENDIF
+            ELSE
+              ;
+              ;Zielplatz iTmp2 ungueltig
+              ;
+              iTmp1=0 iTmp2=0 
+            ENDIF
+          ENDIF  
+        ENDIF
+        ;
+        IF (iTmp1<>giSyncMagNo[iCount])OR(iTmp2<>giSyncPlNo[iCount])
+          ;
+          iAlarmNo=AL_TLocIsNotFree sAlarmParam=<<giSyncMagNo[iCount]<<"/"<<giSyncPlNo[iCount]
+          ;
+          Log(bEnableLog,iFError,sFName,sLogText2)
+          Log(bEnableLog,iFError,sFName,"  GetFreeLoc failed concerning destination magazine " <<giSyncMagNo[iCount]<<", place "<<giSyncPlNo[iCount])
+          ;
+          GOTOF ENDE
+        ELSE
+          ;
+          IF (iOldMagNo>0)AND(iOldPlNo>0)
+            ;
+            sLogText2="  Concerning Tool T="<<gsSyncTName[iCount]<<", DuploNo="<<giSyncDuploNo[iCount]<<": moving from magazine " << iOldMagNo << ", place " << iOldPlNo << " into magazine " << iTmp1 << ", place " << iTmp2
+            Log(bEnableLog,iFError,sFName,sLogText2)
+            ;
+            ;iOldMagNo,iOldPlNo -> Wunschplatz
+            ToAckn(true,40,1,iNewTNo,0,iTmp1,iTmp2,iOldMagNo,iOldPlNo,1)
+            ;
+          ELSE
+            ;
+            ;Wz aus Wz-Liste, d.h. noch nicht beladenes Wz, asynchroner Transfer nicht moeglich, deshalb direkt:
+            $TC_MPP6[iTmp1,iTmp2]=iNewTNo
+            $TC_TPC10[iNewTNo]=0
+          ENDIF
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+    IF (iCount==iUsrIdx+1)AND(iTmp9998>0)
+      ;
+      IF (9998<>iTmpMagNo)OR(iTmp9998<>iTmpPlNo)
+        ;
+        ;Quelle<>Ziel
+        ;
+        ;Wz1 endgueltig vom Zwischenspeicher auf Wunschplatz umspeichern
+        iTmp1=iTmpMagNo iTmp2=iTmpPlNo
+        ;
+        IF (iTmp1>=1)AND(iTmp1<=giNumRealMag)
+          ;
+          IF ($TC_MPP66[iTmp1,iTmp2]<>0)
+            ;
+            ;Reservierung Loeschen
+            iTmp=DELMLRES(iTmp1,iTmp2)
+          ENDIF
+          ;
+          GetFreeLocHHD(iTmp1,iTmp2,iTmpTNo,,,1)
+        ELSE
+          ;
+          IF (iTmp1==9998)
+            ;
+            ;Zielplatz ist Zwischenspeicher
+            ;
+            IF (iTmp2>=1)AND(iTmp2<=$TC_MAP7[iTmp1]*$TC_MAP6[iTmp1])
+              ;
+              ;Zwischenspeicher existiert
+              ;
+              IF NOT (($TC_MPP6[iTmp1,iTmp2]==0)OR($TC_MPP6[iTmp1,iTmp2]==iTmpTNo))
+                ;
+                ;Zielpaltz reserviert -> ungueltig
+                ;
+                iTmp1=0 iTmp2=0
+              ENDIF
+            ELSE
+              ;
+              ;Zielplatz iTmp2 ungueltig
+              ;
+              iTmp1=0 iTmp2=0 
+            ENDIF
+          ENDIF
+        ENDIF
+        ;
+        IF (iTmp1<>iTmpMagNo)OR(iTmp2<>iTmpPlNo)
+          ;
+          iAlarmNo=AL_TLocIsNotFree sAlarmParam=<<iTmpMagNo<<"/"<<iTmpPlNo
+          ;
+          Log(bEnableLog,iFError,sFName,sLogText2)
+          Log(bEnableLog,iFError,sFName,"  GetFreeLoc failed concerning destination magazine " <<iTmpMagNo<<", place "<<iTmpPlNo)
+          ;
+          GOTOF ENDE
+        ELSE
+          ;
+          sLogText2="  Concerning Tool T="<<gsSyncTName[4]<<", DuploNo="<<giSyncDuploNo[4]<<": moving from magazine 9998, place " << iTmp9998 << " into magazine " << iTmpMagNo << ", place " << iTmpPlNo
+          Log(bEnableLog,iFError,sFName,sLogText2)
+          ;
+          ;Zwischenspeicher auf Wunschplatz
+          ToAckn(true,40,1,iTmpTNo,0,iTmpMagNo,iTmpPlNo,9998,iTmp9998,1)
+          ;
+        ENDIF
+      ENDIF
+    ENDIF
+    ;
+    IF (iOldMagNo==9998)AND(giSyncMagNo[iCount]==9999)
+      ;
+      ;Wz wurde aus Zwischenspeicher 9998 in Wz-Liste synchronisiert.
+      ;SiemensWzV nimmt Reserviert-Kennung nicht weg.
+      ;
+      ;Nach einem Platz im Magazin suchen, das fuer das Werkzeug reserviert ist
+      FOR iCount1=1 TO giNumRealMag
+        ;
+        FOR iCount2=1 TO giNumPlacesInMag[iCount1]
+          ;
+          STOPRE
+          IF ($TC_MPP66[iCount1,iCount2]==iNewTNo)
+            ;
+            ;dieser Platz ist fuer das Wz reserviert
+            $TC_MPP4[iCount1,iCount2]=$TC_MPP4[iCount1,iCount2] B_AND (B_NOT 'B100')
+            $TC_MPP66[iCount1,iCount2]=0
+            ;
+            GOTOF NextCount
+          ENDIF
+        ENDFOR
+      ENDFOR
+      ;
+    ENDIF
+  ENDIF
+  ;
+  ;=========
+  NextCount:
+  ;=========
+  ;
+ENDFOR
+;
+;Wz Haushalt richtigstellen abgeschlossen
+
+;====
+ENDE:
+;====
+
+Log(bEnableLog,iFError,sFName,"")
+
+Log(bEnableLog,iFError,sFName,"  Updating synchronization window .. ")
+Log(bEnableLog,iFError,sFName,"")
+;
+;HMI - Synchronisierbild aktualisieren
+UpdSync
+
+STOPRE
+IF (gbWithDG)
+  giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2] giTNoSp=$TC_MPP6[9998,mcLocSp]
+ELSE
+  giTNoDG1=0 giTNoDG2=0 giTNoSp=$TC_MPP6[9998,mcLocSp]
+ENDIF
+
+;Sp Daten Aktualisieren
+SpTlData(1,giTNoSp)
+
+;HMI - Wz Pruefen Aktualiseren
+IF (giTNoDg2>0)
+  giMMC_TNo=giTNoDg2 gsMMC_TName=$TC_TP2[giTNoDg2] giMMC_DuploNo=$TC_TP1[giTNoDg2] giToDuplo=$TC_TP1[giTNoDg2]
+ELSE
+  giMMC_TNo=0 gsMMC_TName="" giMMC_DuploNo=0 giToDuplo=0
+ENDIF
+
+giForceTMSync=0 OUT_TMSyncActive=FALSE OUT_ForceTMSync=FALSE OUT_LoadUnloadActive=FALSE giTlInSp=-1 giNextTlInSp=-1
+
+Log(bEnableLog,iFError,sFName,"  OUT_ForceTMSync="<<OUT_ForceTMSync<< ",  giForceTMSync= " << giForceTMSync)
+Log(bEnableLog,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+Log(bEnableLog,iFError,sFName,"------------ End of TMSync ----------------")
+Log(bEnableLog,iFError,sFName," ")
+
+MsgBox("","CLEAR")
+
+;keine Alarmausgabe - muss vom aufrufenden NC-Zyklus erledigt werden
+
+RET

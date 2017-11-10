@@ -1,0 +1,725 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MGUD_BS.DEF
+;# Task:      GUD Definition
+;# Version:   V06.00.08
+;# Date:      07.11.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;Beschreibung:
+;
+; Globale Anwenderdaten
+; SIEMENS Werkzeugverwaltung   
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 07.11.2017 / Simons
+; - OEM_bSelStop hinzu
+;
+; V06.00.08 - 19.09.2017 / Simons
+; - Neuversionierung
+; - Anzahl Gassen X 7->9
+; - giMagKonfState hinzu
+; - Integration IPOTURN Variablen
+;
+; V06.00.07 - 19.09.2017 / Simons
+; - gbSearchRelST, giRWError hinzu
+;
+; V06.00.07 - 16.05.2017 / Simons
+; - Neuversionierung
+; - gbPrevToBrokenInt, giTNoUpdateMode
+;
+; V06.00.06 - 10.04.2017 / Simons
+; - Neuversionierung
+; - grPosWinDGLin, grCh..., grBigTl... hinzu
+; - grPcLeftPosX, grPcRightPosX entfernt
+; - gsForceFrictComp_832,gbHGWithBero,gbMCWithFFW
+; - Tl_... hinzu
+;
+; V06.00.05 - 31.03.2017 / Simons
+; - giGetfLoc[6], giDate[5], giPrepSTNo
+; - giSyncPickUpDrop -> grSyncPickUpDrop
+;
+; V06.00.05 - 24.11.2016 / Simons
+; - giToAvailMode, gbWithEES
+; - giHMIMessageBox
+;
+; V06.00.05 - 13.10.2016 / Simons
+; - giActDeviceNo Hinzu
+;
+; V06.00.05 - 13.10.2016 / Simons
+; - grSpiPosAccLow,grBckData hinzu
+; - grIBN..., grPalAdapterHeight entfernt
+; - giTCStartDBB4 hinzu
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - OEM_... hinzu
+;
+; V06.00.04 - 29.08.2016 / Simons
+; - giForceToAckn entfernt
+; - grPalLoadPosXL/R hinzu
+;
+; V06.00.04 - 25.07.2016 / Simons
+; - Neuversionierung
+; - gbWithMagPanel
+; - gbPLCSimActive
+; - grMaxTlDg
+;
+; V06.00.03 - 19.06.2016 / Simons
+; - Hinzu     gr(Asym)DiskLoadMax
+; - Entfaellt grTorqueAsymDiskLoad
+;
+; V06.00.03 - 21.04.2016 / Simons
+; Hinzu
+; - Prepare Optimierung
+; - mcMaxWPonPal
+; - gbTlFirstMach
+; - gbTMIsHHD
+; - grPosWinDGRot
+; - grTCPrepTimeMin
+; - grTlTiltTorqueSp
+; - grTlTiltTorqueDG
+; - grTlTiltFactorDG
+; - gbWithMillHead
+; - gbTiltHeadExist
+; - gsReqTlData
+; - giResult,gsResult,grResult1,grResult2
+; - gsProtMissTl
+; - grLiftWinDGRot
+; - giNextTlInSp, giTlInSp
+; - grTCSpPosTol
+; - grTCCoolOn
+; - gbSpecTlInSp
+; - grCleanTlStart,-Width,-Feed
+; - grTCJerkRedExp, giItCount
+; - grSpecTlRunTime
+; - grTCPosFH
+; - gbWithHG, gbWithDG, gbMagWithFixedGuide
+; - gbMag9998Exist, gbMag9999Exist
+; - giNumPlacesInMag, giNumRealMag
+;
+; V06.00.01 - 25.07.2015 / Simons
+; - grExit.. hinzu
+;
+; V06.00.00 - 18.07.2015 / Simons
+; - Prototyp / Neu
+;
+;-------------------------------------
+
+APR 11 APW 11
+
+; Maschinennummer
+;----------------
+DEF NCK STRING[32] gsMachIdent
+
+; Optionen
+;---------
+DEF NCK BOOL gbHmiOperate
+DEF NCK BOOL gbSwivHeadExist
+DEF NCK BOOL gbTiltHeadExist
+DEF NCK BOOL gbWithRecHead
+DEF NCK BOOL gbWithFacingHead
+DEF NCK BOOL gbWithMillHead
+DEF NCK BOOL gbWithHG
+DEF NCK BOOL gbWithDG
+DEF NCK BOOL gbMagWithFixedGuide
+DEF NCK BOOL gbWithMagPanel
+DEF NCK BOOL gbWithEES
+DEF NCK BOOL gbHGWithBero
+DEF NCK BOOL gbMCWithFFW
+
+DEF NCK BOOL gbBAExist
+DEF NCK BOOL gbTMIsHHD
+DEF NCK INT giOptToolMgmt   ; Bitleiste fuer WzV-Optionen
+
+; Kennzeichner fuer Magazin/DG
+;-----------------------------
+DEF NCK BOOL gbMag9998Exist
+DEF NCK BOOL gbMag9999Exist
+DEF NCK INT giMagIdent
+DEF NCK INT giMagType
+DEF NCK INT giMachType
+DEF NCK INT giDGType
+
+; Werkzeugverwaltung - Allgemein
+;-------------------------------
+DEF NCK BOOL gbPosAfterTC      ; kein Verlassen des Magazins im TC
+DEF NCK BOOL gbTCSlowMode      ; Wz schonen
+DEF NCK BOOL gbWaitCoolantEnd  ; Wenn Spindel steht, dann WzW Tuer oeffnen
+DEF NCK BOOL gbTCFirstZMove    ; Z freifahren vor Werkzeugwechsel
+DEF NCK BOOL gbToLoadFixColDat ; Kollisionsdaten zu Werkstücktyp prüfen
+DEF NCK BOOL gbPLCSimActive    ; PLC befindet sich im Simulationsbetrieb
+DEF NCK INT giMagNoLoadList=-1 ; Magazin-Nummer Beladeliste
+DEF NCK INT giMagOffsetLoadPot ; Differnz Platz Sp zu Platz HG
+DEF NCK REAL grDoorOpenTime    ; Zeit zum Oeffnen der WzW Tuer
+DEF NCK STRING[32] gsFirstTool=""
+;
+DEF NCK INT giNumPlacesInMag[17] ; Anzahl Plaetze im Magazin
+DEF NCK INT giNumRealMag         ; Anzahl magazine ohne Zwischenspeicher
+;
+; Anpassungen Rechenmodel an Realitaet
+DEF NCK REAL grTCJerkX
+DEF NCK REAL grTCJerkY
+DEF NCK REAL grTCJerkZ
+DEF NCK REAL grTCJerkDGRot
+DEF NCK REAL grTCJerkRedExp
+DEF NCK REAL giItCount       ; Anzahl Iterationsschritte
+
+; Aktuelle Auftragsdaten fuer Systemprogramm Kanal 2
+;---------------------------------------------------
+DEF NCK BOOL gbLogTMReset   ; Log Option
+DEF NCK INT giJobNo
+DEF NCK INT giJobTaskId
+DEF NCK INT giJobTaskIdNo
+DEF NCK INT giJobTNo
+DEF NCK INT giJobSourceMag
+DEF NCK INT giJobSourceLoc
+DEF NCK INT giJobDestMag
+DEF NCK INT giJobDestLoc
+DEF NCK INT giJobErrReact
+DEF NCK INT giMaxPrepCount=1 ; max. Anzahl ununterbrochener WzVorbereitungs-Auftraege
+DEF NCK INT giTNoUpdateMode
+
+; Tasks fuer Kanal 2
+;-------------------
+DEF NCK INT giTaskID=0
+DEF NCK INT giTaskOption=0
+DEF NCK INT giTaskState=0
+DEF NCK INT giTaskData[3]
+
+; Programmorganisation
+;---------------------
+DEF NCK BOOL gbQuitSysCha2=FALSE ; Aufforderung an Kanal 2, aus Sys_Cha2 auszusteigen
+DEF NCK INT giStepHome=0         ; Schritte in Rev_Cha1/2
+DEF NCK INT giStepTestStop=0     ; Schritte in Teststop.spf
+DEF NCK STRING[32] gsMsgBoxResult ; Ergebnisvariable von MsgBox.SPF
+DEF NCK STRING[128] gsProtMissTl  ; Name der Datei, in der die fehlenden Wz aufgelistet werden
+; Variable fuer ChkTlData, ...
+DEF NCK STRING[64] gsResult
+DEF NCK INT giResult
+DEF NCK REAL grResult1 
+DEF NCK REAL grResult2
+
+; Tool Planning
+DEF NCK INT giHMIMessageBox
+
+;TL OEM Dekodierung
+;------------------
+;Schneidenspezifisch
+DEF NCK BOOL OEM_bSelCheck
+DEF NCK BOOL OEM_bSelMeas
+DEF NCK BOOL OEM_bSelMeasNoNewVal
+;
+DEF NCK BOOL OEM_bTlMeasured
+DEF NCK BOOL OEM_bTlChecked
+DEF NCK BOOL OEM_bTlDefect
+DEF NCK BOOL OEM_bValidMeasCut
+DEF NCK INT  OEM_iCutNo
+DEF NCK REAL OEM_rCheckLen
+;
+;Wz Spezifisch
+DEF NCK BOOL OEM_bSelHGNoTapeCl
+DEF NCK BOOL OEM_bSelChip
+DEF NCK BOOL OEM_bSelStop
+;
+DEF NCK BOOL OEM_bHeavyTlHG
+DEF NCK BOOL OEM_bBigTlHG
+;
+DEF NCK REAL OEM_rWeight
+DEF NCK REAL OEM_rColLen
+DEF NCK REAL OEM_rColRad
+DEF NCK REAL OEM_rTiltTorque
+
+;TL_... Dekodierung
+DEF NCK BOOL TL_Released
+DEF NCK BOOL TL_Locked
+DEF NCK BOOL TL_FixPlace
+DEF NCK BOOL TL_Manual
+DEF NCK BOOL TL_Load
+DEF NCK BOOL TL_Unload
+
+; Werkzeugwechsel/Werkzeugvorbereitung
+DEF NCK BOOL gbPrepReset  ; Vorbereitung Abbrechen
+DEF NCK BOOL gbPrepActiv  ; Vorbereitung laeuft
+DEF NCK BOOL gbPrepDone   ; Vorbereitung erledigt, warte auf WzW
+DEF NCK BOOL gbPrepEnd    ; Vorbereitung erledigt und Wz im WzW übernommen
+DEF NCK BOOL gbTcActive   ; WzW laeuft
+DEF NCK BOOL gbHGBigTl    ; großes Werkzeug im HG
+DEF NCK BOOL gbHGHeavyTl  ; schweres Werkzeug im HG 
+DEF NCK BOOL gbHGNoTapeCl ; Werkzeug ohne Kegelreinigung im HG
+DEF NCK BOOL gbWaitToolMoved
+DEF NCK BOOL gbNextToJob
+DEF NCK BOOL gbSearchRelST
+
+; Synchronisierung WzV
+DEF NCK INT giForceTMSync=0
+DEF NCK STRING[32] gsSyncTName[iNumSyncArray]  ;0..iNumSyncArray-1
+DEF NCK INT giSyncDuploNo[iNumSyncArray]
+DEF NCK INT giSyncMagNo[iNumSyncArray]
+DEF NCK INT giSyncPlNo[iNumSyncArray]
+DEF NCK STRING[32] gsSyncRealTName[iNumSyncArray]  ;0..iNumSyncArray-1
+DEF NCK INT giSyncRealDuploNo[iNumSyncArray]
+DEF NCK INT giSyncRealMagNo[iNumSyncArray]
+DEF NCK INT giSyncRealPlNo[iNumSyncArray]
+
+;TMReset
+DEF NCK BOOL gbToAcknRunning=FALSE ; Quittierung ueber PLC an SIEMENS-WzV
+DEF NCK INT giSyncTC
+DEF NCK INT giTMResetBypass=0      ; Notausstieg aus TMReset
+DEF NCK INT giTlInSp               ; Spindelwerkzeug
+DEF NCK INT giNextTlInSp           ; Einzuwechselndes Werkzeug
+DEF NCK INT giTCStartDBB4          ; Synchronisation DBB4
+DEF NCK INT giGetfLoc[6]
+DEF NCK REAL grSyncPickupDrop
+
+;Technologiezyklen
+DEF NCK BOOL gbCyc800Act
+DEF NCK BOOL gbCyc832Act
+DEF NCK STRING[128] gsForceFrictComp_832 ;Auflistung der zu kompensierenden Achsen (CUST_832)
+
+; Werkzeugwechsel
+;----------------
+DEF NCK BOOL gbEnaTcMaxToolLen ; Freigabe TC für ueberlange Wz
+DEF NCK BOOL gbTlFirstMach     ; Erstbearbeitung 
+DEF NCK INT  giTCMask          ; Freigabemaske TC Funktionen
+DEF NCK REAL grAccValLow       ; reduzierte Beschleunigung [%]
+DEF NCK REAL grTcMaxToolLen    ; Laenge ueberlanges Wz
+DEF NCK REAL grTCPrepTimeMin   ; min. Vorbereitungszeit ohne Prepare
+DEF NCK REAL grTCMinL1         ; kleinste Wz Laenge
+DEF NCK STRING[255] gsReqTlData ; Vorgabe zu ueberpruefender Wz Offsets
+
+; SonderWz'e
+;-----------
+DEF NCK BOOL gbSpecTlInSp  ; SonderWz in Spindel
+DEF NCK REAL grSpecTlRunTime ; Laufzeit Plandrehkopf etc. 
+; Reinigungsbereich Werkzeug(Konen)
+DEF NCK REAL grCleanTlStart ; Anfang
+DEF NCK REAL grCleanTlWidth ; Bereich
+DEF NCK REAL grCleanTlFeed  ; Geschwindigkeit beim Reinigen
+
+; Positionen
+DEF NCK REAL grTcPosX
+DEF NCK REAL grTcPrePosX
+DEF NCK REAL grTCRelSpDist
+DEF NCK REAL grTcPosY
+DEF NCK REAL grTcPosZ
+DEF NCK REAL grTCPrePosZ  ; Z-Position für DG-WT1
+DEF NCK REAL grTcPosA     ; Tilt-Spindel
+DEF NCK REAL grTcPosC     ; Schwenkspindel
+DEF NCK REAL grTcPosZMin
+DEF NCK REAL grTcSPos     ; Motorspindel
+DEF NCK REAL grTcSPosG1   ; Richtposition G1 oder Motorspindel
+DEF NCK REAL grTcSPosG2   ; Richtposition G2 oder Motorspindel
+DEF NCK REAL grTcSPosTol  ; RichtPosition Toleranz
+DEF NCK REAL grTCPosFH    ; Wechselposition Planzugeinheit
+DEF NCK REAL grTCCoolOn   ; Kuehlmittel ein
+
+; Beladeposition Beladestelle_Hand
+;---------------------------------
+DEF NCK REAL grToLoadPosX
+DEF NCK REAL grToLoadPosY
+DEF NCK REAL grToLoadPosZ
+
+; Spindel
+;--------
+DEF NCK STRING[32] gsSpindleType    ; Spindeltyp
+DEF NCK BOOL gbIsGearSpindle        ; Getriebespindel
+DEF NCK INT giMaxDefaultSpindleVelo ; max. Default-Spindeldrehzahl
+DEF NCK REAL grToLenShaftClmp       ; MT-Variante mit Klemmung Spindelwelle
+DEF NCK REAL grSpiPosVeloLow        ; Wz Schutz RichtDrehzahl Sp
+DEF NCK REAL grSpiPosAccLow         ; Wz Schutz Beschleunigung Sp
+DEF NCK REAL grBckData[6]           ; Gesicherte SpDaten aus SpTlData
+;
+; Bremskennlinie
+DEF NCK REAL grTCSPOS1_tb
+DEF NCK REAL grTCSPOS1_n1
+DEF NCK REAL grTCSPOS1_n2
+DEF NCK REAL grTCSPOS1_k1
+DEF NCK REAL grTCSPOS1_k2
+DEF NCK REAL grTCSPOS2_tb
+DEF NCK REAL grTCSPOS2_n1
+DEF NCK REAL grTCSPOS2_n2
+DEF NCK REAL grTCSPOS2_k1
+DEF NCK REAL grTCSPOS2_k2
+;
+DEF NCK REAL grJSpG1 ; G1 oder Motorspindel - J(mot)+J(fr) ohne Wz
+DEF NCK REAL grJSpG2 ; G2 - J(mot)+J(fr) ohne Wz
+DEF NCK REAL gbSpIsUnClmpFixed ; Sp ist mech. fixiert, wenn geloest
+DEF NCK REAL grSpClmpTime    ; Wz Spannzeit
+DEF NCK REAL grSpUnClmpTime  ; Wz Loeszeit
+DEF NCK REAL grSpClmpTimeC   ; Wz Spannzeit (Schaltzeit)
+DEF NCK REAL grSpUnClmpTimeC ; Wz Loeszeit (Schaltzeit)
+DEF NCK REAL grTlTiltTorqueSp; Wz Kippmoment
+DEF NCK REAL grExitRadXY  ; Ausfahrradius
+DEF NCK REAL grExitStartX ; Anfangspunkt des Ausfahrradius
+DEF NCK REAL grExitDoorHeight ; Hoehe der WZW Oeffnung
+;
+DEF NCK REAL grSPosMaxTime
+DEF NCK REAL grSPosMinTime
+DEF NCK REAL grSpiStopLimitFine
+
+; B-Achse
+;--------
+DEF NCK REAL grBAxStopLimitFine
+
+; Arbeitsraumueberwachung
+;-----------------------
+; in Spindelnaehe
+DEF NCK REAL grWorkarea_MinPos_Z
+DEF NCK REAL grWorkarea_VldPos1_B
+DEF NCK REAL grWorkarea_VldPos2_B
+DEF NCK REAL grWorkarea_VldPos3_B
+DEF NCK REAL grBAxAllRan
+DEF NCK REAL grMaxPalRad
+; fuer Sonderpaletten
+DEF NCK REAL grWorkarea_MaxPos_Z
+DEF NCK REAL grWorkarea_MaxPos_B
+DEF NCK REAL grWorkarea_MinPos_B
+
+;Werkzeug Pruefen/Vermessen
+;--------------------------
+DEF NCK BOOL gbLastToBroken
+DEF NCK BOOL gbPrevToBroken
+DEF NCK BOOL gbPrevToBrokenInt
+DEF NCK BOOL gbStopIfNotMeasured=FALSE
+DEF NCK BOOL gbToCheckAtTC=TRUE
+DEF NCK BOOL gbErrMsgOnToCheck=FALSE
+DEF NCK INT  giMMC_TNo=0
+DEF NCK INT  giMMC_DuploNo=0
+DEF NCK INT  giToBreakCtrlState=0
+DEF NCK INT  giProbVal
+DEF NCK INT  giToNoProb=0
+DEF NCK INT  giToProbMag=0
+DEF NCK INT  giToProbPot=0
+DEF NCK INT  giToDuplo
+DEF NCK REAL grProbVal
+DEF NCK REAL grToCheckTol     ; Toleranz fuer <Wz pruefen>
+DEF NCK REAL grToMeasTol      ; Toleranz fuer <Wz messen>
+DEF NCK REAL grMinMeasToolLen ; Mindestlaenge
+DEF NCK REAL grMinMeasTol
+DEF NCK REAL grMaxMeasTol
+DEF NCK REAL grMeasOffset
+DEF NCK REAL grMinMeasOffset
+DEF NCK REAL grMaxMeasOffset
+DEF NCK REAL grToolMeasPosX   ; Messposition Wz-Vermessen
+DEF NCK STRING[32] gsMMC_TName=""
+
+; WKZ Bruchkontrolle Typ MSC BK9
+;-------------------------------
+DEF NCK REAL grTOBREAKPOSX_MSC   ; Einbaulage X
+DEF NCK REAL grTOBREAKPOSZ_MSC   ; Einbaulage Z
+DEF NCK REAL grTOBREAKOFFSET_MSC ; Winkeloffset Bruchkontrolle
+DEF NCK REAL grOFFSETMIN_MSC     ; Min. Winkeloffset Bruchkontrolle
+DEF NCK REAL grOFFSETMAX_MSC     ; Max. Winkeloffset Bruchkontrolle
+DEF NCK REAL grTOBREAKTOL_MSC    ; Toleranz Bruchkontrolle in mm
+DEF NCK REAL grTOBREAKPREPOS_MSC ; Winkelvorposition bei Teachen
+DEF NCK STRING[32] GSMSCTONAME[4]; WZ Name zum Einrichten
+
+; MPS Anbindung
+;--------------
+DEF NCK INT giMPSActivPal
+DEF NCK INT giMPSActivProg
+DEF NCK INT giMPSWorkState[mcMaxWPonPal]
+DEF NCK INT giMPSWorkStep[mcMaxWPonPal]
+DEF NCK INT giMPSRunMode
+DEF NCK BOOL gbMPSSafeOffs
+DEF NCK STRING[128] gsMPSProgName[mcMaxWPonPal]
+
+; Einzelne Werkstuecke Zaehlen und Pruefen
+;-----------------------------------------
+DEF NCK INT giCOUNTER[40]
+DEF NCK INT giPAL_CHECK
+
+; NC-Variablen im KundenProgramm
+;------------------------------- 
+DEF NCK BOOL gbProgExist
+DEF NCK INT giToAvailMode
+;
+; Palettenverwaltung - ohne Prefix "gi" etc. wg. Abwaertskompatibilitaet
+DEF NCK INT PROGMODE[2]
+DEF NCK INT BufNo
+DEF NCK INT PAL_NO
+DEF NCK INT PAL_NEW
+DEF NCK INT PAL_TYP
+DEF NCK INT PAL_STATUS
+DEF NCK INT PAL_PRIORITY
+DEF NCK INT WORKING_STEP
+DEF NCK INT UNCLAMP_AUTO
+DEF NCK INT TOOL_MISSING
+DEF NCK INT TOOL_BREAK_REACTION
+DEF NCK INT giPAL_BUFNO[3]
+DEF NCK INT giMMC_PAL[5,17]
+DEF NCK INT giMMC_Device[17]
+DEF NCK INT giActDeviceNo
+DEF NCK STRING[200] CustomerHome
+DEF NCK STRING[24] PALCHGPROG
+DEF NCK STRING[24] PROG_NAME
+DEF NCK STRING[128] PROG_PATH  
+DEF NCK STRING[128] PROGNAME
+DEF NCK STRING[24] gsMMC_PROG[17]
+DEF NCK STRING[24] gsMMC_PATH[17]
+DEF NCK STRING[32] gsDeviceName[4]
+
+; Programmnummer und Status Spann-/Loesablauf
+;--------------------------------------------
+DEF NCK INT giClampCycle
+DEF NCK INT giClampStatus
+
+; Palettenwechsler
+;-----------------
+DEF NCK REAL grToLenPalChgColl ; max. Wz.-Kollisions-Laenge, ab der es zu einer Kollision des Spindelwerkzeuges beim Palettenwechsel gibt
+DEF NCK REAL grPalChgFreePosX
+DEF NCK REAL grProgFreePosX
+
+; Werkzeugwechsler - Allgemein
+;-----------------------------
+; Optionen
+DEF NCK BOOL gbDGIsNCAxis
+DEF NCK BOOL gbDGIsNC2Axis
+DEF NCK BOOL gbDGLinIsCurve
+DEF NCK BOOL gbDGWithEncoder
+; Miksch Kette
+DEF NCK BOOL gbDg2MagSide
+; Wz-Gewicht - Schwellen
+DEF NCK INT giSetHeavyTlDg
+DEF NCK REAL grHeavyTlDg
+DEF NCK REAL grMaxTlDg
+DEF NCK REAL grMidTlDg
+DEF NCK REAL grLightTlDg
+DEF NCK REAL grMaxDiffTlDg
+DEF NCK REAL grTlHolderWeight
+DEF NCK REAL grDiffFactHigh
+DEF NCK REAL grDiffFactLow
+DEF NCK REAL grTlTiltTorqueDG
+DEF NCK REAL grTlTiltFactorDG
+
+; NC-Wechsler
+;------------
+DEF NCK REAL grTcLenOversize ; max. Wz.-Kollisions-Laenge, bei der ein Werkzeugwechsel in beide Richtungen möglich ist
+; Schwenkpositionen
+DEF NCK REAL grHomePosDGRot
+DEF NCK REAL grHomePos2DGRot
+DEF NCK REAL grPosWinDGRot
+DEF NCK REAL grRelMagDGRot
+DEF NCK REAL grHor1DGRot
+DEF NCK REAL grLiftDGRot
+DEF NCK REAL grLiftWinDGRot
+DEF NCK REAL grHor2DGRot
+DEF NCK REAL grHomePosWindow ; Vorpositionsfenster
+; Geschwindigkeiten
+DEF NCK REAL grLowFeedDGRot
+DEF NCK REAL grMidFeedDGRot
+DEF NCK REAL grHighFeedDGRot
+DEF NCK REAL grFeedEmptyDGRot
+; Kollision mit WzW Tuer
+DEF NCK REAL grToMaxRad     ; max. erlaubter Wz Radius
+DEF NCK REAL grToMaxRadDoor ; max. erlaubter Wz Radius bei geschlossener Tür
+
+; Wechsler mit linearer NC-Achse
+;-------------------------------
+; Positionen der linearen Achse
+DEF NCK REAL grHomePosDGLin
+DEF NCK REAL grHomePosDGLinPlus
+DEF NCK REAL grTransPosDGLin
+DEF NCK REAL grTransPosDGLinPlus
+DEF NCK REAL grSwivPosDGLin
+DEF NCK REAL grSwivPosDGLinPlus
+DEF NCK REAL grRelPosZDGLin
+DEF NCK REAL grPosWinDGLin
+
+; Magazine
+;---------
+DEF NCK BOOL gbMovTlHor     ; Freigabe Wz darf horizontaln Fahren
+DEF NCK INT giMagState      ; Magazinstatus
+DEF NCK INT giMagKonfState=1; MagKonf Status (Default=Durchlaufen)
+DEF NCK INT giMagRes        ; Mag-Nr./Platz-Nr des Platzes, der beim letzten asynchronen Umspeichern reserviert wurde
+DEF NCK INT giPlRes
+DEF NCK REAL grSpToHgDist   ; Abstand Sp zum HG
+DEF NCK REAL grHGClmpTime   ; HG - Wz Spannzeit (Schaltzeit)
+DEF NCK REAL grHGUnClmpTime ; HG/Mag - Wz Loeszeit (Schaltzeit)
+DEF NCK REAL grHGClmpTimeC   ; HG - Wz Spannzeit 
+DEF NCK REAL grHGUnClmpTimeC ; HG/Mag - Wz Loeszeit
+DEF NCK REAL grHeavyTlHG    ; Gewichtsschwelle HG
+; Wz Wechselpositionen
+DEF NCK REAL grHgTcPosX
+DEF NCK REAL grHgTcPosZ
+DEF NCK REAL grHgTcPrePosX  ; Vorposition
+DEF NCK REAL grHgTcPrePosZ  ; Vorposition 
+DEF NCK REAL grHgLoadPosX
+DEF NCK REAL grHGPosX[8]      ; X1-Positionen HG0..7
+
+DEF NCK REAL grHgMaxSwingRad  ; max. Schwenk-Radius des HG (mit Wz max. Koll.-Laenge)
+DEF NCK REAL grHgMaxSwingPosZ ;max. Z1-Position fuer Hg-schwenken wg. Magazinverkleidung
+DEF NCK REAL grHgMaxSwingPosZBigX
+; Kollisionslaengen
+DEF NCK REAL grMaxColLenZDoor   ; Tür
+DEF NCK REAL grMaxColLenZCover  ; Blech
+DEF NCK REAL grMaxColLenDrawer  ; Schublade
+DEF NCK REAL grMaxColRadDrawer  ; Schublade
+DEF NCK REAL grLimitTlColRX
+DEF NCK REAL grLimitTlColRYZ
+DEF NCK REAL grLimitTlColLen
+DEF NCK REAL grBigTlSizeHG
+DEF NCK REAL grBigTlLenHG
+DEF NCK REAL grAsymDiskLoadMax  ; max. asymetrische Beladung der Scheibe
+DEF NCK REAL grDiskLoadMax      ; max. Beladung der Scheibe
+DEF NCK REAL grDGProtectX ; DG schuetzen X
+DEF NCK REAL grDGProtectZ ; DG schuetzen Z
+
+; Mittelgassen Magazin
+DEF NCK REAL grRange ;Halbe Breite der Mittelgassen
+DEF NCK INT giDiskPosPassage ;Indexposition Durchfahrstellung
+DEF NCK INT giNumLaneX
+DEF NCK INT giNumLaneZ
+DEF NCK INT giActLaneX
+DEF NCK INT giActLaneZ
+DEF NCK INT giSeniorLaneX[9]
+DEF NCK INT giSeniorLaneZ[7]
+DEF NCK REAL grLaneX[9]
+DEF NCK REAL grLaneZ[7]
+
+DEF NCK REAL grLaneCorrX[9]
+DEF NCK REAL grLaneCorrZ[7]
+
+DEF NCK REAL grLaneXMin[9]
+DEF NCK REAL grLaneXMax[9]
+DEF NCK REAL grLaneZMin[7]
+DEF NCK REAL grLaneZMax[7]
+DEF NCK REAL grDiskPassage ;Durchfahrstellung
+; additive Magazin-Feinkorrekturen
+DEF NCK REAL grMagCorrX
+DEF NCK REAL grMagCorrZ
+; additive Feinkorrekturen fuer die Werkzeug-Reihensegmente (max. 8 Reihen 1..8)
+DEF NCK REAL grCassCorrX[17]  ;0..16: Index = Cassetten-Nr
+DEF NCK REAL grCassCorrZ[17]  ;0..16: Index = Cassetten-Nr
+
+; Werkzeugnr. für Werkzeuge auf Sonderplätzen
+DEF NCK INT giTNoSp
+DEF NCK INT giTNoHg
+DEF NCK INT giTNoDg1
+DEF NCK INT giTNoDg2
+
+; Platzdaten fuer Quell- und Zielplatz
+DEF NCK INT giPlDatBero[2]  ;0..1
+DEF NCK INT giPlDatFLog[2]
+DEF NCK INT giPlDatLane1X[2]
+DEF NCK INT giPlDatLane2X[2]
+DEF NCK INT giPlDatLane1Z[2]
+DEF NCK INT giPlDatLane2Z[2]
+DEF NCK REAL grPlDatPosX[2]
+DEF NCK REAL grPlDatPosZ[2]
+DEF NCK REAL grPlDatPosV1[2]
+DEF NCK REAL grPlDatPosV2[2]
+
+; Mech. Bohrerbrucheinrichtung im Magazin
+DEF NCK REAL grToBreakPosX
+DEF NCK REAL grToBreakPosZ
+DEF NCK REAL grToBreakPrePosZ
+DEF NCK REAL grToBreakOverrunZ
+DEF NCK REAL grToBreakTol ;Toleranzgrenze um den Sollwert
+
+; Kulisse HG
+DEF NCK REAL grHGFreeGuideX
+DEF NCK REAL grHGInGuideX
+
+; BALLUFF-Schreib-/Lesestation Station im Magazin
+DEF NCK INT giRemovedFromDrawer=0
+DEF NCK INT giOptCodeCarrier
+DEF NCK INT giWaitRWChip
+DEF NCK INT giRWError
+DEF NCK REAL grRWHeadPosX
+DEF NCK REAL grRWHeadPosZ
+DEF NCK REAL grHgMinLiftSwingPosZ
+
+; Prepare Optimierung
+;--------------------
+DEF NCK BOOL gbOptToolPrep     ; Optimalierung Wz-Vorbereitung
+DEF NCK BOOL gbTcPrepTeachRun  ; Messung Lernlauf aktiv(ieren)
+DEF NCK BOOL gbWaitPrepare     ; Lernlaufzeiten geladen, Warten bis Vorbereitung sinnvoll
+DEF NCK BOOL gbPrepAfterTC     ; Seit dem Letzten TC wurde schon eine Vorbereitung angestossen
+DEF NCK BOOL gbPutToTime       ; Lernlaufzeit Wz in Spindel schreiben
+DEF NCK BOOL gbGetToTime       ; Lernlaufzeit Wz in Spindel laden
+DEF NCK INT giPrepMode         ; Betriebsart 0=aus 1=Ein 2=Reset
+DEF NCK INT giActPrepTime      ; Aktuelle Zeit Prepare -> TC_BS
+DEF NCK INT giMaxPrepTime      ; Maximale Werkzeug Vorbereitungszeit
+DEF NCK INT giPrepSTNo         ; Duplonummer des angeforderten Wz
+DEF NCK STRING[32] gsPrepTName ; Name des angeforderten Wz
+DEF NCK STRING[128] gsPrepReq  ; Anforderung "Warten" an Kanal 2
+DEF NCK STRING[128] gsPrepInfo ; Letzte Laufzeitmessung von TC_BS
+DEF NCK STRING[128] gsPrepProgName ; aktueller DatensatzName
+
+; Uebergabe GUD fuer grAXISPOS
+;-----------------------------
+DEF NCK INT  giMagLoadPlNo
+DEF NCK REAL grSpEncClamped
+DEF NCK REAL grSpEncClampedWoTool
+DEF NCK REAL grSpEncUnclamped
+DEF NCK REAL grLineNo
+DEF NCK REAL grOpNo
+DEF NCK REAL grMachNo
+DEF NCK REAL grPalLoadPosZ
+DEF NCK REAL grPalLoadPosXL
+DEF NCK REAL grPalLoadPosXR
+DEF NCK REAL grFreePosZ
+DEF NCK REAL grPalLoadPosB
+DEF NCK REAL grPalLoadPosA
+DEF NCK REAL grPosLaneVT1
+DEF NCK REAL grPosLaneVT2
+;Kette
+DEF NCK REAL grChPosLD
+DEF NCK REAL grChWaitPosLD
+DEF NCK REAL grChPrePosToLD
+DEF NCK REAL grChPosMC
+DEF NCK REAL grChWaitPosMC
+DEF NCK REAL grChPrePosToMC
+DEF NCK REAL grChPosCP
+DEF NCK REAL grChPrePosLDToCP
+DEF NCK REAL grChPrePosMCToCP
+
+; OMATIVE
+;--------
+DEF CHAN INT _IACT_DBB_EXCHANGE[2]=(400,4)
+
+; Inch/Metrisch
+;--------------
+DEF NCK BOOL gbMetricScale
+DEF NCK INT giOldScalSys=-1
+DEF NCK REAL grInchMetr
+
+;IPOTURN
+;-------
+DEF NCK REAL grIPOTurnJerkX
+DEF NCK REAL grIPOTurnJerkY
+DEF NCK REAL grIPOTurnJerkZ
+DEF NCK REAL grIPOTurnJerkA_C
+DEF NCK REAL grIPOTurnJerkB
+DEF NCK BOOL gbIpoTurnActive
+
+; Achsgeschwindigkeiten
+;----------------------
+DEF NCK REAL grMaxVeloX
+DEF NCK REAL grMaxVeloY
+DEF NCK REAL grMaxVeloZ
+DEF NCK REAL grMaxVeloA
+DEF NCK REAL grMaxVeloC
+
+DEF NCK REAL grMaxVeloB
+DEF NCK REAL grMaxVeloCT
+
+; Allgemeine Felder
+;-----------------
+DEF NCK INT giDate[5]
+DEF NCK REAL grAxisPos[80] ;August 2014: erweitert auf 80
+DEF NCK REAL grPARA[51]
+DEF NCK REAL grTempComp[32]
+
+M30
+

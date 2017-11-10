@@ -1,0 +1,200 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     CleanTl2.SPF
+;# Task:      Wz Kegel Reinigen
+;# Version:   V06.00.08
+;# Date:      21.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: Flat,Cas,DDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 21.08.2017 / Simons
+; - Neuversionierung
+; - mcDBB_MagExist -> mcDBW_MagExist
+; - GetPlDat hinzu
+;
+; V06.00.07 - 14.07.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.06 - 15.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 20.04.2016 / Simons
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag
+; - WaitCycEnd
+;
+; V04.00.00 - 25.03.2014 / Huettner
+; - Vorlage
+;
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Kanal 2:
+;
+; - leeres HG an Werkzeugplatz fahren
+; - HG absenken/vor, Wz-Kegel reinigen, HG heben/zurueck
+; - mit naechstem Werkzeug weitermachen
+;
+; Eingangsparameter:
+; iMagNoNo=0: alle Teilmagazine
+;        n>0: nur das vorgegebene Teilmagazin n
+;
+; Wird angestossen durch Bearbeitungsprogramm im Kanal 1
+;
+;--------------------------------------
+
+PROC CleanTl2 (INT iMagNo) SAVE DISPLOF
+
+DEF STRING[32] sCycName="CleanTl2 V06.00.07"
+;
+DEF BOOL bMagIsDDisk, bMagIsCas
+;
+DEF INT iMag, iMag1, iMag2, iPot, iTNo, iMask
+
+bMagIsDDisk=((giMagType B_AND 'B10110000')<>0) bMagIsCas=((giMagType B_AND 'B1000000')<>0)
+
+WHILE ($P_SEARCH)
+  ;
+  ;Warten bis Satzsuchlauf ausgeschaltet wird
+  G04 F0.1
+  STOPRE
+ENDWHILE
+
+IF (NOT $P_SUBPAR[1])
+  ;
+  ;iMagNo nicht vorgegeben -> alle Teilmagazine
+  iMagNo=0
+ENDIF
+
+IF (iMagNo<0)OR(iMagNo>giNumRealMag)
+  ;
+  ;kein gueltiges Magazin
+  ;
+  RET
+ENDIF
+
+;Messzylinder zurueck
+M_ProbeCycBackw0
+
+IF (iMagNo==0)
+  ;
+  ;ueber alle Magazine
+  ;
+  iMag1=1 iMag2=giNumRealMag
+ELSE
+  ;
+  ;Einzelnes Magazin
+  ;
+  iMag1=iMagNo iMag2=iMagNo
+ENDIF
+
+;Reinigungsablauf
+;----------------
+
+MSG(MSG_CleanTlRunning)
+
+STOPRE
+giTNoHg=$TC_MPP6[9998,mcLocHG]
+IF (giTNoHg>0)
+  ;
+  ;Wz ist im HG
+  ;
+  ;ins Magazin ablegen
+  PutTool
+ENDIF
+
+FOR iMag=iMag1 TO iMag2
+  ;
+  iMask=RTOI(EXP((iMag-1)*LN(2)))
+  ;
+  ;Magazin nicht vorhanden
+  IF ((mcDBW_MagExist B_AND iMask)==0) GOTOF NEXT_MAG
+  ;
+  ;Zielcassette gesperrt
+  IF (($TC_MAP3[iMag] B_AND 'B10')<>0) GOTOF NEXT_MAG
+  ;
+  ;Ueber alle Plaetze im Teilmagazin
+  FOR iPot=1 TO giNumPlacesInMag[iMag]
+    ;
+    ;Platz gesperrt oder leer
+    IF ((($TC_MPP4[iMag,iPot] B_AND 'B1')<>0)OR($TC_MPP6[iMag,iPot]<=0)) GOTOF NEXT_LOC
+    ;
+    iTNo=$TC_MPP6[iMag,iPot]
+    ;
+    OEM_TlData(iTNo)
+    ;
+    ;Dieses Wz darf nicht gereinigt werden
+    IF (OEM_bSelHGNoTapeCl) GOTOF NEXT_LOC
+    ;
+    ;Magazinplatz anfahren
+    GetPlDat(iMag,iPot,0,0)
+    GetTool(FALSE, iTNo, iMag, iPot)
+    ;
+    IF (NOT mcbDBB_HGUnClamped)
+      M_HgUnclamp1
+    ENDIF
+    ;
+    IF (bMagIsDDisk)
+      ;
+      M_HgAdv1 M_TlTapeCleanOn1
+      G4 F3
+      M_HgRet1 M_TlTapeCleanOff0
+      ;
+      ;Leeres HG hinten
+    ENDIF
+    ;
+    IF (bMagIsCas)
+      ;
+      M_HgLower1 M_TlTapeCleanOn1
+      G4 F3
+      M_HgLift1 M_TlTapeCleanOff0
+      ;
+      ;Leeres HG vertikal gehoben / hinten
+    ENDIF
+    ;
+    STOPRE
+    giMagState=30
+    ;
+    ;========
+    NEXT_LOC:
+    ;========
+    ;
+    WaitCycEnd
+    ;
+  ENDFOR
+  ;
+  ;========
+  NEXT_MAG:
+  ;========
+  ;
+ENDFOR
+;
+;====
+ENDE:
+;====
+;
+MSG("")
+;
+RET
+

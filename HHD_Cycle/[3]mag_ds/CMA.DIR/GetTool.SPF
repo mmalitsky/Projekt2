@@ -1,0 +1,329 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetTool.SPF
+;# Task:      Wz aus Kassette Holen
+;# Version:   V06.00.07
+;# Date:      15.09.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: D60NC, D120
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 15.09.2017 / Simons
+; - bei bToTC giMagState=0 eingefuegt
+; - Formale Aenderungen
+;
+; V06.00.07 - 30.07.2017 / Simons
+; - Neuversionierung
+; - Fahren in WzW Position, nur wenn erforderlich
+;
+; V06.00.06 - 28.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop-> grSyncPickupDrop
+; - gbHGWithBero hinzu
+; - Wz ins Magazin Ablegen veraendert
+; - rActPos... entfernt
+; - WHILE (NOT ...) -> WHENEVER (NOT...) DO RDISABLE
+; - Auswertung Wz in HG nur wenn HG hinten ist
+; - Formale Aenderungen
+;
+; V06.00.05 - 10.03.2017 / Simons
+; - bFast hinzu
+; - Voreilend HG Loesen
+; - Formale Aenderungen
+;
+; V06.00.05 - 19.01.2017 / Simons
+;  bToMag korrigiert
+;
+; V06.00.05 - 16.12.2016 / Simons
+; - BERO_HG: 67... -> 66... getauscht
+;
+; V06.00.05 - 12.12.2016 / Simons
+; - BERO im HG
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 21.05.2016 / Simons
+; - Neue Versionierung
+; - giNumPlacesInMag
+;
+; V04.00.01 - 15.12.2015 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Leeres HG auf WzW-Pos. fahren
+; Leeres HG auf Beladepos. fahren
+;
+; Eingangsparameter:
+; ------------------
+; bNoAlarm:   true=Im Fehlerfalle kein Alarm, aber Programmaussprung
+; iTNo:       Werkzeugnummer des zu greifenden Werkzeugs
+; iMagNo:     Magazin-Nummer Ziel
+;              <9998: Leeres HG an Platz im Magazin fahren: HG gehoben, vertikal und geloest
+;              =9998: Leeres HG in HG-WzW-Position fahren: HG gehoben, horizontal und geloest
+;              =9999: Leeres HG in Wkz-Beladeposition fahren: HG gehoben, horizontal und geloest (nicht bei CassMag)
+; iPotNo:     Platz-Nummer Ziel
+; bFast:      nur
+;------------------------------------
+
+PROC GetTool(BOOL bNoAlarm, INT iTNo, INT iMagNo, INT iPotNo, BOOL bFast)
+
+DEF STRING[32] sCycName="GetTool V06.00.07", sAlarmParam=""
+;
+DEF BOOL bDisk2, bDDS, bToMag, bToTC, bToLoad, bHgHomeReq, bTlInHG, bHGUnClamped, bHGRetracted, bAxInPos, bEnabled
+;
+DEF INT iAlarmNo=0, iCount, iChkRes
+;
+DEF REAL rNewPosX, rNewPosV1, rNewPosV2, rVeloX, rVeloV1, rVeloV2, rWaitShort, rX1ClampDist, rX1Vmin
+
+rWaitShort=3*$MN_IPO_CYCLE_TIME bDDS=((giMagType B_AND 'H20')<>0) rX1ClampDist=grInchMetr*5.0 rX1Vmin=4000/grInchMetr
+;
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+;Ueberpruefungen
+;---------------
+IF ((giMagState MOD 10)>0)
+  iAlarmNo=AL_HgNotEmpty
+  GOTOF ENDE
+ENDIF
+;
+IF NOT ((giMagState==10)OR(giMagState==20)OR(giMagState==30)OR(giMagState==50))
+  ;HG steht fuer GetTool in ungueltiger Position
+  iAlarmNo=AL_HGNotInValidPos
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo<=0)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998)AND(iMagNo<>9999))
+  iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iMagNo
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+  ;
+  IF (iPotNo<1)OR(iPotNo>giNumPlacesInMag[iMagNo])
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iPotNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+;Leeres HG und zulaessige Zielangaben
+
+;Magazinstatus
+;-------------
+bHGRetracted=(mcbDBB_HGRetracted) bHGUnClamped=(mcbDBB_HGUnClamped) bHgHomeReq=(IN_HgHome) bTlInHG=(IN_ToolInHG) rVeloX=$MA_POS_AX_VELO[mcAxX1] rVeloV1=360.0*$MA_POS_AX_VELO[mcAxV1] bAxInPos=(($AA_STAT[mcAxX1]==4)AND($AA_STAT[mcAxV1]==4))
+IF (bDDS)
+  rVeloV2=360.0*$MA_POS_AX_VELO[mcAxV2] bAxInPos=(bAxInPos)AND($AA_STAT[mcAxV2]==4)
+ENDIF
+
+IF (gbHGWithBero)AND(giTNoHG==0)AND(bTlInHG)AND(bHGRetracted)
+  ;HG sollte in dieser Situation leer sein, es wird aber ein Wz erkannt
+  iAlarmNo=AL_HGNotEmpty
+  GOTOF ENDE
+ENDIF
+
+IF (NOT bHGUnClamped)AND(giMagState<>10)AND(giMagState<>20)
+  ;
+  ;HG geklemmt sicherstellen
+  M_HgUnClamp1
+  ;
+  bTlInHG=(IN_ToolInHG) bHGUnClamped=(mcbDBB_HGUnClamped)
+ENDIF
+
+;Auftragserkennung
+bToMag=(iMagNo>=1)AND(iMagNo<=giNumRealMag)
+bToTC=(iMagNo==9998)AND(iPotNo==1)
+bToLoad=(iMagNo==9999)AND(iPotNo>1)
+
+IF (NOT bHGRetracted)AND((giMagState==30)OR(giMagState==50))
+  ;
+  ;HG hinten sicherstellen
+  M_HgRet1
+  STOPRE
+  ;
+ENDIF
+
+IF (bToTC)
+  ;
+  ;Leeres HG auf WzWPosition fahren
+  ;
+  IF (giMagState==30)OR(giMagState==50)
+    ;
+    ;HG leer und hinten
+    ;
+    IF (NOT bAxInPos)
+      ;
+      ;Warten bis die betroffenen Achsen im Genauhalt sind
+      ;
+      IF (bDDS)
+        WHENEVER (($AA_STAT[mcAxX1]<>4)OR($AA_STAT[mcAxV1]<>4)OR($AA_STAT[mcAxV2]<>4)) DO RDISABLE
+      ELSE
+        WHENEVER (($AA_STAT[mcAxX1]<>4)OR($AA_STAT[mcAxV1]<>4)) DO RDISABLE
+      ENDIF
+      STOPRE
+    ENDIF
+    ;
+    IF (bDDS)AND($AA_IM[mcAxX1]>(grLaneX[2]+grRange))
+      ;
+      ;beide Scheiben auf Durchfahrposition
+      COARSEA[mcAxV1] COARSEA[mcAxV2] FA[mcAxV1]=rVeloV1 FA[mcAxV2]=rVeloV2 POS[mcAxV1]=CDC(giDiskPosPassage) POS[mcAxV2]=CDC(giDiskPosPassage)
+    ELSE
+      ;
+      ;Scheibe 1 auf Durchfahrposition
+      COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=CDC(giDiskPosPassage)
+    ENDIF
+    ;
+    M=QU(MQ_HgAdv)
+    ;
+    giMagState=0
+    ;
+    IPOBRKA(mcAxX1,100)
+    ADISPOSA(mcAxX1,0)
+    WHENEVER (NOT mcbDBB_HGAdvanced) DO RDISABLE
+    FA[mcAxX1]=rVeloX POS[mcAxX1]=grHgTcPrePosX
+    ;
+    ;HG Vorne und Bremsrampe ueberfahren -> weiter nach grHgTcPosX
+  ENDIF
+  ;
+  IF (NOT OUT_HgInTcPos)
+    ;
+    ;Linearachse noch nicht in WzW Position
+    ;
+    IF (NOT gbDGIsNCAxis)
+      WHEN (ABS($VA_IM[mcAxX1]-grHgTcPosX)<rX1ClampDist)AND(NOT mcbDBB_HGUnClamped)AND(SYG_IM[mcSYG_ErrIncCha2]==1)AND($VA_VACTM[mcAxX1]>rX1Vmin) DO M_HgUnclamp0
+    ENDIF
+    FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHgTcPosX
+  ENDIF
+  ;
+  IF (NOT gbDGIsNCAxis)AND(NOT bHGUnClamped)
+    M_HgUnClamp1
+  ENDIF
+  ;
+  ;HG leer in WzWPosition
+  giMagState=10
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (giMagState==10)OR(giMagState==20)
+  ;
+  ;HG leer im Breich Doppelgreifer/WzWPosition -> HG nach hinten
+  ;
+  ;WzW Position anfahren/sicherstellen
+  COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHgTcPosX
+  ;
+  ;Scheibe 1 auf Durchfahrposition drehen
+  COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=CDC(giDiskPosPassage)
+  ;HG in Vorposition
+  COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHgTcPrePosX
+  ;
+  M_HgRet1
+  ;
+  STOPRE
+  ;Leeres HG hinten
+  giMagState=30
+  ;
+ENDIF
+
+IF (bToLoad)
+  ;
+  ;Leeres HG auf Beladeposition fahren
+  ;
+  IF (giMagState==30)OR(giMagState==50)
+    ;
+    ;HG leer und hinten -> Beladeposition anfahren/sicherstellen
+    ;
+    FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHGLoadPosX
+  ENDIF
+  ;
+  M_HgRet1
+  ;
+  STOPRE
+  ;HG leer in Werkzeugbeladeposition
+  giMagState=50
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToMag)
+  ;
+  ;Status: giMagState=30/50
+  ;
+  rNewPosX=grPlDatPosX[0] rNewPosV1=grPlDatPosV1[0] rNewPosV2=grPlDatPosV2[0]
+  ;
+  ;HG leer und hinten
+  ;
+  ;Alle Achsen auf Magazinposition des Wz's fahren
+  IF (bDDS)
+    FINEA[mcAxX1] FINEA[mcAxV1] FINEA[mcAxV2] FA[mcAxX1]=rVeloX FA[mcAxV1]=rVeloV1 FA[mcAxV2]=rVeloV2 POS[mcAxX1]=rNewPosX POS[mcAxV1]=rNewPosV1 POS[mcAxV2]=rNewPosV2
+  ELSE
+    FINEA[mcAxX1] FINEA[mcAxV1] FA[mcAxX1]=rVeloX FA[mcAxV1]=rVeloV1 POS[mcAxX1]=rNewPosX POS[mcAxV1]=rNewPosV1
+  ENDIF
+  ;
+  IF (bHgHomeReq)
+    ;
+    STOPRE
+    ;Leeres HG hinten
+    giMagState=30
+    ;
+  ELSE
+    ;
+    IF (NOT gbHGNoTapeCl)
+      WHEN (TRUE) DO M_TlTapeCleanOn0
+    ENDIF
+    ;
+    WHEN (mcbDBB_HGAdvSW) DO M_HgClamp0
+    M_HgAdv1
+    ;
+    giMagState=0
+    ;
+    IF (bFast)
+      STOPRE
+      grSyncPickupDrop=ITOR(iTNo*100000)+iMagNo*1000+iPotNo
+    ELSE
+      ;
+      M_HgClamp1
+      ;
+      bTlInHG=(IN_ToolInHG)
+      ;
+      ;HG geklemmt vorne am Quellmagazinplatz
+      giMagState=82 grSyncPickupDrop=ITOR(iTNo*100000)+iMagNo*1000+iPotNo
+      ;
+      IF (gbHGWithBero)AND(NOT bTlInHG)
+        ;Wz sollte im HG sein, es wird aber keins erkannt
+        iAlarmNo=AL_NoTlInHG
+        GOTOF ENDE
+      ENDIF
+    ENDIF
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (bHgHomeReq)
+  ;PLC auffordern, $A_IN[..] zurueckzunehmen
+  M_HgHomeFinished0
+  STOPRE
+ENDIF
+;
+IF (NOT bNoAlarm)AND(iAlarmNo>0)
+  MSG("")
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET
+

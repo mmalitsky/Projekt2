@@ -1,0 +1,226 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetPlDat.SPF
+;# Task:      Platz Daten ermitteln
+;# Version:   V06.00.07
+;# Date:      09.09.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1000
+;# Magazines: DDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 09.09.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.07 - 13.06.2017 / Simons
+; - Neuversionierung
+; - AD.0155.1717 hinzu
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - Neue Magazintypen
+; - Pruefmodus
+;
+; V06.00.05 - 29.09.2016 / Simons
+; - Neuversionierung
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag
+; - grPlDatPosX[iCount]=grLaneX[2]
+;
+; V04.00.00 - 26.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Generierung der fuer die Verfahrbewegung
+; des HG notwendigen Daten
+;
+; Magazin 1:  30 Plaetze (Scheibe 1 innen)
+; Magazin 2:  30 Plaetze (Scheibe 1 aussen)
+; Magazin 3:  30 Plaetze (Scheibe 2 innen)
+; Magazin 4:  30 Plaetze (Scheibe 2 aussen)
+;
+; Unterstuetzte Magazine
+; ----------------------
+;
+; NBH 6              / Scheibe 60  / Lmax=450 / Dmax=250 : AD.0090.7070
+; NBH 6+             / Scheibe 60  / Lmax=600 / Dmax=250 : AD.xxxx.xxxx
+; NBH 630 - NBH 1000 / Scheibe 60  / Lmax=600 / Dmax=325 : AD.0149.4041 / AD.0155.1717
+;
+; NBH 6              / Scheibe 120 / Lmax=450 / Dmax=250 : AD.0144.8438
+; NBH 6+             / Scheibe 120 / Lmax=600 / Dmax=250 : AD.xxxx.xxxx
+; NBH 630 - NBH 1000 / Scheibe 120 / Lmax=600 / Dmax=325 : AD.xxxx.xxxx
+;
+; Eingangsparameter:
+; ------------------
+; iMagNo0, iPotNo0: sofern > 0: Quellplatz
+; iMagNo1, iPotNo1: sofern > 0: Zielplatz
+;
+; Ausgangsparameter:
+; ------------------
+; Ergebnisse in GUD-Arrays
+;
+; Zur Beachtung:
+; a) Die angegebenen Koordinaten-Werte beziehen sich zunaechst auf das
+;    metrische System, Einheit: 1 mm
+;    Sie werden am Ende ueber einen multiplikativen Faktor
+;    in das aktuelle Einheitensystem umgerechnet
+; b) Platz 1 der Kassette wird stets als Kassetten-Nullpunkt betrachtet
+; c) Die Umrechnung vom Kassetten- in das Magazinkoordinatensystem erfolgt durch
+;    eine Linearverschiebung um den Vektor (rCaNPX,rCaNPZ)
+;
+;------------------------------------
+
+
+PROC GetPlDat(INT iMagNo0,INT iPotNo0,INT iMagNo1,INT iPotNo1) DISPLOF
+
+DEF STRING[32] sCycName="GetPlDat V06.00.07"
+DEF STRING[128] sFName
+;
+DEF INT iCount, iNumPerLine, iTmp1, iTmp2, iError, iMagNo, iPotNo
+DEF INT iIndG1X, iIndG1Z, iIndG2X, iIndG2Z
+;
+DEF REAL rPosX, rPosV1, rPosV2, rCaNPX, rCaNPV1, rCaNPV2, rDist
+
+;MagazinTyp Pruefen
+;------------------
+;
+IF (gbTMIsHHD)
+  SETAL(AL_CombNotAllowed,"TM HHD + giMagIdent="<<giMagIdent)
+  GOTOF ENDE
+ENDIF
+;
+IF (giMagIdent<>907070)AND(giMagIdent<>01494041)AND(giMagIdent<>01448438)AND(giMagIdent<>01551717)
+  SETAL(AL_CycleInvalid, sCycName)
+  GOTOF ENDE
+ENDIF
+;
+IF (NOT $P_SUBPAR[1])AND(NOT $P_SUBPAR[2])AND(NOT $P_SUBPAR[3])AND(NOT $P_SUBPAR[4]) GOTOF ENDE
+
+FOR iCount=0 TO 1
+  ;
+  IF (iCount==0)
+    iMagNo=iMagNo0 iPotNo=iPotNo0
+  ELSE
+    iMagNo=iMagNo1 iPotNo=iPotNo1
+  ENDIF
+  ;
+  IF (iMagNo==0)OR(iPotNo==0)
+    ;keine Vorgaben
+    giPlDatBero[iCount]=0 giPlDatFLog[iCount]=0
+    grPlDatPosX[iCount]=grLaneX[2] grPlDatPosV1[iCount]=grDiskPassage grPlDatPosV2[iCount]=grDiskPassage
+    giPlDatLane1X[iCount]=1 giPlDatLane2X[iCount]=1
+    GOTOF NextLoop
+  ENDIF
+  ;
+  IF (iMagNo<=0)OR(iMagNo>giNumRealMag)
+    SETAL(AL_InvalidCaNr,<<iMagNo)
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iPotNo<=0)
+    SETAL(AL_InvalidPlNr,<<iPotNo)
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iPotNo>giNumPlacesInMag[iMagNo])AND(iPotNo<>999)
+    SETAL(AL_InvalidPlNr,<<iPotNo)
+    GOTOF ENDE
+  ENDIF
+
+  ; Vorbelegungen
+  ;--------------
+  giPlDatBero[iCount]=0 giPlDatFLog[iCount]=0
+
+  ; Wenn nicht anders definiert, gilt im Folgenden:
+  ; Platz 1 als Scheibennullpunkt, bezogen auf Magazin-Nullpunkt
+
+  CASE iMagNo OF 1 GOTOF Mag1 2 GOTOF Mag2 3 GOTOF Mag3 4 GOTOF Mag4
+  SETAL(AL_InvalidCaNr,<<iMagNo)
+  GOTOF ENDE
+
+  ;----------------
+  ; Scheibe 1 innen
+  ;----------------
+  ;
+  ;====
+  Mag1:
+  ;====
+  giPlDatFLog[iCount]=1
+  ;Platz 1 als Scheibennullpunkt, bezogen auf Magazin-Nullpunkt
+  rCaNPX=grHGPosX[2] rCaNPV1=0.0 rCaNPV2=0.0 rDist=11
+  ;
+  ;Koordinaten bezogen auf Scheibennullpunkt
+  rPosX=0 rPosV1=(iPotNo-1)*rDist rPosV2=grDiskPassage iIndG1X=1 iIndG2X=9999  ;9999: -> rG2X=rG1X
+  GOTOF common
+
+  ;-----------------
+  ; Scheibe 1 aussen
+  ;-----------------
+  ;
+  ;====
+  Mag2:
+  ;====
+  giPlDatFLog[iCount]=2
+  rCaNPX=grHGPosX[3] rCaNPV1=0.0 rCaNPV2=0.0 rDist=11
+  rPosX=0 rPosV1=(iPotNo-1)*rDist rPosV2=grDiskPassage iIndG1X=2 iIndG2X=9999
+  GOTOF common
+
+  ;----------------
+  ; Scheibe 2 innen
+  ;----------------
+  ;
+  ;====
+  Mag3:
+  ;====
+  giPlDatFLog[iCount]=3
+  rCaNPX=grHGPosX[5] rCaNPV1=0.0 rCaNPV2=0.0 rDist=11
+  rPosX=0 rPosV1=grDiskPassage rPosV2=(iPotNo-1)*rDist iIndG1X=2 iIndG2X=9999
+  GOTOF common
+
+  ;----------------
+  ; Scheibe 2 aussen
+  ;----------------
+  ;
+  ;====
+  Mag4:
+  ;====
+  giPlDatFLog[iCount]=4
+  rCaNPX=grHGPosX[6] rCaNPV1=0.0 rCaNPV2=0.0 rDist=11 rPosV1=grDiskPassage
+  rPosX=0 rPosV1=grDiskPassage rPosV2=(iPotNo-1)*rDist iIndG1X=3 iIndG2X=9999
+  GOTOF common
+
+  ;======
+  common:
+  ;======
+  ;
+  ;Fuer die Platzkoordinaten:
+  ;  - Umrechnung ins Magazinkoordinatensystem (ggf. Koordinatenverschiebung)
+  ;  - Umrechnung metrisch <-> nicht-metrisch
+  ;  - additive Magazinkorrekturen beruecksichtigen
+  grPlDatPosX[iCount]=(rPosX+rCaNPX)*grInchMetr+grCassCorrX[iMagNo] grPlDatPosV1[iCount]=rPosV1+rCaNPV1 grPlDatPosV2[iCount]=rPosV2+rCaNPV2
+  ;
+  ;Fuer die Verfahrgassen: Index ausgeben
+  giPlDatLane1X[iCount]=iIndG1X giPlDatLane2X[iCount]=iIndG2X
+  ;
+  ;========
+  NextLoop:
+  ;========
+ENDFOR
+
+;====
+ENDE:
+;====
+;
+RET

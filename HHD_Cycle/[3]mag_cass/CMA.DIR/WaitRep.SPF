@@ -1,0 +1,164 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     WaitRep.SPF
+;# Task:      Auf Antwort von MMC warten
+;# Version:   V06.00.08
+;# Date:      17.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 17.08.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.06 - 03.05.2017 / Simons
+; - Neuversionierung
+;
+; V04.02.00, April 2016/Balles
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+;a) auf Antwort des MMC warten 
+;b) ggf. (altes) Telegramm erneut senden
+;c) auf zugehoerige Antwort warten
+;d) ggf. b) und c) wiederholen
+;
+;Eingangsparameter:
+;iMode:         0= Standard
+;               1= im Fehlerfalle 67xxx-Alarm statt RESET-pflichtigen 66xxx-Alarms
+;iMaxWaitTime:  max. Wartezeit (in Sekunden)
+;
+;------------------------------------
+
+PROC WaitRep(INT iMode, INT iMaxWaitTime)
+
+DEF STRING[32] sCycName="WaitRep V06.00.06", sAlarmParam=""
+;
+DEF INT iAlarmNo=0, iRepCount=1, iMaxTime, iWaitCount, iMaxWaitCount, iActMaxWaitCount, iMaxRepCount, iTmpAckn, iTelNo, iTmpTelNo
+DEF REAL rWaitShort
+
+IF (giAcknFromMMC==giReqToMMC)
+  RET
+ENDIF
+;
+IF (NOT $P_SUBPAR[1])
+  iMode=0
+ENDIF
+;
+IF ($P_SUBPAR[2])
+  ;
+  IF ($P_PROG_EVENT<>3)
+    ;kein Ereignis bzw. Ereignis eingetreten, aber kein RESET-Ereignis
+    iMaxRepCount=5
+  ELSE
+    ;bei RESET-Ereignis reduzierte Wartezeit/Wiederholrate
+    iMaxRepCount=2
+  ENDIF
+  iMaxTime=iMaxWaitTime
+ELSE
+  ;
+  IF ($P_PROG_EVENT<>3)
+    ;kein Ereignis bzw. Ereignis eingetreten, aber kein RESET-Ereignis
+    iMaxTime=30 iMaxRepCount=5
+  ELSE
+    ;bei RESET-Ereignis reduzierte Wartezeit/Wiederholrate
+    iMaxTime=5 iMaxRepCount=2
+  ENDIF
+  iMaxWaitTime=iMaxTime
+ENDIF	
+;
+rWaitShort=(2*$MN_IPO_CYCLE_TIME) iActMaxWaitCount=RTOI(MINVAL(5,iMaxTime)/rWaitShort) iMaxWaitCount=RTOI(iMaxTime/rWaitShort) iTelNo=((giReqToMMC DIV 1000)*1000)
+;
+REPEAT
+  ;
+  iWaitCount=0
+  WHILE (giAcknFromMMC<>giReqToMMC)AND(iWaitCount<=iActMaxWaitCount)
+    ;
+    G04 F=rWaitShort
+    ;
+    IF (giAcknFromMMC==(-1)*giReqToMMC)
+      ;
+      ;Telegramm wurde von WzV bestaetigt, Aktion ist aber noch nicht abgeschlossen
+      ;
+      IF (iActMaxWaitCount<>iMaxWaitCount)
+        iActMaxWaitCount=RTOI(iMaxWaitTime/rWaitShort)
+      ENDIF
+    ENDIF
+    ;
+    iWaitCount=iWaitCount+1
+    STOPRE
+    ;
+  ENDWHILE
+  ;
+  ;Status: Quittierung eingetroffen oder Zeitueberlauf
+  ;
+  IF (giAcknFromMMC<>giReqToMMC)
+    ;
+    ;Zeitueberlauf - MMC hat nicht geantwortet
+    ;
+    iRepCount=iRepCount+1
+    IF iRepCount<=iMaxRepCount
+      ;
+      ;noch nicht alle Wiederholversuche ausgeschoepft -> modifizierten Befehl nochmals absetzen
+      ;
+      IF (giTelOffset<999)
+        giTelOffset=giTelOffset+1
+      ELSE
+        giTelOffset=0
+      ENDIF
+      iTmpTelNo=iTelNo+giTelOffset
+      ;
+      IF (iTmpTelNo==giAcknFromMMC)
+        ;
+        ;Telegrammnummer h‰tte die gleiche Nummer wie die Quittierung -> Sie muﬂ nochmals modifiziert werden
+        ;
+        IF (giTelOffset<999)
+          giTelOffset=giTelOffset+1
+        ELSE
+          giTelOffset=0
+        ENDIF
+        iTmpTelNo=iTelNo+giTelOffset
+        ;
+      ENDIF
+      ;
+      ;jetzt erst Telegramm auslˆsen
+      ;
+      giMBoxFromMMC[0]=0 giReqToMMC=iTmpTelNo
+      ;
+    ENDIF
+  ENDIF
+  ;
+UNTIL (giAcknFromMMC==giReqToMMC)OR(iRepCount>iMaxRepCount)
+;
+;Status: Quittierung eingetroffen oder max. Wartezeit erreicht
+;
+IF (giAcknFromMMC<>giReqToMMC)
+  ;
+  ;trotz Wartens/mehrfacher Wiederholungen keine Quittierung durch MMC
+  ;
+  iTmpAckn=giAcknFromMMC
+  ;
+  IF ($P_PROG_EVENT==3)OR(iMode==1)
+    ;RESET-Ereignis eingetreten
+    iAlarmNo=AL_CommunicationErr67 giAcknFromMMC=giReqToMMC
+  ELSE
+    iAlarmNo=AL_CommunicationErr
+  ENDIF
+  ;
+  LogTrace(sCycName, "No response from tool management: giReqToMMC="<<giReqToMMC<<" <-> giAcknFromMMC="<<iTmpAckn,iAlarmNo)
+  ;
+  SETAL(iAlarmNo, sAlarmParam)
+  ;
+ENDIF
+;
+RET

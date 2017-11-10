@@ -1,0 +1,72 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Wait_To_Check.SPF
+;# Task:      Auswertung BBK
+;# Version:   V06.00.06
+;# Date:      04.05.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+; Verlauf:
+;
+; V06.00.06 - 04.05.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 10.08.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;----------------------------------
+;
+; Eingangsparameter:
+; ------------------
+; iErrorMode       0 (WITH_ALARM):    Alarm absetzen (STOP)
+;                  1 (WITHOUT_ALARM): keinen Alarm absetzen
+; iBreakCtrlMode   0: (mechan.) Bohrerbruchkontrolle nach dem Ausschleusen des Wz aus der Spindel(Standard-Modus)
+;                  1: (mechan.) Bohrerbruchkontrolle, asynchron durch Bearbeitungsprogramm angestossen
+;
+; Ausgangsparameter:
+; -------------------
+; TOOL_BREAK_REACTION
+;
+; Beispiel:
+; ---------
+; TOOL_BREAK_REACTION=1
+; WAIT_TO_CHECK(0)
+; IF TOOL_BREAK_REACTION<>0
+;   ;Wz ist gebrochen
+;   ;hier kommt die Fehler-Reaktion
+; ELSE
+;   ;Wz ist i.O.
+; ENDIF
+;
+; Die globale Anwendervariable TOOL_BREAK_REACTION muss vom aufrufenden
+; NC-Programm auf einen Wert <> 0 gesetzt werden. Nach Aufruf von
+; WAIT_TO_CHECK wird diese Variable auf 0 zurueckgesetzt, sofern das Werkzeug nicht gebrochen ist.
+;
+;----------------------------------
+
+PROC WAIT_TO_CHECK(INT iErrorMode, INT iBreakCtrlMode)
+
+DEF INT iIsBroken=0
+
+IF (NOT $P_SUBPAR[1])
+  iErrorMode=WITH_ALARM
+ENDIF
+;
+IF (NOT $P_SUBPAR[2])
+  iBreakCtrlMode=0
+ENDIF
+;
+WaitTChk(iErrorMode,iBreakCtrlMode,iIsBroken)
+;
+IF (iIsBroken==0)
+  ;nicht gebrochen
+  TOOL_BREAK_REACTION=0
+ENDIF
+;
+RET

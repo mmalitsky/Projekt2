@@ -1,0 +1,178 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetTlLoc.SPF
+;# Task:      Wz Zielplatz bestimmen
+;# Version:   V06.00.05
+;# Date:      27.11.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 27.11.2016 / Simons
+; - iOrder entfernt
+;
+; V06.00.05 - 04.10.2016 / Simons
+; - neue Versionierung
+; - Korrektur iMode=1
+;
+; V06.00.03 - 07.05.2015 / Simons
+; - neue Versionierung
+; - giNumPlacesInMag, giNumRealMag
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Aus Wz-Daten Ziel-Mag/-Platz Auslesen
+;
+; Eingangsparameter
+; iMode  =0: aktuelle Platzdaten fuer ein Werkzeug in einem realen Magazin oder der Sp
+;        =1: nur Quelldaten auslesen
+;            Wenn Quelldaten leer oder falsch: Werte des Eigentuemermagazins auslesen
+;        =2: nur Zieldaten auslesen
+;            Wenn Zieldaten leer oder falsch:  Werte des Eigentuemermagazins auslesen
+;        =3: Zieldaten auslesen.
+;            Wenn Zieldaten leer oder falsch, dann Quelldaten auslesen
+;            Wenn Quelldaten auch leer oder falsch: Werte des Eigentuemermagazins auslesen
+;
+; Format in den Wz-Daten:
+; aabbbxxyyy
+; aa: Quellmagazin (0=virtuelles Magazin 9998/9999) bbb: Quellplatz (1..n)
+; xx: Zielmagazin  (0=virtuelles Magazin 9998/9999) yyy: Zielplatz  (1..n)
+;
+;------------------------------------
+
+PROC GetTlLoc(INT iMode, INT iTNo, VAR INT iMag, VAR INT iPot)
+
+DEF STRING[32] sCycName="GetTlLoc V06.00.05"
+;
+DEF INT iValue
+
+iMag=0 iPot=0
+
+CASE iMode OF 0 GOTOF _ActPot 1 GOTOF _Source 2 GOTOF _Dest 3 GOTOF _SourceDest
+GOTOF _END
+;
+;=======
+_ActPot:
+;=======
+;
+;Aktueller Magazinplatz des Wz's
+iMag=$A_TOOLMN[iTNo] iPot=$A_TOOLMLN[iTNo]
+;
+IF (iMag<1)OR(iPot<1)OR((iMag>giNumRealMag)AND(iMag<>9998))
+  ;
+  ;Wz in keinem realen Magazin oder Zwischenspeicher oder auf ungueltigem Platz
+  ;
+  iMag=0 iPot=0
+ENDIF
+;
+GOTOF _END
+
+;===========
+_SourceDest:
+;===========
+;
+;=====
+_Dest:
+;=====
+;
+IF (iMag<=0)OR(iPot<=0)
+  ;
+  ;Zieldaten auslesen
+  ;
+  ;Platz auf den das Wz zuletzt beladen worden ist
+  iValue=RTOI($TC_TPC10[iTNo] MOD 100000) iMag=(iValue DIV 1000) iPot=(iValue MOD 1000)
+ENDIF
+;
+;Zieldaten nicht pruefen
+IF (iMode==2) GOTOF _common
+;
+IF (iMode==3)
+  ;
+  ;Zieldaten pruefen
+  ;
+  IF (iMag<1)OR(iMag>giNumRealMag)
+    ;
+    ;kein reales Magazin
+    ;
+    iMag=0 iPot=0
+  ELSE
+    ;
+    IF (iPot<1)OR(iPot>giNumPlacesInMag[iMag])
+      ;
+      ;Falscher Platz
+      ;
+      iMag=0 iPot=0
+    ENDIF
+  ENDIF
+ENDIF
+
+;=======
+_Source:
+;=======
+;
+;Aus Zielangaben Magazin und Platz bestimmen
+;
+IF (iMag<=0)OR(iPot<=0)
+  ;
+  ;Quelldaten auslesen
+  ;
+  ;Platz auf den das Wz zuletzt beladen worden ist
+  iValue=RTOI($TC_TPC10[iTNo] DIV 100000) iMag=(iValue DIV 1000) iPot=(iValue MOD 1000)
+ENDIF
+;
+;Quelldaten nicht pruefen
+IF (iMode==1) GOTOF _common
+;
+IF (iMode==3)
+  ;
+  ;Quelldaten pruefen
+  ;
+  IF (iMag<1)OR(iMag>giNumRealMag)
+    ;
+    ;kein reales Magazin
+    ;
+    iMag=0 iPot=0
+  ELSE
+    ;
+    IF (iPot<1)OR(iPot>giNumPlacesInMag[iMag])
+      ;
+      ;Falscher Platz
+      ;
+      iMag=0 iPot=0
+    ENDIF
+  ENDIF
+ENDIF
+
+;=======
+_common:
+;=======
+;
+IF (iMag<1)OR(iPot<1)
+  ;
+  iMag=$A_MYMN[iTNo] iPot=$A_MYMLN[iTNo]
+  ;
+  IF ((iMag<1)OR(iMag>giNumRealMag)OR(iPot<1))
+    ;
+    ;Wz ist in keinem realen Magazin oder Platz ungueltig
+    ;
+    iMag=0 iPot=0
+  ENDIF
+ENDIF
+
+;====
+_END:
+;====
+;
+RET

@@ -1,0 +1,88 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ReasOffs.SPF
+;# Task:      Laden aller Frames
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 12.11.2016 / Simons
+; - Neuversionierung
+; - EES hinzu
+;
+; V06.00.03 - 09.05.2016 / Simons
+; - ProtoTyp
+;
+; V04.00.00 - 28.01.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+; Alle "Einstellbaren Nullpunktverschiebungen"
+; G54 - G59 und G505 - G599 werden aus einer Datei
+; mit dem Namen "ZO_" << NC-ProgrammName als SPF
+; gelesen. Die Datei liegt im Aufrufpfad.
+;
+;------------------------------------
+
+PROC ReadOffs DISPLOF SBLOF
+
+DEF STRING[128] sCycName="ReadOffs V06.00.05", sPrgName
+;
+DEF INT iError=0, iBuf
+
+;Reset sperren
+OUT_LockReset=TRUE iBuf=giPAL_BUFNO[$A_INA[2]]
+;
+;Programmdaten werden gesichert! Bitte nicht abbrechen! Reset gesperrt!
+MSG(MSG_ReadingData)
+;
+;Quelldatei
+IF (giActDeviceNo>0)AND(giActDeviceNo<=mcNumExtDevices)
+  ;
+  ;EES Device
+  ;
+  sPrgName=gsDeviceName[giActDeviceNo]<<"/WKS.DIR/" << gsMMC_PATH[iBuf] << ".WPD/Z" << giMPSActivProg << "_" << gsMMC_PROG[iBuf] << ".SPF"  
+ELSE
+  ;
+  ;NC
+  ;
+  sPrgName="/_N_WKS_DIR/_N_" << gsMMC_PATH[iBuf] << "_WPD/_N_Z" << giMPSActivProg << "_" << gsMMC_PROG[iBuf] << "_SPF"
+ENDIF
+;
+IF ISFILE(sPrgName)
+  ;
+  ;Nullpunktverschiebungen Laden
+  CALL sPrgName
+  ;
+  STOPRE
+  ;
+  ;Sicherungsdatei Loeschen
+  DELETE (iError, sPrgName)
+ENDIF
+;
+;Reset freigeben
+OUT_LockReset=FALSE
+;
+MSG("")
+;
+IF (iError<>0)
+  SETAL(AL_ReadError,"Z" << giMPSActivProg << "_" << gsMMC_PROG[iBuf] << ".SPF")
+ENDIF
+;
+RET
+

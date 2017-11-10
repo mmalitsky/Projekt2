@@ -1,0 +1,63 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Lubricat.SPF
+;# Task:      Start Lubricatio
+;# Version:   V06.00.06
+;# Date:      21.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+; -----------------------------------
+; Verlauf:
+; --------
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 07.05.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.00 - 12.06.2015 / Simons
+; - Prototyp
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+; -----------------------------------
+;
+; nur noch fuer Testzwecke
+;
+;------------------------------------
+
+PROC LUBRICAT SAVE
+
+DEF STRING[32] sCycName="LUBRICAT V06.00.06"
+;
+DEF REAL rActYPos, rActZPos
+
+rActYPos=$AA_IM[mcAxY] rActZPos=$AA_IM[mcAxZ]
+
+MSG(MSG_LubCycleActive)
+
+;Y-Achse positionieren, falls notwendig
+IF (ABS(rActYPos-grTcPosY)>=grPara[20])
+  ;
+  IF (rActZpos<(grTcPosZ-grPara[20]))
+    SETAL(AL_PosUnvalid,"Z="<<rActZpos)
+    GOTOF ENDE
+  ENDIF
+  ;
+  G0 D0 G40 G60 G17 G153 G90 G94 Y=grTcPosY
+  ;
+ENDIF
+;
+M57 ;mit ELSP
+;
+MSG("")
+
+;====
+ENDE:
+;====
+;
+RET

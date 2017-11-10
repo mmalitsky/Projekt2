@@ -1,0 +1,71 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MC_NAME.SPF
+;# Task:      Generiert maschinen-
+;#            spezifischen ProgNamen
+;# Version:   V06.00.06
+;# Date:      21.04.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+; Beschreibung:
+;
+; Der 1. Punkt von Rechts wird durch
+; "x" ersetzt, sonst werden alle Punkte
+; geloescht.
+;
+; D.1009100.001 -> D1009100x001
+;
+;--------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.00 - 01.06.2015 / Simons
+; - ProtoTyp / Neu
+;--------------------------------------
+
+PROC MC_NAME(STRING[32] sSource, VAR STRING[32] sName) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="MC_NAME V06.00.06"
+;
+DEF STRING[1] sAux
+;
+DEF INT iLen, iCount
+
+sName=sSource iLen=STRLEN(sName)
+IF iLen>0
+  sAux="x"
+  ; vom Textende aus
+  iCount=RINDEX(sName,".")
+  WHILE iCount<>-1
+    ; "." Gefunden
+    IF iCount == 0
+      ; ist 1. Zeichen
+      sName=SUBSTRG(sName,1,STRLEN(sName)-1)
+    ELSE
+      IF iCount == iLen-1
+        ; Ist letztes Zeichen
+        sName=SUBSTRING(sName,0,iCount)
+      ELSE
+        ; sonst ab 2. Zeichen
+        sName=SUBSTR(sName,0,iCount)<<sAux<<SUBSTR(sName,iCount+1,iLen-iCount-1)
+      ENDIF
+    ENDIF
+    ; ab hier Punkte loeschen
+    sAux=""
+    ; neue Textlaenge
+    iLen=STRLEN(sName)
+    ; naechsten Punkt suchen
+    iCount=RINDEX(sName,".")
+  ENDWHILE
+ENDIF
+;
+RET

@@ -1,0 +1,96 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Work_Done.SPF
+;# Task:      Bearbeitungsende
+;# Version:   V06.00.05
+;# Date:      24.11.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 24.11.2016 / Simons
+; - immer Tool Planning beruecksichtigen
+;
+; V06.00.05 - 21.09.2016 / Simons
+; - Neuversionierung
+; - giHMI... hinzu
+;
+; V06.00.04 - 26.08.2016 / Simons
+; - Neuversionierung
+; - CFG_MAN verwendet
+;
+; V06.00.03 - 09.05.2016 / Simons
+; - ProtoTyp
+;
+; V04.00.01 - 17.06.2014 / Trappmann
+; - Vorlage
+;
+;------------------------------------
+
+PROC Work_Done(INT iPalStatus)
+
+DEF STRING[32] sResult
+;
+DEF INT iBuf, iActPosAPC
+;
+DEF BOOL bMultiProg, bAPCinBasePos
+
+IF ($P_SEARCH)
+  M17
+ENDIF
+
+IF (NOT $P_SIM)
+
+  CFG_MAN("MPS_HOST",sResult)
+
+  bMultiProg=(sResult<>"")
+
+  IF (BufNo>0)AND(BufNo<18)AND(OUT_SysPrgActive)
+    ;
+    ;Datensatznummer aus Vorwahl
+    iBuf=BufNo
+  ELSE
+    ;
+    M91
+    ;
+    bAPCinBasePos=(IN_APCInPos) iActPosAPC=(INA_APCPos)
+    ;
+    IF (NOT bAPCinBasePos)OR(iActPosAPC==0)
+      ;Palettenwechsel laeuft noch
+      SETAL(AL_APCNotInBasePos)
+    ELSE
+      ;
+      ;Datensatznummer aus APC Stellung
+      iBuf=giPal_BufNo[iActPosAPC]
+    ENDIF
+  ENDIF
+  ;
+  IF (bMultiProg)
+    ;
+    ;Werkstueckstatus -> Fertig
+    giMPSWorkState[giMPSActivProg]=2
+  ENDIF
+  ;
+  IF (NOT bMultiProg)OR(iPalStatus==1)
+    ;
+    ;kein Leitrechner -> Palettenstatus Fertig
+    giMMC_Pal[1,iBuf]=2
+  ENDIF
+  ;
+  ;<Palette mit Erstbearbeitung> Loeschen
+  giMMC_Pal[3,iBuf]=(giMMC_Pal[3,iBuf] B_AND 'B11111110')
+ENDIF
+;
+Pal_Status=2 Pal_New=0
+;
+;Hmi(Tool Planning) setzt Wert nach erhalt auf Null
+giHmiMessageBox=2
+;
+RET
+

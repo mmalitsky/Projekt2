@@ -1,0 +1,64 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ReserveMagPl.SPF
+;# Task:      Telegramm an MMC mit Warten
+;# Version:   V06.00.06
+;# Date:      03.05.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+; Verlauf:
+;
+; V06.00.06 - 03.05.2017 / Simons
+; - ProtoTyp
+;
+;----------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; HHD-Werkzeugverwaltung mit unterlagerter SIEMENS-WzV
+; Magazinplatzreservierung Setzen / Ruecksetzen ohne Warten
+;
+; Eingangsparameter:
+; ------------------
+; bSet=TRUE:  Reservieren
+; bSet=FALSE: Reservierung entfernen
+;
+; iTNo: WzNummer
+; iMagNo: Magazin
+; iLocNo: Platz
+;
+; iMagNo=0 undiLocNo=0 -> Reservierung auf allen Plaetzen, die fuer das Wz reserviert sind aufheben
+;
+;----------------------------------
+
+PROC ReserveMagPl(BOOL bSet, INT iTNo, INT iMagNo, INT iLocNo)
+
+DEF STRING[32] sCycName="ReserveMagPl V06.00.06"
+
+IF (NOT gbTMIsHHD) GOTOF ENDE
+
+IF (NOT $P_SUBPAR[3])
+  iMagNo=0
+ENDIF
+
+IF (NOT $P_SUBPAR[4])
+  iLocNo=0
+ENDIF
+
+;AuftrKennung|Optionsbits|Setzen(1)/Ruecksetzen(-1)|TNr|MagNr|PlNr
+IF (bSet)
+  Send(mcRPlaceReservation,"0|0|1|"<<iTNo<<"|"<<iMagNo<<"|"<<iLocNo)
+ELSE
+  Send(mcRPlaceReservation,"0|0|-1|"<<iTNo<<"|"<<iMagNo<<"|"<<iLocNo)
+ENDIF
+;
+;====
+ENDE:
+;====
+;
+RET

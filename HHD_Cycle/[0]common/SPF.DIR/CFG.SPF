@@ -1,0 +1,29 @@
+ ;# Cycle:     CFG.SPF  
+ ;# Task:      Maschine und Magazin  
+ ;#            Konfigurieren  
+ ;# Version:   V06.00.08  
+ ;# Date:      20.07.2017  /  Simons  
+ ;# Control:   840DSL Operate  
+ ;# TM:        Siemens  
+ ;# NBHSeries: 5 - 1200  
+ ;# Magazines: All  
+ ;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<  
+ ;#  
+ ;#   
+ ;#-------------------------------------  
+ ;# Beschreibung:  
+ ;#   
+ ;# AuswahlOption:  
+ ;# [Magazintypen+Maschinentypen]  
+ ;#   
+ ;# Aufgerufen in  
+ ;# - POS_PROG.SPF  
+ ;# - CREA_POS.SPF  
+ ;#  
+ ;#-------------------------------------   
+ ;   
+ ;----------------  
+ ; MaschinenNummer  
+ ;----------------  
+ gsMachIdent = "D.1009325.001" 
+ ;  

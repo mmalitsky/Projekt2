@@ -1,0 +1,1248 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MovBlock.SPF
+;# Task:      Magazinstatus
+;# Version:   V06.00.08
+;# Date:      28.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 28.10.2017 / Simons
+; - Beim Beladen von Schublade <FestplatzWz> setzen
+;
+; V06.00.08 - 23.08.2017 / Simons
+; - Neuversionierung
+; - IB HHDTM Funktionen
+;
+; V06.00.07 - 14.07.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+; - formale Aenderungen
+;
+; V06.00.06 - 06.05.2017 / Simons
+; - OEM_TlData(..,x) -> OEM_TlData(..,mc..)
+; - neue Leerplatzsuche: im ganzen Magazin, ausser Schublade
+; - TlData(...)
+; - ReserveMagPl hinzu
+; - formale Aenderungen
+;
+; V06.00.06 - 09.12.2016 / Simons
+; - Neuversionierung
+; - giSyncPickUpDrop->grSyncPickUpDrop
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - HHD TM (Version: 04.02.00 / Juli 2016, Balles)
+; - OEM_...
+;
+; V06.00.03 - 08.05.2016 / Simons
+; - Neuversionierung
+; - Einfuehrung HHD TM
+; - giNumPlacesInMag,giNumRealMag
+; - Parameter iOnlyFromPotNo hinzu
+; - iSrc...
+;
+; V04.02.00 - 29.04.2016 / Balles
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+;Im Batch-Modus:
+;- Wz asynchron von vorgegebener Cassette beladen
+;- Wz asynchron auf vorgegebene Cassette entladen
+;- Von Wz-Chip lesen
+;- Auf Wz-Chip schreiben
+;  Wg. Batch-Modus Alarme moeglichst als 67xxx aus-
+;  geben (zur Info), ohne erforderliches NC-RESET
+;
+;Wird aufgerufen ...
+;... nach Betaetigen der Taster "von Input/Output-Magazin beladen"
+;                               "auf Input/Output-Magazin entladen"
+;am Nebenbedienpult
+;
+;Eingangsparameter:
+;iMode:
+;=1: Von <iFromMag> (iFromMag>0) beladen
+;=2: Auf <iToMag> (iToMag>0) entladen
+;
+;Wz-Identifikation + HHD-TM:
+;=10: Chip aller im Teilmag. <iFromMag> befindlichen Werkzeuge einlesen (Werkzeugdatensatz aktualisieren)
+;=11: Chip aller im Teilmag. <iFromMag> befindlichen Werkzeuge mit Werkzeugdaten beschreiben (Chip aktualisieren)
+;=12: wie 11, jedoch erst nach zuvor erfolgreichem Datenvergleich Chip<->Werkzeug
+;
+;iFromMag : Quellmagazin
+;           beim Beladen/Wz-Identifikation: >0
+;           beim Entladen:                  =0 aus allen Teilmagazinen (ausser <iToMag>)
+;                                           >0 nur aus Teilmagazin <iFromMag> entladen
+;iFromPotStart : (nur mit iFromMag>0): erster  zu betrachtender Quellplatz (0= kleinster Platz innerhalb des Teilmagazins <iFromMag>)
+;iFromPotEnd   : (nur mit iFromMag>0): letzter zu betrachtender Quellplatz (0= hoechstmoeglicher Platz innerhalb des Teilmagazins <iFromMag>)
+;iToMag        : Zielmagazin  (beim Entladen: >0)
+;                beim Beladen:  >0  Nr. des Teilmagazins, in das beladen werden soll
+;                beim Beladen:  =0  Beladeziel aus den Wz-Daten ermitteln ($TC_TPC9)
+;                beim Entladen: >0  Nr. des Teilmagazins, in das hinein entladen werden soll
+;                beim Entladen: =0  unzulaessig
+;iActMagNo     : aktuelle Magazin-Nr
+;iActPotNo     : aktuelle Platz-Nr
+;iState        : 0= Anfang
+;                1= laeuft
+;                2= abgebrochen oder beendet
+;
+;beim Beladen:
+;(iFromMag>0,iToMag>0): Von Magazin <iFromMag> nach <iToMag> beladen
+;(iFromMag>0,iToMag=0): Von Magazin <iFromMag> ins "restliche" Magazin beladen gemaess Werkzeugdatum $TC_TPC9
+;
+;bei Wz-Identifikation:
+;(iFromMag>0,iToMag=0): Auftrag betr. Werkzeuge in Teilmagazin <iFromMag>: nur Werkzeug greifen/Lesen/Schreiben/am gleichen Ort ablegen
+;
+;beim Entladen:
+;(iFromMag>0,iToMag>0): Vom Magazin <iFromMag> nach <iToMag> entladen
+;(iFromMag=0,iToMag>0): Von "restlichen" Magazin nach <iToMag> entladen
+;
+;Wird ein Wz gefunden, so wird der Auftrag fuer das Systemprogramm Kanal 2 ausgefuehrt und MovBlock verlassen.
+;Ebenso wird MovBlock verlassen, wenn eine Maximalzahl an Schleifendurchgaengen erreicht ist,
+;ohne dass auf ein umzusetzendes Wz gestossen wurde
+;Der aufrufende Zyklus kann ueber die E/A-Parameter iActMagNo, iActPotNo nicht nur ermitteln,
+;wie weit MovBlock gekommen ist, sondern MovBlock erneut aufrufen, damit dieser Zyklus dort
+;weitermacht, wo er vorher herausgesprungen ist (aufgehoert hat)
+;Bei Stoerungen/Fehlern unterbleibt SETAL (sonst bleibt Maschine stehen): der Teilauftrag
+;wird einfach ausgelassen.
+;
+;------------------------------------
+
+PROC MovBlock(INT iMode, INT iFromMag, INT iFromPotStart, INT iFromPotEnd, INT iToMag, VAR INT iActMagNo, VAR INT iActPotNo, VAR INT iState) DISPLOF
+
+DEF STRING[32] sCycName="MovBlock V06.00.08", sAlarmParam="", sAlarmParam1="", sTName="", sTmp
+;
+DEF BOOL bWithChip, bOnlyWithOneTool, bDoCheck
+;
+DEF INT icStart=0, icRunning=1, icFinished=2, iAlarmNo=0, iAlarmNo1=0, iTNo=0, iAlarmNoShown=0, iSrcMagNo=0, iSrcPotNo=0, iDstMagNo=0, iDstPotNo=0, iInfoMode=0, iLoopCount=0, iTNoChip=0, iTmpMagNo=0, iTmpLocNo=0
+DEF INT iTmp, iIsFixedTl, iPreTNo, iCount, iCaNo, iMask, iMaskMag, iMaxPlNo, iChkRes, iStartCount, iEndCount
+;
+DEF REAL rOldPosX, rOldPosZ
+
+bWithChip=(mcbDBB_WithTlChipHG) bOnlyWithOneTool=((iFromMag>0)AND(iFromPotStart>0)AND(iFromPotStart==iFromPotEnd))
+
+MsgBox("","CLEAR")
+
+;Ueberpruefungen
+;---------------
+IF NOT (((iMode>=1)AND(iMode<=2))OR((iMode>=10)AND(iMode<=12)))
+  ;Modus nicht implementiert
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+;
+IF (NOT bWithChip)AND(NOT gbTMIsHHD)AND((iMode>=10)AND(iMode<=12))
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+;
+IF (iMode==1)OR((iMode>=10)AND(iMode<=12))
+  ;
+  ;von Input/Output-Magazin beladen oder bei Wz-Identifikation
+  ;Codetraeger der Werkzeuge aus Teilmagazin lesen/beschreiben/vergleichen
+  ;
+  IF (iState==icStart)
+    ;
+    IF (iToMag<0)OR(iToMag>giNumRealMag)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+    ;
+    IF (iFromMag>=1)AND(iFromMag==iToMag)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+ENDIF
+;
+IF (iMode==2)
+  ;
+  ;auf Input/Output-Magazin entladen
+  ;
+  IF (iState==icStart)
+    ;
+    IF (iFromMag<0)OR(iFromMag>giNumRealMag)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+    ;
+    IF (iToMag>=1)AND(iFromMag==iToMag)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+ENDIF
+;
+FOR iCount=1 to 2
+  ;
+  ;Ueberpruefung, ob Quell/Zielkassette vorhanden und nicht gesperrt ist
+  ;
+  IF (iCount==1)
+    iCaNo=iFromMag
+  ELSE
+    iCaNo=iToMag
+  ENDIF
+  ;
+  IF (iCaNo>0)
+    ;
+    iMaskMag=RTOI(EXP((iCaNo-1)*LN(2)))
+    ;
+    IF ((mcDBW_MagExist B_AND iMaskMag)==0)
+      ;
+      ;Kassette nicht vorhanden
+      ;
+      iState=icFinished sAlarmParam=<<iCaNo
+      SETAL(AL_CassIsMissing67,sAlarmParam)
+      GOTOF ENDE
+    ENDIF
+    ;
+    IF (($TC_MAP3[iCaNo] B_AND 'B10')<>0)
+      ;
+      ;Kassette gesperrt
+      ;
+      iState=icFinished sAlarmParam=<<iCaNo
+      SETAL(AL_CassIsLocked67,sAlarmParam)
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+ENDFOR
+
+;Ablauf
+;------
+;
+giTNoHg=$TC_MPP6[9998,mcLocHG]
+;
+IF (iState==icStart)AND(giTNoHg>0)
+  ;
+  ;Auftragsstart und ein Wz im HG -> Wz im HG ins Magazin ablegen
+  ;
+  ;vor Beladen/Entladen HG leerfahren
+  GetTlLoc(1, giTNoHg, iSrcMagNo, iSrcPotNo)  ;Quelldaten
+  GetTlLoc(3, giTNoHg, iDstMagNo, iDstPotNo)  ;Zieldaten aus $TC_TP10 oder Angaben hinsichtlich Eigentuemer-Magazin/-Platz
+  ;
+  TlData(giTNoHg)
+  ;
+  iIsFixedTl=Tl_FixPlace
+  ;
+  ;Platzpruefung, ggf. Leerplatzsuche
+  chkTlLoc(iIsFixedTl,giTNoHg,iDstMagNo,iDstPotNo,iTmpMagNo,iTmpLocNo,iAlarmNo,sAlarmParam)
+  IF (iAlarmNo>0)
+    ;bewusst Bedienerhinweis vor der Ausgabe des chkTlLoc-Alarms
+    MakeAlarmparam(sAlarmParam,$TC_TP2[giTNoHg],<<$TC_TP1[giTNoHg])
+    SETAL(AL_RemoveTlFromHG67,sAlarmParam)
+    ;Abbruch, da Wz auf Platz nicht abgelegt werden kann
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  iDstMagNo=iTmpMagNo iDstPotNo=iTmpLocNo
+  ;
+  ;Platzdaten fuer abzulegendes Werkzeug ermitteln
+  GetPlDat(iSrcMagNo,iSrcPotNo,iDstMagNo,iDstPotNo)
+  ;
+  ;Pruefen ob oder warten auf <Cassette vorhanden/freigegeben> / Puffer 1, s.o. GetPlDat
+  ChkSwitch(1,iDstMagNo,iDstPotNo,1,iChkRes)
+  ;
+  ;Werkzeug (asynchron) zum Magazinplatz bringen und ...
+  MovTool(mcTaskAS_T0,giTNoHg,iDstMagNo,iDstPotNo,iAlarmNo,sAlarmParam)
+  IF (iAlarmNo>0) GOTOF HandleAlarm
+  ;
+  ; ... umspeichern: HG->Ca
+  ToAckn(TRUE,5,2,giTNoHg,giTNoHg,iDstMagNo,iDstPotNo,9998,mcLocHG,1)
+ENDIF
+
+;Auftragsbearbeitung
+;-------------------
+;
+;von Input/Output-Magazin beladen/WzIdentifikation
+IF (iMode==1)OR((iMode>=10)AND(iMode<=12)) GOTOF LoadOrToolIdent
+;
+;auf Input/Output-Magazin entladen
+IF (iMode==2) GOTOF DoUnload
+;
+;ungueltiger Modus
+iState=icFinished
+GOTOF ENDE
+;
+;===============
+LoadOrToolIdent:
+;===============
+;
+;von Input/Output-Magazin Beladen/WzIdentifikation
+;
+IF (iState==icStart)
+  ;
+  ;Startpkt. festlegen
+  ;
+  iActMagNo=iFromMag iActPotNo=0 giRemovedFromDrawer=0
+  IF (iFromPotStart>0)
+    iActPotNo=iFromPotStart-1
+  ENDIF
+ENDIF
+;
+IF (iActMagNo<1)OR(iActMagNo>giNumRealMag)
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+;
+iState=icRunning
+;
+iMaxPlNo=giNumPlacesInMag[iActMagNo]
+IF (iFromPotEnd>0)
+  iMaxPlNo=MINVAL(iMaxPlNo,iFromPotEnd)
+ENDIF
+;
+IF (iFromPotStart>0)AND(iFromPotStart>iMaxPlNo)
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+
+LOOP
+  ;
+  STOPRE
+  ;
+  iActPotNo=iActPotNo+1 sAlarmParam=<<iActMagNo<<"/"<<iActPotNo
+  ;
+  IF (iInfoMode>0)
+    SETAL(AL_FlexibleText67,"Info: magazine/place="<<sAlarmParam)
+  ENDIF
+  ;
+  IF (iActPotNo>iMaxPlNo)
+    iState=icFinished
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iActMagNo==1)
+    ;
+    ;Ruestplatz/Schublade
+    ;
+    IF (iMaxPlNo>31)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+    ;
+    iMask=RTOI(EXP((iActPotNo-1)*LN(2)))
+    ;
+    IF ($TC_MPP2[iActMagNo,iActPotNo]==9999)
+      ;
+      ;Platztyp 9999: Pseudoplatz
+      ;
+      giRemovedFromDrawer=(giRemovedFromDrawer B_OR iMask)
+      GOTOF NextStep0
+    ENDIF
+  ENDIF
+  ;
+  IF (($TC_MPP4[iActMagNo,iActPotNo] B_AND 'B111111110101')<>0)
+    ;
+    ;Platz Gesperrt/reserviert/durch Nachbarplatz-Wz belegt und ...
+    ;
+    IF ($TC_MPP6[iActMagNo,iActPotNo]<=0)AND(iActMagNo==1)
+      ;... datenmaessig leer -> wird als physik. leerer Platz betrachtet
+      giRemovedFromDrawer=(giRemovedFromDrawer B_OR iMask)
+    ENDIF
+    ;
+    IF (($TC_MPP4[iActMagNo,iActPotNo] B_AND 'B1')<>0)
+      ;
+      ;Platz gesperrt
+      ;
+      IF (iInfoMode>0)
+        SETAL(AL_TlLocBlocked67,sAlarmParam)
+      ENDIF
+      GOTOF NextStep0
+    ENDIF
+    ;
+    IF (($TC_MPP4[iActMagNo,iActPotNo] B_AND 'B11110000')<>0)
+      ;
+      ;Pl. belegt durch NachbarWz
+      ;
+      IF (iInfoMode>0)
+        SETAL(AL_TlPlaceUsedByOtherTool67,sAlarmParam)
+      ENDIF
+      GOTOF NextStep0
+    ENDIF
+    ;
+    IF (($TC_MPP4[iActMagNo,iActPotNo] B_AND 'B111100000100')<>0)
+      ;
+      ;Pl. reserviert
+      ;
+      IF (iInfoMode>0)
+        SETAL(AL_TlPlaceReserved67,sAlarmParam)
+      ENDIF
+      GOTOF NextStep0
+    ENDIF
+  ENDIF
+  ;
+  iTNo=$TC_MPP6[iActMagNo,iActPotNo] iDstMagNo=-1 iDstPotNo=-1
+  ;
+  ;Quellplatzdaten bestimmen
+  GetPlDat(iActMagNo,iActPotNo,0,0)
+  rOldPosX=grPlDatPosX[0] rOldPosZ=grPlDatPosZ[0]
+  ;
+  IF (NOT bWithChip) GOTOF PrepForTransport
+  ;
+  ;Ab hier mit angewaehltem Codetraeger
+  ;
+  IF (iTNo==0)
+    ;
+    ;Platz ohne Wz
+    ;
+    iTNo=$TC_MPP66[iActMagNo,iActPotNo]
+    IF (iTNo>0)
+      ;
+      ;Platz ist fuer ein Wz reserviert
+      ;
+      IF ($A_TOOLMN[iTNo]==9998)AND($A_TOOLMLN[iTNo]>=mcLocSp)AND($A_TOOLMLN[iTNo]<mcLocHG)
+        ;
+        ;Reserviertes Wz in SP oder DG1/2
+        ;
+        MakeAlarmparam(sTmp,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+        SETAL(AL_TakeTlToMag67,sTmp)
+        ;
+        GOTOF NextStep0
+        ;
+      ENDIF
+    ENDIF
+  ELSE
+    ;
+    OEM_TlData(iTNo)
+    IF (NOT OEM_bSelChip)
+      ;
+      ;Optionsbit Chip nicht gesetzt
+      ;
+      IF (iMode>=10)AND(iMode<=12)
+        ;
+        ;Identifikationsauftrag
+        ;
+        IF (gbTMIsHHD)
+          giStateToMMC[1]=mcState2ErrDueDataNoChip
+        ENDIF
+        ;
+        ;Platz mit Wz, Wz lt. Daten ohne Chip -> bei Identauftrag ueberspringen
+        GOTOF NextStep0
+      ELSE
+        ;
+        ;Modus "Beladen von Inputmagazin" -> Werkzeug normal beladen
+        GOTOF PrepForTransport
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  IF (iTNo>0)
+    ;
+    ;Es befindet sich ein Wz auf dem Platz oder Platz ist fuer ein Wz reserviert
+    ;
+    ;Warten, bis Cass. eingefahren/nicht gesperrt sowie sofern Platz endschalterueberwacht - Platz belegt
+    REPEAT
+      ChkSwitch(3,iActMagNo,iActPotNo,0,iChkRes)
+    UNTIL ((iChkRes==0)OR(iChkRes==2))
+  ELSE
+    ;
+    ;Es befindet sich kein Wz auf dem Platz
+    ;
+    ;nur pruefen ob Cass. eingefahren/nicht gesperrt und sofern Platz endschalterueberwacht - ob Platz belegt oder frei - Puffer 0, s.o. GetPlDat
+    ChkSwitch(0,iActMagNo,iActPotNo,0,iChkRes)
+  ENDIF
+  ;
+  IF NOT ((iChkRes==0)OR(iChkRes==2)) GOTOF PrepForTransport
+  ;
+  ;Werkzeug vorhanden laut Endschalter oder keine Endschalterueberwachung (iChkRes=0)
+  ;
+  ;Abwahl Kegelreiniger
+  gbHGNoTapeCl=FALSE
+  ;
+  ;Platz anfahren und Chip auslesen
+  GetTool(FALSE, iTNo, iActMagNo, iActPotNo, TRUE)
+  ;
+  IF (iTNo>0)
+    ;
+    ;Wz vorhanden -> Umspeichern: Ca->Hg
+    ToAckn(TRUE,5,2,iTNo,iTNo,9998,mcLocHG,iActMagNo,iActPotNo,1)
+    ;
+    giTNoHg=$TC_MPP6[9998,mcLocHG] grSyncPickUpDrop=0
+    ;
+  ENDIF
+  ;
+  IF (NOT mcbDBB_HGClamped)
+    M_HgClamp1
+    STOPRE
+  ENDIF
+  ;
+  ;HG geklemmt vertikal gesenkt an Quellmagazinplatz
+  giMagState=82
+  ;
+  CASE iMode OF 10 GOTOF _RChip 11 GOTOF _WChip 12 GOTOF _RWChip DEFAULT GOTOF _RChip
+  ;
+  ;======
+  _WChip:
+  ;======
+  ;Werkzeugdaten -> Chip
+  RWChip(2,iTNo,0,iAlarmNo1,sAlarmParam1,iTNoChip)
+  GOTOF _RWChipWait
+  ;
+  ;=======
+  _RWChip:
+  ;=======
+  ;Name/Duplo von Chip lesen, vergleichen + (sofern o.k.) Werkzeugdaten -> Chip
+  RWChip(4,iTNo,0,iAlarmNo1,sAlarmParam1,iTNoChip)
+  GOTOF _RWChipWait
+  ;
+  ;======
+  _RChip:
+  ;======
+  ;Chip lesen -> ggf. Wz anlegen -> WzDaten aktualisieren
+  RWChip(1,iTNo,0,iAlarmNo1,sAlarmParam1,iTNoChip)
+  ;
+  ;===========
+  _RWChipWait:
+  ;===========
+  ;
+  IF (giWaitRWChip>0)
+    ;Warten, bis Vorgang beendet
+    RWChip(giWaitRWChip,iTNo,0,iAlarmNo1,sAlarmParam1,iTNoChip)
+  ENDIF
+  IF (iAlarmNo1>0)
+    ;
+    ;Fehler beim Chip-Lesen/-Schreiben: vor Alarmausgabe Werkzeug (ohne Verfahren des HG) auf aktuellem Platz ablegen
+    ;
+    ;giTNoHG kann auch 0 sein, obwohl Wz koerperlich im HG, aber ohne Chip
+    giTNoHg=$TC_MPP6[9998,mcLocHG] iTNo=giTNoHg
+    ;
+    ;Wz auf Platz ablegen + Umspeichern  (iTNo==0 ist moeglich !!), keine Fehlerausgabe
+    RWDropTool(mcTaskAS_Displace, iTNo, iActMagNo, iActPotNo, FALSE, iAlarmNo, sAlarmParam)
+    ;
+    giTNoHg=$TC_MPP6[9998,mcLocHG]
+    ;
+    IF (iAlarmNo==0)
+      ;
+      IF (iChkRes==2)
+        ;lt. BERO Wz auf dem Platz, wobei RWChip (s.o.) iAlarmNo1>0 zurueckmeldete
+        SETAL(AL_TakeTlFromLoc67,<<iActMagNo<<"/"<<iActPotNo)
+        ;trotzdem weitermachen
+      ENDIF
+      IF (iAlarmNo1==AL_TlWithoutChip67)OR(iAlarmNo1==AL_NoChipOrNoTool67)
+        ;
+        ;kein Codetraeger erkannt
+        ;
+        IF (iChkRes==2)
+          ;
+          ;lt. BERO Wz auf dem Platz, wobei RWChip (s.o.) iAlarmNo1>0 zurueckmeldete
+          ;
+          IF (iTNo<=0)
+            SETAL(AL_NoChipOrNoTool67)
+          ELSE
+            MakeAlarmparam(sTmp,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+            SETAL(AL_TlWithoutChip67,sTmp)
+          ENDIF
+        ENDIF
+        ;
+        IF (iChkRes==0)
+          ;Platz nicht endschalterueberwacht
+          SETAL(AL_NoChipOrNoTool67)
+        ENDIF
+        ;
+        ;mit naechstem Platz weitermachen
+        GOTOF NextStep0
+      ELSE
+        ;sonstige Fehler aus RWChip
+        iAlarmNo=iAlarmNo1 sAlarmParam=sAlarmParam1 iAlarmNoShown=0
+        GOTOF HandleAlarm
+      ENDIF
+    ELSE
+      ;RWDropTool mit Fehler
+      iAlarmNoShown=0
+      GOTOF HandleAlarm
+    ENDIF
+  ELSE
+    ;
+    ;RWChip fehlerfrei
+    ;
+    STOPRE
+    giTNoHg=$TC_MPP6[9998,mcLocHG]
+    ;
+    IF (iTNoChip>0)
+      ;
+      IF ($P_TOOLEXIST[iTNoChip])
+        ;
+        TlData(iTNoChip,mcSetRelTl)
+        ;
+        ;Quelle eintragen/Ziel loeschen
+        $TC_TPC10[iTNoChip]=ITOR(iActMagNo*1000+iActPotNo)*100000
+        ;
+      ENDIF
+    ENDIF
+    ;
+    IF (iTNoChip==giTNoHg)AND(giTNoHg>0)
+      ;
+      ;Wz auf dem Chip und im HG stimmen ueberein
+      ;
+      iTNo=giTNoHg
+      MakeAlarmParam(sTName,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+      ;
+      OEM_TLData(iTNo)
+      gbHGBigTl=OEM_bBigTlHG gbHGHeavyTl=OEM_bHeavyTlHG gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+      ;
+      IF (iMode>=10)AND(iMode<=12)
+        ;
+        ;Sondermodus Werkzeug-Identifikation -> das vom HG auf dem Platz <iActMagNo/iActPotNo> gegriffene Wz genau dort wieder ablegen
+        ;
+        ;Kollisionsueberpruefung, dann Wz auf Platz ablegen + Umspeichern
+        RWDropTool(mcTaskAS_Displace, iTNo, iActMagNo, iActPotNo, FALSE, iAlarmNo, sAlarmParam)
+        ;
+        ;Teilauftrag beendet
+        IF (iAlarmNo==0) GOTOF ENDE
+        ;
+        GOTOF HandleAlarm
+        ;
+      ENDIF
+    ELSE
+      ;
+      ;HG leer und kein Chip erkannt
+      IF (iTNoChip==0)AND(giTNoHg==0) GOTOF NextStep0
+      ;
+      IF (giTNoHg>0)
+        ;
+        ;anderes Werkzeug im HG als vom Chip gelesen
+        ;
+        iAlarmNo=AL_WrongTlInHG67 sAlarmParam=sTName
+      ELSE
+        ;
+        ;kein Wz im HG
+        ;
+        iAlarmNo=AL_NoToolInHG67
+      ENDIF
+      ;
+      GOTOF HandleAlarm
+      ;
+    ENDIF
+  ENDIF
+ 
+  ;================
+  PrepForTransport:
+  ;================
+  ;
+  ;Beladen ohne Balluff: Wz normalerweise auf seinem Platz
+  ;Beladen mit Balluff:  Wz normalerweise bereits im HG
+  ;
+  ;WzIdentauftrag
+  IF (iMode>=10)AND(iMode<=12) GOTOF NextStep0
+  ;
+  ;Beladeauftrag
+  ;-------------
+  ;
+  ;Kein Wz -> Weiter
+  IF (iTNo<=0) GOTOF NextStep0
+  ;
+  MakeAlarmParam(sTName,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+  ;
+  IF (giTNoHG<>iTNo)
+    ;
+    ;Platzbelegung Pruefen
+    REPEAT
+      ChkSwitch(3,iActMagNo,iActPotNo,0,iChkRes)
+    UNTIL ((iChkRes==0)OR(iChkRes==2))
+  ENDIF
+  ;
+  IF (iFromMag==1)
+    ;
+    ;Von Schublade ins Magazin Beladen
+    ;
+    TlData(iTNo,mcResLockTl + mcResActiveTl + mcResLoadUnloadTl + mcSetFixPlaceTl)
+    ;
+    OEM_TlData(iTNo,mcResMeasured_Tested)
+  ENDIF
+  ;
+  ChkDim(1,iTNo,iChkRes)
+  ;
+  IF (iChkRes<0)
+    ;Fehler bzgl. Werkzeugdaten
+    IF (iChkRes==-4)
+      SETAL(AL_TlNotFound67,sTName)
+      iAlarmNo=AL_TlNotFound67 iAlarmNoShown=iAlarmNo
+    ELSE
+      SETAL(AL_InvalidToolData67,sTName)
+      iAlarmNo=AL_InvalidToolData67 iAlarmNoShown=iAlarmNo
+    ENDIF
+  ENDIF
+  ;
+  IF (iToMag>0)
+    ;Zielcassette als Parameter vorgegeben
+    iDstMagNo=iToMag iDstPotNo=0
+  ELSE
+    ;Zielinformationen den Wz-Daten entnehmen
+    iDstMagNo=($TC_TPC9[iTNo] DIV 1000) iDstPotNo=($TC_TPC9[iTNo] MOD 1000)
+  ENDIF
+  ;
+  IF (iAlarmNo<=0)
+    ;
+    ;Wz Daten sind gueltig
+    ;
+    ;Zielplatzdaten Pruefen
+    IF (iDstMagNo==iFromMag)
+      SETAL(AL_SourceEqualDestCass67,sTName)
+      iAlarmNo=AL_SourceEqualDestCass67 iAlarmNoShown=iAlarmNo
+    ENDIF
+    IF (iDstMagNo>giNumRealMag)
+      SETAL(AL_InvalidTargetPlace67,sTName)
+      iAlarmNo=AL_InvalidTargetPlace67 iAlarmNoShown=iAlarmNo
+    ENDIF
+  ENDIF
+  ;
+  IF (iAlarmNo<=0)
+    ;
+    ;gueltige Zielplatzdaten
+    ;
+    IF (iDstMagNo>0)
+      ;
+      ;Zielcassette vorgegeben
+      ;
+      IF (iDstPotNo<=giNumPlacesInMag[iDstMagNo])
+        ;
+        ;Ziel-Cassette ist vorgegeben, aber nicht der Platz
+        iDstPotNo=MAXVAL(iDstPotNo,0)
+        ;
+      ELSE
+        ;ungueltige Platzangabe
+        SETAL(AL_InvalidTargetPlace67,sTName)
+        iAlarmNo=AL_InvalidTargetPlace67 iAlarmNoShown=iAlarmNo
+      ENDIF
+    ELSE
+      iDstMagNo=0 iDstPotNo=MAXVAL(iDstPotNo,0)
+    ENDIF
+  ENDIF
+  ;
+  IF (iAlarmNo<=0)
+    ;
+    ;gueltige Zielplatzdaten
+    ;
+    IF (iDstMagNo>0)
+      ;
+      ;iDstPotNo<=0: neue Leerplatzsuche nur im Teilmagazin iDstMagno
+      ;iDstPotNo >0: neue Leerplatzsuche auf dem vorgegebenen Platz iDstMagNo/iDstPotNo
+      ;
+      iStartCount=iDstMagNo iEndCount=iDstMagNo
+    ELSE
+      ;
+      ;neue Leerplatzsuche im ganzen Magazin, ausser im Quellmagazin
+      iStartCount=2 iEndCount=giNumRealMag
+    ENDIF
+    ;
+    FOR iCount=iStartCount TO iEndCount
+      ;
+      IF (iCount==iFromMag)
+        iTmpMagNo=0 iTmpLocNo=0
+      ELSE
+        iTmpMagNo=iCount iTmpLocNo=iDstPotNo
+        ;
+        GetFreeLocHHD(iTmpMagNo,iTmpLocNo,iTNo,-1)
+        IF (iTmpMagNo>0)AND(iTmpLocNo>0) GOTOF CheckIfOk
+        ;
+      ENDIF
+    ENDFOR
+  ENDIF
+  ;
+  ;=========
+  CheckIfOk:
+  ;=========
+  ;
+  IF (iAlarmNo<=0)
+    ;
+    ;Ueberpruefung des Ergebnisses der Zielplatzpruefung/Leerplatzsuche
+    ;
+    IF (iTmpMagNo<=0)OR(iTmpLocNo<=0)
+      ;
+      ;vorgegebener Zielplatz ungeeignet oder kein Leerplatz
+      ;
+      IF (iDstMagNo>0)AND(iDstPotNo>0)
+        SETAL(AL_TargetLocNotQualified67,sTName)
+        iAlarmNo=AL_TargetLocNotQualified67 iAlarmNoShown=iAlarmNo
+      ELSE
+        SETAL(AL_NoFreeTargetFound67,sTName)
+        iAlarmNo=AL_NoFreeTargetFound67
+      ENDIF
+    ELSE
+      ;
+      IF (iTmpMagNo==iFromMag)OR((iTmpMagNo==iActMagNo)AND(iTmpLocNo==iActPotNo))
+        ;
+        ;Zielcass==Quellcass oder Zielplatz==Quellplatz
+        ;
+        IF (iTmpMagNo==iFromMag)
+          SETAL(AL_SourceEqualDestCass67,sTName)
+          iAlarmNo=AL_SourceEqualDestCass67 iAlarmNoShown=iAlarmNo
+        ELSE
+          SETAL(AL_SourceEqualDestLoc67,sTName)
+          iAlarmNo=AL_SourceEqualDestLoc67 iAlarmNoShown=iAlarmNo
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  ;===============
+  QueryForAlarms1:
+  ;===============
+  ;
+  IF (iAlarmNo>0)
+    ;
+    ;Fehlerzustand erkannt
+    ;
+    IF (iTNo==giTNoHg)
+      ;
+      ;Werkzeug bereits im HG (z.B. wegen Balluff)
+      ;
+      ;vor Alarmausgabe Werkzeug wieder auf alten Platz ablegen (Kollisionsueberpruefung + Wz auf Platz ablegen + Umspeichern)
+      RWDropTool(mcTaskAS_Displace, iTNo, iActMagNo, iActPotNo, FALSE, iAlarmNo1, sAlarmParam1)
+      IF (iAlarmNo1>0)
+        iAlarmNo=iAlarmNo1 sAlarmParam=sAlarmParam1
+        GOTOF HandleAlarm
+      ENDIF
+    ENDIF
+    ;
+    giTNoHg=$TC_MPP6[9998,mcLocHG]
+    ;
+    IF (giTNoHg>0)
+      ;muesste jetzt eigentlich 0 sein wg. RWDropTool
+      iAlarmNo=AL_HgNotEmpty iAlarmNoShown=0
+    ENDIF
+    ;
+    IF (iAlarmNo==iAlarmNoShown)
+      ;da Alarm bereits angezeigt
+      iAlarmNo=0 iAlarmNoShown=0
+      ;Weitermachen
+      GOTOF NextStep0
+    ENDIF
+    ;
+    GOTOF HandleAlarm
+    ;
+  ENDIF
+  ;
+  ;Status: Leerplatzsuche/Zielplatzpruefung war erfolgreich => Werkzeug umsetzen
+  ;
+  iDstMagNo=iTmpMagNo iDstPotNo=iTmpLocNo
+  $TC_TPC10[iTNo]=(($TC_TPC10[iTNo] DIV 100000)*100000)+iDstMagNo*1000+iDstPotNo
+  ;
+  OEM_TlData(iTNo, mcGetMeasProp)
+  bDoCheck=(OEM_bSelCheck)AND(NOT OEM_bTlMeasured)
+  ;
+  IF (bDoCheck)
+    ;
+    ;Werkzeug mit Bruchkontrolle und noch nicht vermessen
+    ;
+    ;bei Bruch Wz wieder ablegen (Teilmagazin iFromMag), ansonsten im HG belassen
+    ToBreak(3,$TC_TP2[iTNo],$TC_TP1[iTNo],OEM_iCutNo,iFromMag)
+    ;
+    giTNoHg=$TC_MPP6[9998,mcLocHG]
+    IF (giTNoHg<=0)
+      ;
+      ;HG ist leer
+      ;
+      TlData(iTNo)
+      ;
+      ;Wz gesperrt -> Umsetzen nach iDstMagNo/iDstPotNo nicht sinnvoll
+      IF (Tl_Locked) GOTOF NextStep0
+      ;
+      ;Wz bereits am Zielort -> weitermachen
+      IF ($A_TOOLMN[iTNo]==iDstMagNo)AND($A_TOOLMLN[iTNo]==iDstPotNo) GOTOF NextStep0
+      ;
+    ENDIF
+  ENDIF
+  ;
+  ;Zielplatz-Reservieren
+  ReserveMagPl(TRUE,iTNo,iDstMagNo,iDstPotNo)
+  ;
+  ;Wz an Zielort bringen
+  ToTrans(1,mcTaskAS_Displace,iTNo,iDstMagNo,iDstPotNo,1,iAlarmNo,sAlarmParam)
+  ;
+  ;Alle Reservierungen fuer dieses Wz aufheben
+  ReserveMagPl(FALSE,iTNo)
+  ;
+  ;Teilauftrag erfolgreich ausgefuehrt -> MovBlock verlassen, um anderen Auftrag aufnehmen und anschl. wieder MovBlock bedienen zu koennen
+  IF (iAlarmNo<=0) GOTOF ENDE
+  ;
+  IF (iAlarmNo<67000)
+    ;RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+    GOTOF HandleAlarm
+  ELSE
+    IF (iAlarmNo==AL_VerifyTlPosition67)
+      ;
+      ;Alarm bereits ausgegeben
+      iAlarmNo=0 iState=icFinished
+      ;
+      ;MovBlock verlassen
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+  IF (iAlarmNo>0)OR(iDstMagNo==iActMagNo)AND(iDstPotNo==iActPotNo)
+    ;
+    ;Fehler oder wieder am alten Platz abgelegt
+    SETAL(AL_TakeTlFromLoc67,<<iActMagNo<<"/"<<iActPotNo)
+    ;
+    ;Alarm bereits ausgegeben
+    iAlarmNo=0
+    ;
+  ENDIF
+  ;
+  ;=========
+  NextStep0:
+  ;=========
+  ;
+  IF (gbTMIsHHD)
+    ;
+    IF ((giStateFromMMC[0] B_AND mcState1ToNCAbortReqByUser)<>0)
+      ;
+      ;Abbruch durch Bediener angefordert -> Abbruch
+      ;
+      giStateFromMMC[0]=giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+      ;
+      SETAL(AL_AbortDueToUser67,"")
+      ;
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+ENDLOOP
+
+;========
+DoUnload:
+;========
+;
+;-------------------
+;Entladen (iMode==2)
+;-------------------
+;
+IF (iState==icStart)
+  ;
+  ;Startpkt. festlegen
+  ;
+  IF (iFromMag>0)
+    ;Quellcassette vorgegeben
+    iActMagNo=iFromMag iActPotNo=0
+    IF (iFromPotStart>0)
+      iActPotNo=iFromPotStart-1
+    ENDIF
+  ELSE
+    iActMagNo=giNumRealMag iActPotNo=0
+  ENDIF
+ENDIF
+;
+;Sicherheitsabfrage
+IF (iActMagNo<=0)
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+;
+IF (iActMagNo==iToMag)AND(iToMag>0)
+  iActMagNo=iActMagNo-1 iActPotNo=0
+ENDIF
+;
+IF (iActMagNo>=1)AND(iActMagNo<=giNumRealMag)
+  iMaxPlNo=giNumPlacesInMag[iActMagNo]
+  IF (iFromPotEnd>0)
+    iMaxPlNo=MINVAL(iMaxPlNo,iFromPotEnd)
+  ENDIF
+ELSE
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+;
+IF (iFromMag>0)AND(iActMagNo<>iFromMag)
+  ;bei vorgegebener Quellcassette wurde Quellcassette verlassen
+  iState=icFinished
+  GOTOF ENDE
+ENDIF
+;
+IF (iActMagNo<1)OR(iActMagNo>giNumRealMag)
+  ;
+  ;ungueltiges Magazin
+  ;
+  ;neu initialisieren -> Ruecksprung
+  iState=icStart
+  GOTOB DoUnload
+  ;
+ENDIF
+
+REPEAT
+  ;
+  ;Alle gesperrten und/oder nicht vorhandenen Kassetten ueberspringen
+  ;
+  iChkRes=0 iMaskMag=RTOI(EXP((iActMagNo-1)*LN(2)))
+  ;
+  IF NOT ((mcDBW_MagExist B_AND iMaskMag)<>0)
+    ;Cassette nicht vorhanden
+    SETAL(AL_CassIsMissing67,<<iActMagNo)
+    iChkRes=-1
+  ELSE
+    IF (($TC_MAP3[iActMagNo] B_AND 'B10')<>0)
+      ;Cassette ist gesperrt
+      SETAL(AL_CassIsLocked67,<<iActMagNo)
+      iChkRes=-2
+    ENDIF
+  ENDIF
+  IF (iChkRes==-2)OR(iChkRes==-1)
+    ;
+    ;Cassette gesperrt oder nicht vorhanden -> Teilmagazin auslassen
+    ;
+    iActMagNo=(iActMagNo-1) iActPotNo=0
+    IF (iActMagNo<=0)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+    ;
+    IF (iActMagNo==iToMag)AND(iToMag>0)
+      iActMagNo=(iActMagNo-1) iActPotNo=0
+    ENDIF
+    ;
+    IF (iActMagNo<1)OR(iActMagNo>giNumRealMag)
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+UNTIL (iChkRes>=0)
+;
+iState=icRunning
+;
+iMaxPlNo=giNumPlacesInMag[iActMagNo]
+IF (iFromPotEnd>0)
+  iMaxPlNo=MINVAL(iMaxPlNo,iFromPotEnd)
+ENDIF
+;
+IF (iFromPotStart>0)
+  IF (iFromPotStart>iMaxPlNo)
+    ;unzulaessige Vorgabe
+    iState=icFinished
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+LOOP
+  ;
+  ;naechster Platz in der gleichen Cass.
+  ;
+  STOPRE
+  ;
+  iActPotNo=(iActPotNo+1)
+  IF (iActPotNo>iMaxPlNo)
+    IF (iFromMag>0)
+      ;Nur bestimmte Kassette pruefen -> Fertig
+      iState=icFinished
+      GOTOF ENDE
+    ENDIF
+    ;
+    ;Wechsel in naechstes Magazin
+    iActMagNo=(iActMagNo-1) iActPotNo=0
+    ;
+    ;Ausstieg, damit SysCha2.spf wieder zum Zuge kommt und MovBlock erneut aufruft
+    ;iState unveraendert belassen, iActMagNo/iActPotNo vorbereitet fuer erneuten Start von MovBlock
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (($TC_MPP4[iActMagNo,iActPotNo] B_AND 'B1')<>0) GOTOF NextStep1
+  ;
+  ;Platz ist nicht gesperrt
+  ;
+  iTNo=$TC_MPP6[iActMagNo,iActPotNo] iDstMagNo=-1 iDstPotNo=-1
+  ;
+  ;Kein Wz auf Platz -> Weiter
+  IF (iTNo<=0) GOTOF NextStep1
+  ;
+  ;Wz auf Platz
+  ;
+  OEM_TlData(iTNo)
+  ;
+  TlData(iTNo)
+  ;
+  ;Wz. lt. SIEMENS-Status defekt oder zum Entladen markiert     ODER
+  ;Wz. lt. OEM-Status defekt (nur HHD-WzV)                      ODER
+  ;genau dieses eine Werkzeug entladen unabhaengig vom Status
+  ;
+  IF NOT ((Tl_Unload)OR(Tl_Locked)OR(OEM_bTlDefect)OR(bOnlyWithOneTool)) GOTOF NextStep1
+  ;
+  ;Entladekennung, gesperrt oder Modus 1 Wz unabhaengig vom WzStatus entladen
+  ;Wz gesperrt oder markiert zum Entladen oder Sondermodus (wobei WzStatus nicht relevant ist)
+  ;
+  iDstMagNo=iToMag iDstPotNo=0
+  ;
+  GetFreeLocHHD(iDstMagNo,iDstPotNo,iTNo,-1)
+  ;
+  IF (iDstMagNo==iToMag)AND(iDstPotNo>0)
+    ;
+    ;Freier Platz im Entlademagazin gefunden
+    ;
+    ;bisherigen Platz in Wz-Daten eintragen (fuer spaeteres Wiederbeladen)
+    $TC_TPC9[iTNo]=iActMagNo*1000+iActPotNo
+    ;
+    ;Zielplatzdaten bestimmen und in GUD's ablegen
+    GetPlDat(0,0,iDstMagNo,iDstPotNo)
+    ;
+    REPEAT
+      ;Puffer 1, s.o. GetPlDat
+      ChkSwitch(2,iDstMagNo,iDstPotNo,1,iChkRes)
+    UNTIL ((iChkRes==0)OR(iChkRes==1))
+    ;
+    IF (iToMag==1)
+      ;
+      ;Wz ist auf Schublade
+      ;
+      ;WzStatusbits <Wz ist vermessen> und <Wz ist getestet> zuruecksetzen
+      OEM_TlData(iTNo, mcResMeasured_Tested)
+    ENDIF
+    ;
+    $TC_TPC10[iTNo]=(($TC_TPC10[iTNo] DIV 100000)*100000)+iDstMagNo*1000+iDstPotNo
+    ;
+    IF (iDstMagNo==1)
+      ;
+      ;Entladen auf Schublade
+      ;
+      ;Zielplatz reservieren
+      ReserveMagPl(TRUE,iTNo,iDstMagNo,iDstPotNo)
+    ENDIF
+    ;
+    OEM_TlData(iTNo)
+    IF (bWithChip)AND(OEM_bSelChip)
+      ;
+      ;Wz mit Codetraeger
+      ;
+      ;Werkzeugtransport mit Beschreiben des Balluff-Chip
+      ToTrans(3,mcTaskAS_Displace,iTNo,iDstMagNo,iDstPotNo,1,iAlarmNo,sAlarmParam)
+    ELSE
+      ToTrans(2,mcTaskAS_Displace,iTNo,iDstMagNo,iDstPotNo,1,iAlarmNo,sAlarmParam)
+    ENDIF
+    ;
+    IF (iDstMagNo==1)AND((giOptToolMgmt B_AND mcOptTM_OnUnloadReservePl)<>0)
+      ;
+      ;Entladen auf Schublade und Altplatz soll reserviert bleiben
+      ;
+      ;Altplatz-Reservierung setzen (entfernt implizit alle anderen Reservierungen fuer iTNo)
+      ReserveMagPl(TRUE,iTNo,iActMagNo,iActPotNo)
+    ELSE
+      ;Zielplatz-Reservierung aufheben
+      ReserveMagPl(FALSE,iTNo,iDstMagNo,iDstPotNo)
+    ENDIF
+    ;
+    IF (iAlarmNo<=0)
+      ;
+      ;Wz wurde nach Magazin <iToMag> umgesetzt
+      ;
+      IF (gbTMIsHHD)
+        ;
+        ;Ist die Zielcassette jetzt moeglicherweise voll?
+        ;
+        iTmp=0
+        FOR iCount=1 TO giNumPlacesInMag[iToMag]
+          IF ($TC_MPP6[iToMag,iCount]<=0)
+            iTmp=iTmp+1
+          ENDIF
+        ENDFOR
+        IF (iTmp<=0)
+          ;kein freier Platz mehr im Entlademagazin
+          iState=icFinished
+        ENDIF
+      ENDIF
+      ;
+      ;bewusst MovBlock verlassen, um anderen Auftrag aufnehmen und anschl. wieder MovBlock bedienen zu koennen
+      GOTOF ENDE
+    ELSE
+      ;
+      IF (iAlarmNo<67000)
+        ;RESET-pflicht. Alarm: kann noch nicht ausgegeben worden sein
+        SETAL(iAlarmNo,sAlarmParam)
+        iState=icFinished
+      ELSE
+        ;kein SETAL, da bereits ausgegeben
+        IF (iAlarmNo==AL_VerifyTlPosition67)
+          iState=icFinished
+        ENDIF
+      ENDIF
+      iAlarmNo=0
+    ENDIF
+    ;
+    GOTOF ENDE
+  ENDIF
+  ;
+  IF (iDstMagNo<=0)OR(iDstPotNo<=0)
+    ;
+    ;kein Leerplatz gefunden
+    ;
+    MakeAlarmParam(sTmp,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+    SETAL(AL_NoUnloadPlaceFound67,sTmp)
+    ;kein Ausstieg, mit naechstem Platz/Wz weitermachen
+    ;
+    IF (gbTMIsHHD)
+      ;
+      ;Ist die Zielcassette moeglicherweise voll?
+      ;
+      iTmp=0
+      FOR iCount=1 TO giNumPlacesInMag[iToMag]
+        IF ($TC_MPP6[iToMag,iCount]<=0)
+          iTmp=iTmp+1
+        ENDIF
+      ENDFOR
+      IF (iTmp<=0)
+        ;kein freier Platz mehr im Entlademagazin
+        iState=icFinished
+        GOTOF ENDE
+      ENDIF
+    ELSE
+      IF ($TC_TP7[iTNo]<=4)
+        ;selbst fuer ein "normales" Wz kein Leerplatz gefunden -> Zielcassette muss voll sein
+        iState=icFinished
+        GOTOF ENDE
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  ;=========
+  NextStep1:
+  ;=========
+  ;
+  IF (gbTMIsHHD)
+    ;
+    IF ((giStateFromMMC[0] B_AND mcState1ToNCAbortReqByUser)<>0)
+      ;
+      ;Abbruch durch Bediener angefordert
+      ;
+      SETAL(AL_AbortDueToUser67,"")
+      giStateFromMMC[0]= giStateFromMMC[0] B_AND (B_NOT mcState1ToNCAbortReqByUser)
+      iState=icFinished
+      ;
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+ENDLOOP
+
+;====
+ENDE:
+;====
+;
+IF (iFromMag>0)AND(iFromPotStart>0)AND(iFromPotEnd>0)AND(iFromPotStart==iFromPotEnd)AND(iActMagNo==iFromMag)AND(iActPotNo>=iFromPotEnd)
+  ;
+  ;Sonderfall: nur von 1 Platz beladen/entladen
+  iState=icFinished
+ENDIF
+;
+MSG("")
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;fertig wg. Fehlers
+iState=icFinished
+;
+IF (iAlarmNo>0)AND(iAlarmNo<>iAlarmNoShown)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+RET

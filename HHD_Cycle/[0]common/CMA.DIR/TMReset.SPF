@@ -1,0 +1,1145 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TMReset.SPF
+;# Task:      WzV - Synchronisieren
+;# Version:   V06.00.08
+;# Date:      23.10.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+;---------
+;
+; V06.00.08 - 11.10.2017 / Simons
+; - Neuversionierung
+; - OUT_LoadAckn -> OUT_TMJobActive, OUT_DelToolsActive, gbToAcknRunning=FALSE  entfernt
+; - mcDBB_ToAckn hinzu
+;
+; V06.00.07 - 12.07.2017 / Simons
+; - Laufzeitoptimierung
+; - MSGBOX -> MSG
+;
+; V06.00.07 - 11.06.2017 / Simons
+; - Neuversionierung
+; - gbPrepAfterTC=FALSE
+;
+; V06.00.06 - 05.05.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop-> grSyncPickupDrop
+; - gbHGWithBero hinzu
+; - Abbruch bei Magazinbeladung (IN_TlInLoadPlace)
+; - grSyncPickupDrop - Warten bis Klemmen/Loesen abgeschlossen sein sollte
+; - TlData(...)
+; - Statusermittlung NCDG: Anpassung an RevCha1
+; - S-Wort abloeschen
+; - formale Aenderungen
+;
+; V06.00.05 - 10.03.2017 / Simons
+; - GetFreeLocHHD - Manipulationen rueckgaengig machen
+; - WzV Nachfuehren - Abfrage ob BERO im HG angesprochen hat
+;
+; V06.00.05 - 25.11.2016 / Simons
+; - WM286 (mcDBB_StepTC NeuWz Beladen)
+;
+; V06.00.05 - 07.11.2016 / Simons
+; - gbTCFirstZMove=TRUE
+;
+; V06.00.05 - 20.10.2016 / Simons
+; - giSyncTC=0 hinzu
+; - OUT_ForceTMSync nur im Reset setzen
+; - CFG_MAN hinzu
+; - IPOTURN nur wenn Zyklus vorhanden
+;
+; V06.00.05 - 27.09.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V06.00.04 - 02.09.2016 / Simons
+; - Neuversionierung
+; - Einfuehrung D60NC/D120
+; - mcDBB_LoadCaseMeas
+; - ToPrepOptInit
+; - MTC ohne Encoder entfernt
+; - mcbDBB_DGLinInTCPos hinzu
+;
+; V06.00.03 - 29.05.2016 / Simons
+; - Neuversionierung
+; - giSync... nicht mehr Loeschen
+; - IDS aus TC_BS loeschen
+; - Logik Umspeichern SpWz erweitert
+; - Bei Aufruf im Rev_Cha1 nur Umspeichern
+; - Wz Umspeichern auch bei Abbruch im Be-/Entladen
+;
+; V06.00.02 - 13.04.2016 / Simons
+; - OUT_PrepareActive hinzu
+; - HG hinzu
+; - Rueckzug mit den Variablen
+;   giNextTlInSp, giTlInSp aus TC_BS
+; - IDS aus TC_BS abbrechen
+; - HHDTM hinzu
+; - giMagNoLoadList entfernt
+;
+; V06.00.01 - 31.08.2015 / Simons
+; - Einfuehrung WM 307 Kette
+; - SYG_BM/IM[..] zuruecksetzen
+;
+; V06.00.00 - 15.07.2015 / Simons
+; ProtoTyp
+;
+; V04.00.00 - 25.03.2014 / Huettner
+; Vorlage
+;
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+; - noch nicht in Angriff genommene,
+;   nicht-asynchrone Auftraege
+;   (fuer Kanal 2) loeschen
+; - Platzreservierung (aus asynchronen
+;   Umsetzvorgaengen) entfernen
+; - Schnittstellen zuruecksetzen
+; - Ortswechsel HG/Kette->DG1 bzw. SP->DG2
+;   nachfuehren
+; - Ortswechsel Mag->HG/Sp bzw.
+;   HG/Sp-> Mag nachfuehren
+; - Protokollieren
+;
+; Aufgerufen (Kanal 1):
+; - Im Rahmen des Prog-Event "RESET"
+;   von CYCPE_MA.SPF
+; - Im REV_CHA1
+;
+;-------------------------------------
+
+PROC TMReset(INT iMode)
+
+DEF STRING[32] sCycName="TMReset V06.00.08"
+;
+DEF STRING[128] sFName="/_N_MPF_DIR/_N_LogReset_MPF"
+;
+DEF STRING[32] sLogFromMag, sLogToMag, sOption
+DEF STRING[128] sLogText
+;
+DEF BOOL bMagIsDDisk, bDGIsNcAxis, bMagIsPickUpDisk, bMagIsChain, bMagIsMiksch, bDGIsMTC, bDGIsWM286, bDGIsWM307, bMagIsWM307
+DEF BOOL bTurnedNeg, bRelFromMag, bRelToMag, bEnableLog, bSecLoop, bTCWasActive, bXYInTcPos
+;
+DEF INT icMagNo=1, iTmp, iTmpMagNo, iTmpPotNo,iFError, iFSize, iFMaxSize, iErr, iState, iCount, iMaxCount
+DEF INT iStepNo, iPLCStepNo, iTNo, iTNoMag, iTNoLoad, iMagPos, iMagNo, iLocNo, iLocFromMag, iLocToMag, iLoadPlaceNo
+;
+DEF REAL rTmp1, rTmp2, rc0x5mm, rTCInPosCoarse
+
+;bewusst zuerst damit im Fehlerfalle TMRESET mittels RESET verlassen und korrigiert werden kann
+;
+IF (giTMResetBypass<>0)
+  ;
+  ;einmaliger Notausstieg
+  giTMResetBypass=0
+  RET
+ENDIF
+;
+giTMResetBypass=1 bTCWasActive=OUT_TCActive bEnableLog=gbLogTMReset rc0x5mm=0.5*grInchMetr rTCInPosCoarse=rc0x5mm gbTCFirstZMove=TRUE gbPrepAfterTC=FALSE
+
+;Konfiguration
+;-------------
+;
+bDGIsMTC=((giDGType B_AND 'B1')<>0) bDGIsWM286=((giDGType B_AND 'B10')<>0) bDGIsWM307=((giDGType B_AND 'B100')<>0) bDGIsNcAxis=((bDGIsWM286)OR(bDGIsWM307))
+bMagIsPickUpDisk=((giMagType B_AND 'B1')<>0) bMagIsDDisk=((giMagType B_AND 'B10110000')<>0) bMagIsChain=((giMagType B_AND 'B100')<>0) bMagIsWM307=((bMagIsChain)AND(bDGIsWM307)) bMagIsMiksch=((bMagIsChain)AND(NOT bDGIsWM307))
+
+;GndSt
+;-----
+IF (iMode==0)
+  ;
+  ;Die nicht-asynchronen Auftraege im Auftragspuffer fuer Kanal 2 loeschen:
+  ;Mit Reset werden naemlich im FB250/FB251 die Anwenderschnittstellen und indirekt damit die Schnittstellenbits in DB71 bzw. DB72 zurueckgesetzt
+  ;
+  ;WzW/Wz Vorbereitung
+  SYG_IM[mcSYG_TC+10]=-1 SYG_BM[mcSYG_TC]=FALSE SYG_BM[mcSYG_TC+1]=FALSE SYG_RM[mcSYG_TC+12]=10 OUT_PrepareActive=FALSE
+  $A_DBW[iJobPtrPrep+2]=0 $A_DBW[iJobPtrMove+2]=0 $A_DBW[iJobPtrASync+2]=0
+  ;
+  IF (bTCWasActive)
+    CANCEL(SyncID_TC+0,SyncID_TC+1,SyncID_TC+2,SyncID_TC+3,SyncID_TC+6)
+    CANCEL(SyncID_TC+7,SyncID_TC+8,SyncID_TC+9,SyncID_TC+10,SyncID_TC+11,SyncID_TC+12)
+  ENDIF
+  ;
+  ;GetFreeLocHHD - Manipulationen rueckgaengig machen
+  IF (giGetfLoc[0]>0)
+    ;FestplatzWz setzen
+    $TC_TP8[giGetfLoc[0]]=giGetfLoc[1] giGetfLoc[0]=0 giGetfLoc[1]=0
+  ENDIF
+  IF (giGetfLoc[2]>0)
+    ;Magazin Freigeben
+    $TC_MAP3[giGetfLoc[2]]=giGetfLoc[3] giGetfLoc[2]=0 giGetfLoc[3]=0
+  ENDIF
+  IF (giGetfLoc[4]>0)
+    ;Beladeliste Freigeben
+    $TC_MAP3[giGetfLoc[4]]=giGetfLoc[5] giGetfLoc[4]=0 giGetfLoc[5]=0
+  ENDIF
+  ;
+  MSG(MSG_TMResetRunning)
+  ;
+  ;Allgemein
+  mcDBB_ToAckn=0 giStepTeststop=0 $A_DBB[31]=0
+  ;
+  ;Kanal 2
+  gbQuitSysCha2=FALSE giMagState=0 giWaitRWChip=0 gbWaitToolMoved=FALSE gbNextToJob=FALSE giTaskID=0 giTaskState=0 OUT_ReqLoopEndChan2=FALSE
+  ;
+  ;Messen / BBK
+  gbStopIfNotMeasured=FALSE gbToCheckAtTC=FALSE gbErrMsgOnToCheck=FALSE giToBreakCtrlState=0
+  ;
+  OUT_RevCha1Active=FALSE OUT_RevCha2Active=FALSE OUT_SysPrgActive=FALSE OUT_SysCha2Active=FALSE OUT_TMSyncActive=FALSE
+  ;
+  IF (gbTMIsHHD)
+    ;
+    ;Zusatzparameter fuer Zyklus MovBlock zuruecksetzen
+    giParaMovBlock[0]=0 giParaMovBlock[1]=0 giStateToMMC[0]=0
+  ENDIF
+  ;
+  IF ISFILE("/_N_CMA_DIR/_N_IPOTURN_SPF" )
+    ;
+    ;Standardwerte setzen
+    IPOTURN(0)
+  ENDIF
+  ;
+  ;PREPARE Optimierung
+  ToPrepOptInit
+  ;
+  IF (giForceTMSync<>0)
+    ;
+    ;nur Setzen erlaubt, Ausnahme: nach erfolgtem Synchronisieren auch Ruecksetzen erlaubt
+    OUT_ForceTMSync=TRUE
+  ENDIF
+  ;
+  ;Bei Reset S-Wort loeschen, um Wiederanlauf zu unterdruecken
+  S0
+  ;
+ENDIF
+
+;Aktueller Status
+;
+iStepNo=0 iPLCStepNo=0
+;
+IF (bDGIsNcAxis)AND(bTCWasActive)
+  ;
+  bTurnedNeg=((mcDBB_StepTC B_AND 'B10')<>0) bSecLoop=((mcDBB_StepTC B_AND 'B10000')<>0)
+  ;
+  IF (NOT bTurnedNeg)
+    ;
+    rTmp1=grHor1DGRot-grPosWinDGRot rTmp2=grHor2DGRot-grPosWinDGRot
+    ;
+    IF ((($AA_IM[mcAxDGRot]>=grHomePosDGRot)AND($AA_IM[mcAxDGRot]<rTmp1))OR(OUT_DGRotInBasePos))AND(((mcDBB_StepTC B_AND 'B1000')==0)OR(bSecLoop))
+      iStepNo=1
+      GOTOF STEP_END
+    ENDIF
+    ;
+    IF ($AA_IM[mcAxDGRot]>=rTmp1)AND($AA_IM[mcAxDGRot]<=rTmp2)
+      ;
+      ;WZW mechanisch begonnen aber noch nicht abgeschlossen
+      iStepNo=2
+      GOTOF STEP_END
+    ENDIF
+  ELSE
+    ;
+    ;mit ueberlangem Wz
+    ;
+    rTmp1=grHor2DGRot+grPosWinDGRot rTmp2=grHor1DGRot+grPosWinDGRot
+    ;
+    IF ($AA_IM[mcAxDGRot]>rTmp1)OR(OUT_DGRotInBasePos)AND(((mcDBB_StepTC B_AND 'B1000')==0)OR(bSecLoop))
+      iStepNo=1
+      GOTOF STEP_END
+    ENDIF
+    ;
+    IF ($AA_IM[mcAxDGRot]<=rTmp1)AND($AA_IM[mcAxDGRot]>=rTmp2)
+      ;
+      ;WZW mechanisch begonnen aber noch nicht abgeschlossen
+      iStepNo=2
+    ENDIF
+  ENDIF
+  ;
+  ;WZW mechanisch vollendet
+  iStepNo=3
+  GOTOF STEP_END
+ENDIF
+
+IF (bDGIsMTC)AND(bTCWasActive)AND(mcDBB_PlcStepTC<>0)AND((mcbDBB_DGLinInTCPos)OR(NOT bMagIsMiksch))
+  ;
+  IF (NOT OUT_DGRotInTCPos)
+    ;DG nicht in GndSt
+    iStepNo=2
+  ELSE
+    ;
+    IF ((mcDBB_PlcStepTC B_AND 'H80')<>0)
+      ;SollposDG<>IstposDG und DG in GndSt
+      iStepNo=1
+    ELSE
+      ;SollposDG=IstposDG und DG in GndSt
+      iStepNo=3
+    ENDIF
+  ENDIF
+ENDIF
+;
+;=======
+STEP_END:
+;=======
+
+STOPRE
+
+IF (bEnableLog)
+  ;
+  ;LogFile initialisieren
+  ;
+  IF (ISFILE(sFName))
+    FileSize(iFError, sFName, iFSize)
+    iFMaxSize=($MN_LEN_PROTOCOL_FILE*1024)-1000
+    IF (iFSize > iFMaxSize) ;max. Laenge durch MD11420 beschraenkt !!
+      DELETE(iFError,sFName)
+    ENDIF
+  ENDIF
+  LOG(bEnableLog,iFError,sFName,"------------ Start of TMReset ----------------")
+  LOG(bEnableLog,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+  ;
+  ;Ausgangssituation
+  LOG(bEnableLog,iFError,sFName,"  OUT_ForceTMSync="<<OUT_ForceTMSync<<", giForceTMSync= "<<giForceTMSync)
+  LOG(bEnableLog,iFError,sFName,"  giTlInSp="<<giTlInSp<<", giNextTlInSp="<<giNextTlInSp)
+  LOG(bEnableLog,iFError,sFName,"  iPLCStepNo="<<iPLCStepNo<<", iStepNo="<<iStepNo<<", giSyncTC="<<giSyncTC<<", grSyncPickupDrop="<<grSyncPickupDrop)
+ENDIF
+
+;Aktuelle Wz Belegung
+IF (gbMag9998Exist)
+  ;
+  ;Anzahl Plaetze Zwischenspeichermagazin
+  iMaxCount=$TC_MAP6[9998]*$TC_MAP7[9998]
+  ;
+  FOR iCount=1 TO iMaxCount
+    ;
+    iTmp=$TC_MPP6[9998,iCount]
+    IF (iCount==1)
+      sLogText="  SP:  "
+    ENDIF
+    IF (iCount==2)
+      sLogText="  DG2: "
+    ENDIF
+    IF (iCount==3)
+      sLogText="  DG1: "
+    ENDIF
+    IF (iCount==4)
+      sLogText="  HG:  "
+    ENDIF
+    ;
+    IF (iTmp>0)
+      sLogText=sLogText<<"T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]
+    ELSE
+      sLogText=sLogText<<"no tool"
+    ENDIF
+    LOG(bEnableLog,iFError,sFName,sLogText)
+  ENDFOR
+ENDIF
+
+IF (giNumRealMag<=0)OR(giMagRes>giNumRealMag)
+  giMagRes=0 giPlRes=0
+ELSE
+  ;
+  IF (giMagRes>0)AND(giPlRes>0)
+    ;
+    ;<reserviert> fuer Wz aus Zwischenspeicher fuer zu beladendes Wz" ruecksetzen
+    ;
+    $TC_MPP4[giMagRes,giPlRes]=$TC_MPP4[giMagRes,giPlRes] B_AND (B_NOT 'B1100')
+    giMagRes=0 giPlRes=0
+  ENDIF
+ENDIF
+
+;Belegung Aktualisieren
+iTNoMag=0
+IF (gbMag9998Exist)
+  ;
+  giTNoSp=$TC_MPP6[9998,mcLocSp]
+  IF (gbWithDG)
+    giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+  ENDIF
+  IF (gbWithHG)
+    giTNoHG=$TC_MPP6[9998,mcLocHG]
+  ENDIF
+  IF (bMagIsChain)OR(bMagIsPickUpDisk)
+    iMagPos=OUTA_ActPosV1
+    IF (iMagPos>0)
+      iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+    ENDIF
+  ENDIF
+ELSE
+  iStepNo=0 giTNoSp=0 giTNoDG1=0 giTNoDG2=0 giTNoHG=0
+ENDIF
+
+IF (giNumRealMag<=0)OR(NOT gbMag9998Exist)
+  ;
+  ;Weder im Zwischenspeicher noch Magazin
+  ;Moegliche Uebergaenge - Mag->DG/Sp bzw. Dg/Sp->Mag
+  ;
+  grSyncPickupDrop=0
+  ;
+  GOTOF QuerySyncTC
+ENDIF
+
+IF (bMagIsDDisk)OR(bMagIsPickUpDisk)OR(bMagIsChain)
+  ;
+  IF (OUT_LoadActiv)AND(grSyncPickupDrop<>0)
+    ;
+    ;Abbruch waehrend eines Beladevorgangs ins/aus dem Magazin
+    ;
+    CFG_MAN("COMFORTPANEL",sOption)
+    IF (sOption<>"")
+      iLoadPlaceNo=3
+    ELSE
+      iLoadPlaceNo=2
+    ENDIF
+    ;
+    ;Platzinformationen aus grSyncPickupDrop entnehmen
+    iTNo=RTOI(grSyncPickupDrop DIV 100000) iTmp=RTOI(grSyncPickupDrop MOD 100000) iMagNo=RTOI(iTmp DIV 1000) iLocNo=(iTmp MOD 1000)
+    IF (gbWithHG)
+      iMagNo=9998
+    ENDIF
+    ;
+    IF (iMagNo>0)AND(iLocNo>0)
+      ;
+      ;Wz in Beladestation
+      iTNoLoad=$TC_MPP6[iMagNo,iLocNo]
+      ;
+      IF (iTNo>0)AND(IN_TlInLoadPlace)AND(iTNoLoad==0)
+        ;
+        ;- Es soll ein Wz beladen werden
+        ;- ein Wz ist auf dem Beladeplatz
+        ;- Daten noch  nicht umgespeichert
+        ;
+        IF ($P_TOOLEXIST[iTNo])
+          ;
+          ;Wz ins Magazin umspeichern
+          ToAckn(TRUE,50,1,iTNo,0,iMagNo,iLocNo,9999,iLoadPlaceNo,1)
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTNo]<<", DuploNo="<<$TC_TP1[iTNo]<<" loaded")
+          ;
+          ;<Wz entladen> und <Wz beladen> immer zuruecksetzen
+          TlData(iTNo,mcResLoadUnloadTl)
+          ;
+          ;Vor dem naechsten Einsatz soll das Wz immer geprueft werden
+          OEM_TlData(iTNo,mcResMeasured_Tested)
+          ;
+        ENDIF
+      ENDIF
+      ;
+      IF (iTNo==0)AND(NOT IN_TlInLoadPlace)AND(iTNoLoad>0)
+        ;
+        ;- Ein Wz soll entladen werden
+        ;- es ist kein Wz auf dem Beladeplatz
+        ;- Daten noch  nicht umgespeichert
+        ;
+        IF ($P_TOOLEXIST[iTNoLoad])
+          ;
+          ToAckn(TRUE,50,1,iTNoLoad,0,iMagNo,iLocNo,9999,iLoadPlaceNo,1)
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTNoLoad]<<", DuploNo="<<$TC_TP1[iTNoLoad]<<" unloaded")
+          ;
+          ;<Wz entladen> und <Wz beladen> immer zuruecksetzen
+          TlData(iTNoLoad,mcResLoadUnloadTl)
+          ;
+          ;Vor dem naechsten Einsatz soll das Wz immer geprueft werden
+          OEM_TlData(iTNoLoad,mcResMeasured_Tested)
+          ;
+          ;Ueberwachungsdaten Zuruecksetzen, Verschleiss Loeschen
+          TlData(iTNoLoad,mcResMonData + mcResWear)
+          ;
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+  ;
+  ;Strobe-Signal Beladen/Entladen Beladestelle Magazin
+  grSyncPickupDrop=0 mcDBB_ToMagPanel=0 OUT_TMJobActive=FALSE OUT_LoadActiv=FALSE OUT_LoadReset=FALSE OUT_LoadDone=FALSE OUT_LoadEnd=FALSE
+ELSE
+  ;
+  ;Status <Beladen/Entladen von/auf Schublade>
+  OUT_TMJobActive=FALSE
+ENDIF
+
+IF (grSyncPickupDrop<>0)
+  ;
+  ;Bei Abbruch waehrend eines Wechsels ins/aus dem Magazin
+  ;Wz und Platzinformationen aus grSyncPickupDrop entnehmen
+  ;(tttttmmppp ttttt=T-Nr mm=MagNr ppp=PlatzNr)
+  ;
+  iTNo=RTOI(grSyncPickupDrop DIV 100000) iTmp=RTOI(grSyncPickupDrop MOD 100000) iMagNo=RTOI(iTmp DIV 1000) iLocNo=(iTmp MOD 1000)
+  ;
+  IF (iTNo>0)
+    ;
+    IF ($P_TOOLEXIST[iTNo])
+      ;
+      IF (gbWithHG)AND(NOT OUT_ComeInTC)
+        ;
+        ;HG nicht im Bereich WzW
+        ;
+        ;Warten bis das Wz Klemmen/Loesen abgeschlossen ist
+        G04 F=2*MAXVAL(grHGClmpTimeC,grHGUnClmpTimeC)
+        STOPRE
+        ;
+        ;HG gespannt und es war kein Wz im HG -> Wz ins HG
+        sLogFromMag="HG" iLocFromMag=mcLocHG bRelFromMag=(mcbDBB_HGClamped)AND(giTNoHG<=0)
+        ;
+        ;HG geloest und Wz stammt aus HG -> Wz ins Magazin
+        sLogToMag="HG" iLocToMag=mcLocHG bRelToMag=(mcbDBB_HGUnClamped)AND(iTNo==giTNoHG)
+        ;
+        IF (gbHGWithBero)AND(bRelFromMag)AND(NOT IN_ToolInHG) GOTOF SYNC_NEW
+      ENDIF
+      ;
+      IF (bMagIsWM307)
+        ;
+        ;Warten bis das Wz Klemmen/Loesen abgeschlossen ist
+        G04 F=2*MAXVAL(grChClmpTimeC,grChUnClmpTimeC)
+        STOPRE
+        ;
+        ;Kette gespannt und es war kein Wz im DG2 -> Wz in DG2
+        sLogFromMag="DG2" iLocFromMag=mcLocDG2 bRelFromMag=(mcbDBB_ChClamped)AND(giTNoDG2<=0)
+        ;
+        ;Kette geloest und Wz stammt aus DG1 -> Wz ins Magazin
+        sLogToMag="DG1" iLocToMag=mcLocDG1 bRelToMag=(mcbDBB_ChUnClamped)AND(iTNo==giTNoDG1)
+      ENDIF
+      ;
+      IF (bMagIsMiksch)
+        ;
+        ;DG abgesenkt und Wz stammt aus DG2 -> Wz ins Magazin
+        sLogToMag="DG2" iLocToMag=mcLocDG2 bRelToMag=(gbDg2IsMagSide)AND(mcbDBB_DGRetracted)AND(iTNo==giTNoDG2)
+        ;
+        ;DG in Position Magazin und noch nicht umgespeichert -> Wz in DG1
+        sLogToMag="DG1" iLocFromMag=mcLocDG1 bRelFromMag=(mcbDBB_DGLinInChain)AND(giTNoDG1<=0)
+      ENDIF
+      ;
+      IF (bMagIsPickUpDisk)
+        ;
+        ;Warten bis das Wz Klemmen/Loesen abgeschlossen ist
+        G04 F=2*MAXVAL(grSpClmpTimeC,grSpUnClmpTimeC)
+        STOPRE
+        ;
+        ;Ortswechsel nur in Uebergabeposition
+        bXYInTcPos=(ABS($VA_IM[X]-grTcPosX)<=rTCInPosCoarse)AND(ABS($VA_IM[Y]-grTcPosY)<=rTCInPosCoarse)
+        ;
+        ;lt. WzV kein Wz in Sp aber die Sp ist geklemmt mit Wz -> Wz aus Magazin in Sp umspeichern
+        sLogFromMag="Spindle" iLocFromMag=mcLocSp bRelFromMag=(mcbDBB_SpClamped)AND(giTNoSp<=0)AND(bXYInTcPos)
+        ;
+        ;lt. WzV ist das zu uebergebende Wz in der Sp aber die Sp ist nicht gespannt mit Wz  -> Wz aus Sp ins Magazin umspeichern
+        sLogToMag="Spindle" iLocToMag=mcLocSp bRelToMag=(NOT mcbDBB_SpClamped)AND(iTNo==giTNoSp)AND(giTNoSp>0)AND(bXYInTcPos)
+      ENDIF
+      ;
+      IF (bRelFromMag)
+        ;
+        ;aus Magazin in Zwischenspeicher
+        ToAckn(TRUE,50,1,iTNo,0,9998,iLocFromMag,iMagNo,iLocNo,1)
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTNo]<<", DuploNo="<<$TC_TP1[iTNo]<<" changed from magazine "<<iMagNo<<", place "<<iLocNo<<" to "<<sLogFromMag)
+      ENDIF
+      ;
+      IF (bRelToMag)
+        ;
+        ;von Zwischenspeicher ins Magazin
+        ;
+        ;Leerplatz bestimmen
+        iTmpMagNo=iMagNo iTmpPotNo=iLocNo
+        GetFreeLocHHD(iTmpMagNo,iTmpPotNo,iTNo)
+        ;
+        IF (iTmpMagNo>0)AND(iTmpPotNo>0)AND(iTmpMagNo==iMagNo)AND(iTmpPotNo==iLocNo)
+          ;
+          ;Magazinplatz ist frei -> Platzreservierung loeschen
+          iState=DELMLRES(iMagNo,iLocNo)
+          ToAckn(TRUE,50,1,iTNo,0,iMagNo,iLocNo,9998,iLocToMag,1)
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTNo]<<", DuploNo="<<$TC_TP1[iTNo]<<" changed from "<<sLogToMag<<" to magazine "<<iMagNo<<", place "<<iLocNo)
+        ELSE
+          ;
+          ;Magazinplatz ist nicht frei
+          ;
+          LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTNo]<<", DuploNo="<<$TC_TP1[iTNo]<<" cannot be changed from "<<sLogToMag<<" to magazine"<<iMagNo<<", place "<<iLocNo)
+          ;
+          ;Synchronisierung erzwingen
+          giForceTMSync=20
+          ;
+          ;Umspeichern ins Magazin nicht moeglich 67xxx ausgeben, aber weitermachen
+          SETAL(AL_PleaseSync67)
+        ENDIF
+      ENDIF
+    ENDIF
+  ENDIF
+
+  ;Belegung Aktualisieren
+  STOPRE
+  giTNoSp=$TC_MPP6[9998,mcLocSp] iTNoMag=0
+  IF (gbWithDG)
+    giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+  ENDIF
+  IF (gbWithHG)
+    giTNoHG=$TC_MPP6[9998,mcLocHG]
+  ENDIF
+  IF (bMagIsChain)OR(bMagIsPickUpDisk)
+    iMagPos=OUTA_ActPosV1
+    IF (iMagPos>0)
+      iTNoMag=$TC_MPP6[icMagNo,iMagPos]
+    ENDIF
+  ENDIF
+ENDIF
+
+;===========
+QuerySyncTC:
+;===========
+
+IF (NOT gbMag9998Exist)
+  ;
+  ;kein Zwischenspeicher vorhanden
+  giSyncTC=0
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (NOT bMagIsPickUpDisk)
+  ;
+  ;ist abgearbeitet -> Loeschen
+  ;
+  grSyncPickupDrop=0
+ENDIF
+
+IF (giSyncTC<>0)
+  ;
+  ;Ein WzW wurde gestartet, aber nicht beendet. Es wurden eventuell Wz-Daten vorab umgespeichert, die jetzt korrigiert werden muessen
+  ;
+  ;iStepNo:
+  ; 1 - WzW angestossen
+  ; 2 - WzW Laeuft (Wz'e im DG)
+  ; 3 - WzW fertig (Wz'e in Kette/HG, Sp)
+  ;10 - Wz Beladen in ToLoad
+  ;11 - HandWz beladen in TC_BS
+  ;12 - Wz Beladen in TC_BS
+  ;20 - Wz Entladen in ToUnLoad
+  ;21 - HandWz Entladen in TC_BS
+  ;22 - Wz Entladen in TC_BS
+  ;
+  ;Wz in/fuer Sp bei Start des WzW's in TC_BS
+  ;- giTlInSp     = Alt (SpWz)
+  ;- giNextTlInSp = Neu
+  ;
+  IF (OUT_LoadUnLoadActive)
+    ;
+    IF (giTNoSp<=0)AND(giNextTlInSp>0)AND(mcbDBB_SpClamped)AND(giSyncTC>=10)AND(giSyncTC<=12)
+      ;
+      ;Neues Wz in WzListe, Sp leer -> Umspeichern in Sp
+      iTmp=giNextTlInSp $TC_MPP6[9998,mcLocSP]=iTmp
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocSp,9998,mcLocSp,1)
+      giTNoSp=iTmp giNextTlInSp=-1 OUT_ToolInSp=TRUE
+      ;
+      IF (giSyncTC==11)
+        ;Kennung HandWz setzen
+        TlData(iTmp,mcSetManTl)
+      ENDIF
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" loaded into Spindle")
+    ENDIF
+    ;
+    IF (giTNoSp>0)AND(NOT mcbDBB_SpClamped)AND(giSyncTC>=20)AND(giSyncTC<=22)
+      ;
+      iTmp=giTNoSp
+      ToAckn(TRUE,50,1,iTmp,0,9999,1,9998,mcLocSp,1)
+      giTNoSp=0 OUT_ToolInSp=FALSE
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" unloaded from Spindle")
+      ;
+      ;<Wz entladen> und <Wz beladen> immer zuruecksetzen
+      TlData(iTmp,mcResLoadUnloadTl)
+      ;
+      ;Vor dem naechsten Einsatz soll das Wz immer geprueft werden
+      OEM_TlData(iTmp,mcResMeasured_Tested)
+      ;      
+    ENDIF
+    ;
+    ;Sollzustand erreicht
+    iStepNo=0
+  ENDIF
+  ;
+  ;Eine notwendige Korrektur der Wz'e ist bei der Scheibe in "Abbruch im Magazin" schon erfolgt - grSyncPickupDrop im Rev_Cha1 geloescht
+  IF (bMagIsPickUpDisk) GOTOF ENDE
+  ;
+  IF (iStepNo==1)
+    ;
+    ;Sollzustand
+    ;- Neues Wz in Kette/HG
+    ;- Altes Wz in Sp
+    ;
+    IF (giTNoSp>0)AND(giTNoSp==giNextTlInSp)
+      ;
+      IF (giTNoDG1>0)
+        ;
+        ;DG1 nicht leer
+        ;
+        IF (giTNoDG2>0) GOTOF SYNC_NEW
+        ;
+        iTmp=giTNoDG1
+        ;Umspeichern DG1 in DG2
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,9998,mcLocDG1,1)
+        giTNoDG2=iTmp giTNoDG1=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to DG2")
+      ENDIF
+      ;
+      iTmp=giTNoSp
+      ;Neues Wz in Sp -> Umspeichern in DG1
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,9998,mcLocSp,1)
+      giTNoDG1=iTmp giTNoSp=0
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from SP to DG1")
+    ENDIF
+    ;
+    IF (bMagIsWM307)
+      ;
+      IF (iTNoMag>0)AND(giTNoDG2<=0)AND(iTNoMag==giTlInSp)
+        ;
+        iTmp=iTNoMag
+        ;Altes Wz in Kette, DG2 leer -> Umspeichern in DG2
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,icMagNo,iMagPos,1)
+        giTNoDG2=iTmp iTNoMag=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from Chain to DG2")
+      ENDIF
+      ;
+      IF (iTNoMag<=0)AND(giTNoDG1>0)AND(giTNoDG1==giNextTlInSp)
+        ;
+        iTmp=giTNoDG1
+        ;Platzreservierung Loeschen
+        iState=DELMLRES(1,iMagPos)
+        ;Neues Wz in DG1, Kette leer -> Umspeichern in Kette
+        ToAckn(TRUE,50,1,iTmp,0,icMagNo,iMagPos,9998,mcLocDG1,1)
+        iTNoMag=iTmp giTNoDG1=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to Chain")
+      ENDIF
+    ENDIF
+    ;
+    IF (gbWithHG)
+      ;
+      IF (giTNoHG>0)AND(giTNoDG2<=0)AND(giTNoHG==giTlInSp)
+        ;
+        iTmp=giTNoHG
+        ;Altes Wz in HG, DG2 leer -> Umspeichern in DG2
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,9998,mcLocHG,1)
+        giTNoDG2=iTmp giTNoHG=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from HG to DG2")
+      ENDIF
+      ;
+      IF (giTNoHG<=0)AND(giTNoDG1>0)AND(giTNoDG1==giNextTlInSp)
+        ;
+        iTmp=giTNoDG1
+        ;Neues Wz in DG1, HG leer -> Umspeichern in HG
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocHG,9998,mcLocDG1,1)
+        giTNoHG=iTmp giTNoDG1=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to HG")
+      ENDIF
+    ENDIF
+    ;
+    IF (giTNoSp==0)AND(giTNoDG2>0)AND(giTNoDG2==giTlInSp)
+      ;
+      iTmp=giTNoDG2
+      ;Altes Wz in DG2, Sp leer -> Umspeichern in Sp
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocSp,9998,mcLocDG2,1)
+      giTNoSp=iTmp giTNoDG2=0
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to SP")
+    ENDIF
+    ;
+    IF (giTNoSp<>giTlInSp)OR((gbWithHG)AND(giTNoHG<>giNextTlInSp))OR((bMagIsWM307)AND(iTNoMag<>giNextTlInSp)) GOTOF SYNC_NEW
+    ;
+  ENDIF
+  ;
+  IF (iStepNo==2)
+    ;
+    ;Sollzustand:
+    ;- Neues Wz in DG1
+    ;- Altes Wz in DG2
+    ;
+    IF (giTNoSp>0)AND(giTNoSp==giNextTlInSp)
+      ;
+      IF (giTNoDG1>0)
+        ;
+        ;DG1 nicht leer
+        IF (giTNoDG2>0) GOTOF SYNC_NEW
+        ;
+        iTmp=giTNoDG1
+        ;Umspeichern DG1 in DG2
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,9998,mcLocDG1,1)
+        giTNoDG2=iTmp giTNoDG1=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to DG2")
+      ENDIF
+      ;
+      iTmp=giTNoSp
+      ;Neues Wz in Sp -> Umspeichern in DG1
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,9998,mcLocSp,1)
+      giTNoDG1=iTmp giTNoSp=0
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from SP to DG1")
+    ENDIF
+    ;
+    IF (giTNoSp>0)AND(giTNoSp==giTlInSp)
+      ;
+      IF (giTNoDG2>0)
+        ;
+        ; DG2 nicht leer
+        IF (giTNoDG1>0) GOTOF SYNC_NEW
+        ;
+        iTmp=giTNoDG2
+        ;Umspeichern DG2 in DG1
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,9998,mcLocDG2,1)
+        giTNoDG1=iTmp giTNoDG2=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to DG1")
+      ENDIF
+      ;
+      iTmp=giTNoSp
+      ;Altes Wz in Sp -> Umspeichern in DG2
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,9998,mcLocSp,1)
+      giTNoDG2=iTmp giTNoSp=0
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from SP to DG2")
+    ENDIF
+    ;
+    IF (bMagIsWM307)
+      ;
+      IF (iTNoMag>0)AND(giTNoDG2<=0)AND(iTNoMag==giTlInSp)
+        ;
+        iTmp=iTNoMag
+        ;Altes Wz in Kette, DG2 leer -> Umspeichern in DG2
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,icMagNo,iMagPos,1)
+        giTNoDG2=iTmp iTNoMag=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from Chain to DG2")
+      ENDIF
+      ;
+      IF (iTNoMag>0)AND(giTNoDG1<=0)AND(iTNoMag==giNextTlInSp)
+        ;
+        iTmp=iTNoMag
+        ;Neues Wz in Kette, DG1 leer -> Umspeichern in DG1
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,icMagNo,iMagPos,1)
+        giTNoDG1=iTmp iTNoMag=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from Chain to DG1")
+      ENDIF
+    ENDIF
+    ;
+    IF (gbWithHG)
+      ;
+      IF (giTNoHG>0)AND(giTNoDG2<=0)AND(giTNoHG==giTlInSp)
+        ;
+        iTmp=giTNoHG
+        ;Altes Wz in HG, DG2 leer -> Umspeichern in DG2
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,9998,mcLocHG,1)
+        giTNoDG2=iTmp giTNoHG=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from HG to DG2")
+      ENDIF
+      ;
+      IF (giTNoHG>0)AND(giTNoDG1<=0)AND(giTNoHG==giNextTlInSp)
+        ;
+        iTmp=giTNoHG
+        ;Neues Wz in HG, DG1 leer -> Umspeichern in DG1
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,9998,mcLocHG,1)
+        giTNoDG1=iTmp giTNoHG=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from HG to DG1")
+      ENDIF
+    ENDIF
+    ;
+    IF (giTNoDG2<>giTlInSp)OR(giTNoDG1<>giNextTlInSp) GOTOF SYNC_NEW
+    ;
+  ENDIF
+  ;
+  IF (iStepNo==3)
+    ;
+    ;Sollzustand:
+    ;- Neues Wz in Sp
+    ;- Altes Wz in Kette/HG
+    ;
+    IF (giTNoSp>0)AND(giTNoSp==giTlInSp)
+      ;
+      IF (giTNoDG2>0)
+        ;
+        ;DG2 nicht leer
+        IF (giTNoDG1>0) GOTOF SYNC_NEW
+        ;
+        iTmp=giTNoDG2
+        ;Umspeichern DG2 in DG1
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,9998,mcLocDG2,1)
+        giTNoDG1=iTmp giTNoDG2=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to DG1")
+      ENDIF
+      ;
+      iTmp=giTNoSp
+      ;Altes Wz in Sp -> Umspeichern in DG2
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG2,9998,mcLocSp,1)
+      giTNoDG2=iTmp giTNoSp=0
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from SP to DG2")
+    ENDIF
+    ;
+    IF (bMagIsWM307)
+      ;
+      IF (iTNoMag>0)AND(giTNoDG1<=0)AND(iTNoMag==giNextTlInSp)
+        ;
+        iTmp=iTNoMag
+        ;Neues Wz in Kette, DG1 leer -> Umspeichern in DG1
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,icMagNo,iMagPos,1)
+        giTNoDG1=iTmp iTNoMag=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from Chain to DG2")
+      ENDIF
+      ;
+      IF (iTNoMag<=0)AND(giTNoDG2>0)AND(giTNoDG2==giTlInSp)
+        ;
+        iTmp=giTNoDG2
+        ;Altes Wz in DG2, Kette Leer - Umspeichern in Kette
+        iState=DELMLRES(icMagNo,iMagPos)
+        ToAckn(TRUE,50,1,iTmp,0,icMagNo,iMagPos,9998,mcLocDG2,1)
+        iTNoMag=iTmp giTNoDG2=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to chain")
+      ENDIF
+    ENDIF
+    ;
+    IF (gbWithHG)
+      ;
+      IF (giTNoHG>0)AND(giTNoDG1<=0)AND(giTNoHG==giNextTlInSp)
+        ;
+        iTmp=giTNoHG
+        ;Neues Wz in HG, DG1 leer -> Umspeichern in DG1
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocDG1,9998,mcLocHG,1)
+        giTNoDG1=iTmp giTNoHG=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from HG to DG1")
+      ENDIF
+      ;
+      IF (giTNoHG<=0)AND(giTNoDG2>0)AND(giTNoDG2==giTlInSp)
+        ;
+        iTmp=giTNoDG2
+        ;Altes Wz in DG2, HG Leer - Umspeichern in HG
+        ToAckn(TRUE,50,1,iTmp,0,9998,mcLocHG,9998,mcLocDG2,1)
+        giTNoHG=iTmp giTNoDG2=0
+        ;
+        LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG2 to HG")
+      ENDIF
+    ENDIF
+    ;
+    IF (giTNoSp<=0)AND(giTNoDG1>0)AND(giTNoDG1==giNextTlInSp)
+      ;
+      iTmp=giTNoDG1
+      ;Neues Wz in DG1, Sp leer - Umspeichern in Sp
+      ToAckn(TRUE,50,1,iTmp,0,9998,mcLocSp,9998,mcLocDG1,1)
+      giTNoSp=giTNoDG1 giTNoDG1=0
+      ;
+      LOG(bEnableLog,iFError,sFName,"  T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]<<" changed from DG1 to SP")
+    ENDIF
+    ;
+    IF (giTNoSp<>giNextTlInSp)OR((gbWithHG)AND(giTNoHG<>giTlInSp))OR((bMagIsWM307)AND(iTNoMag<>giTlInSp)) GOTOF SYNC_NEW
+    ;
+  ENDIF
+  ;
+  ;Sollzustand erreicht
+  OUT_ForceTMSync=FALSE giSyncTC=0
+ENDIF
+;
+GOTOF ENDE
+
+;========
+SYNC_NEW:
+;========
+;
+giForceTMSync=iStepNo
+;
+;Sollzustand konnte nicht hergestellt Meldung, manuelle Synchronisation verlangen, TMReset fortsetzen
+SETAL(AL_PleaseSync67)
+;
+;====
+ENDE:
+;====
+
+;Neuer Status
+OUT_LoadUnloadActive=FALSE
+;
+IF (giNumRealMag>0)AND(gbMag9998Exist)
+  ;
+  ;Synchronisierbild bzw. Zyklus TMSync vorbesetzen (mit dem Ist-Zustand)
+  UpdSync
+  ;
+  ;Belegung Aktualisieren
+  STOPRE
+  giTNoSp=$TC_MPP6[9998,mcLocSp]
+  IF (gbWithDG)
+    giTNoDG1=$TC_MPP6[9998,mcLocDG1] giTNoDG2=$TC_MPP6[9998,mcLocDG2]
+  ENDIF
+  IF (gbWithHG)
+    giTNoHG=$TC_MPP6[9998,mcLocHG]
+  ENDIF
+  ;
+  IF (bMagIsDDisk)
+    ;
+    ;Aktuelle Magazinpos. bzgl. WzW-Stelle ermitteln
+    ;
+    FOR iCount=1 TO giNumRealMag
+      ;
+      IF (iCount==1)OR(iCount==2)
+        ;
+        ;1. Doppelscheibe
+        IF (mcbDBB_Disk1InPassage)
+          ;
+          ;in Teilungspos., aber nicht (!!) in Passage
+          IF (OUTA_ActPosV1<=giNumPlacesInMag[iCount])
+            $TC_MAP8[iCount]=OUTA_ActPosV1
+          ENDIF
+        ENDIF
+        ;
+        IF (iCount==3)OR(iCount==4)
+          ;
+          ;2. Doppelscheibe
+          IF (mcbDBB_Disk2InPassage)
+            ;
+            ;in Teilungspos., aber nicht (!!) in Passage
+            IF (OUTA_ActPosV2<=giNumPlacesInMag[iCount])
+              $TC_MAP8[iCount]=OUTA_ActPosV2
+            ENDIF
+          ENDIF
+        ENDIF
+      ENDIF
+    ENDFOR
+    ;
+  ENDIF
+  ;
+  IF (bMagIsChain)OR(bMagIsPickUpDisk)
+    ;
+    IF (OUTA_ActPosV1<=giNumPlacesInMag[1])
+      $TC_MAP8[1]=OUTA_ActPosV1
+    ENDIF
+  ENDIF
+ELSE
+  giTNoSp=0 giTNoHG=0 giTNoDG1=0 giTNoDG2=0
+ENDIF
+;
+IF (NOT bMagIsPickUpDisk)
+  ;
+  ;ist abgearbeitet -> Loeschen
+  grSyncPickupDrop=0
+ENDIF
+
+IF (bTCWasActive)
+  ;
+  ;Sp/HG/Kette Spannen/Loesen deaktivieren
+  CANCEL(SyncID_TC+4,SyncID_TC+5)
+ENDIF
+
+;Aktualisierung Spindeldaten
+SpTlData(1,giTNoSp)
+
+;HMI - Wz Pruefen aktualisieren
+giMMC_TNo=0 gsMMC_TName="" giMMC_DuploNo=0 giToDuplo=0
+;
+IF (giTNoSp>0)AND(bMagIsPickUpDisk)
+  ;
+  ;Pruefung in Spindel
+  giMMC_TNo=giTNoSp gsMMC_TName=$TC_TP2[giTNoSp] giToDuplo=$TC_TP1[giTNoSp]
+ENDIF
+;
+IF (giTNoHG>0)AND(gbWithHG)
+  ;
+  ;Pruefung im HG
+  giMMC_TNo=giTNoHG gsMMC_TName=$TC_TP2[giTNoHG] giToDuplo=$TC_TP1[giTNoHG]
+  ;
+  OEM_TLData(giTNoHG)
+  ;
+  gbHGBigTl=OEM_bBigTlHG gbHGHeavyTl=OEM_bHeavyTlHG gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+ENDIF
+;
+IF (giTNoDG2>0)AND(bMagIsChain)
+  ;
+  ;Pruefung im DG
+  giMMC_TNo=giTNoDG2 gsMMC_TName=$TC_TP2[giTNoDG2] giToDuplo=$TC_TP1[giTNoDG2]
+ENDIF
+;
+giMMC_DuploNo=giToDuplo
+
+IF (iMode==0)
+  ;
+  ;LOAD CASE
+  ;
+  mcDBB_LoadCaseMeas=0
+  ;
+  CFG_MAN("LOADCASE",sOption)
+  ;Abfrage Lastfallueberwachung fuer Torque-Tisch passt Palette zum eingemessenen Programm oder wurde Lastfallueberwachung abgewaehlt bei aktiven Einmessdaten.
+  IF (($A_INA[2]<>giLCActPal)OR(sOption==""))AND(giLCActPal<>0)
+    ;
+    IF ISFILE("/_N_CMA_DIR/_N_LC_MINV_SPF" )
+      ;
+      ;Ruecksetzen auf Minwerte
+      LC_MINV
+    ELSE
+      SETAL(AL_LCMinProgNotExist)
+    ENDIF
+    ;
+    ;Einmessung erfolgte nicht ueber ProgCall -> loeschen
+    IF (gbLCAutoDelete)
+      ;
+      IF ISFILE(gsLCActProgName)
+        DELETE(iErr,gsLCActProgName)
+      ENDIF
+      gbLCAutoDelete=FALSE gsLCActProgName=""
+    ENDIF
+  ENDIF
+ENDIF
+;
+giTMResetBypass=0
+
+IF (bEnableLog)
+  IF (gbMag9998Exist)
+    ;
+    ;Neue Zwischenspeicher Belegung dokumentieren
+    LOG(bEnableLog,iFError,sFName," ")
+    ;
+    FOR iCount=1 TO iMaxCount
+      iTmp=$TC_MPP6[9998,iCount]
+      IF (iCount==1)
+        sLogText="  SP:  "
+      ENDIF
+      IF (iCount==2)
+        sLogText="  DG2: "
+      ENDIF
+      IF (iCount==3)
+        sLogText="  DG1: "
+      ENDIF
+      IF (iCount==4)
+        sLogText="  HG:  "
+      ENDIF
+      ;
+      IF (iTmp>0)
+        sLogText=sLogText<<"T="<<$TC_TP2[iTmp]<<", DuploNo="<<$TC_TP1[iTmp]
+      ELSE
+        sLogText=sLogText<<"no tool"
+      ENDIF
+      LOG(bEnableLog,iFError,sFName,sLogText)
+    ENDFOR
+  ENDIF
+  ;
+  ;Status Synchronisieren
+  LOG(bEnableLog,iFError,sFName,"  iPLCStepNo="<<iStepNo<<",  giSyncTC="<<giSyncTC)
+  sLogText="  OUT_ForceTMSync="<<OUT_ForceTMSync<< ",  giForceTMSync= " << giForceTMSync
+  LOG(bEnableLog,iFError,sFName,sLogText)
+  ;
+  ;Abschluss Logbuch - Eintrag
+  LOG(bEnableLog,iFError,sFName,"TimeStamp (YYYY-MM-DD HH:MM:SS): " << (2000+$A_YEAR) << "-" << $A_MONTH << "-" << $A_DAY << "  " << $A_HOUR << ":" << $A_MINUTE << ":" << $A_SECOND)
+  LOG(bEnableLog,iFError,sFName,"------------ End of TMReset ----------------")
+  LOG(bEnableLog,iFError,sFName," ")
+ENDIF
+
+RET

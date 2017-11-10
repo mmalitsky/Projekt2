@@ -1,0 +1,419 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     POS_MC.SPF
+;# Task:      Einrichtwerte Maschine
+;# Version:   V06.00.08
+;# Date:      08.11.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;# -----------------------------------
+;# Beschreibung:
+;#
+;# - das Programm beinhaltet maschinen-
+;#   typspezifische Vorgabewerte.
+;# - nur die passenden Programmteile
+;#   werden in das maschinenspezifische
+;#   PosProgramm uebernommen
+;# - Das Programm ist nicht ausfuehrbar
+;#
+;# AuswahlOption:
+;#   [MaschinenTypen,MagazinTypen]
+;# ------------------------------------
+;#
+;# Verlauf:
+;#
+;# V06.00.08 - 08.11.2017 / Simons
+;# - Anpassungen und Werte korrigieren
+;#
+;# V06.00.08 - 21.10.2017 / Simons
+;# - Palettenwechsler mit NC HubAchse aktualisiert
+;#
+;# V06.00.08 - 28.07.2017 / Simons
+;# - NG Hinzu
+;#
+;# V06.00.08 - 01.07.2017 / Simons
+;# - Neuversionierung
+;# - Palettenwechsler mit NC HubAchse hinzu
+;#
+;# V06.00.06 - 02.04.2017 / Simons
+;# - Neuversionierung
+;# - NBH1200 angepasst
+;#
+;# V06.00.05 - 14.02.2017 / Simons
+;# - NBH5S+D grTcPosY=350.0
+;#
+;# V06.00.05 - 22.11.2016 / Simons
+;# - gsDeviceName..
+;# - giToAvailMode
+;# - Integration 5. Achse
+;#
+;# V06.00.05 - 28.10.2016 / Simons
+;# - grSpEnc... Vorgabewerte geaendert
+;#
+;# V06.00.05 - 12.10.2016 / Simons
+;# - andere Z-Achsnullung bei TiltHead
+;# - NBH5: grTcSPos..=0.0
+;# - [Optionen] hinzu
+;# - grTCSPos.. entfernt
+;# - Anpassung fuer Messtaster und SonderWz'e
+;# - Adapterplatte, grFreePosZ, grTCPosZ entfernt
+;#
+;# V06.00.04 - 29.08.2016 / Simons
+;# - Neuversionierung
+;# - NBH 6/6P
+;# - NBH1200 angelegt
+;#
+;# V06.00.02 - 14.02.2016 / Simons
+;# - grCleanTl... Hinzu
+;#
+;# V06.00.01 - 20.07.2015 / Simons
+;# Hinzu
+;# - grTCMinL1
+;# - grToLenPalChgColl
+;#
+;# V06.00.01 - 20.07.2015 / Simons
+;# - NBH500 grTCPosZ = 999.8
+;#
+;# V06.00.00 - 17.06.2015 / Simons
+;# - ProtoTyp
+;#
+;# V04.00.00 - 30.01.2015 / Schaaf
+;# - Neues POS-Programm
+;#   Bestehendes POS-Programm wurde in
+;#   mehrere Einzelprogramme aufgeteilt
+;#
+;# ------------------------------------
+;#
+; 
+; Anpassung fuer Messtaster und SonderWz'e
+; ----------------------------------------
+; grSpiPosVeloLow = Spindelrichtdrehzahl [U/Min]
+; grSpiPosAccLow  = Spindelbeschleunigung [U/sý]
+; grACCValLow     = Achsbeschleunigung [%]
+; [giMaxDefaultSpindleVelo] = max. Spindeldrehzahl
+;                             kann hier ueberschrieben werden
+; (Begrenzung in SET_MC)
+;
+grSpiPosVeloLow=100
+grSpiPosAccLow=10
+grACCValLow=10
+;
+; Palettenbeladung
+; ----------------
+; grPalLoadPosZ = Z-Achsposition fuer Palettenuebergabe
+; grPalLoadPosB = Beladeposition B-Achse
+; grPalLoadPosA = Beladeposition A-Achse (Option)
+;
+; grToLenPalChgColl = Maximale Wz-Laenge, bei der eine Kollision
+;                     beim Palettenwechsel moeglich ist.
+;                     Sonst Abwahl mit 9999.00
+;
+; Werkzeugwechsel Achsen
+; ----------------------
+; grTcPosX      = X-Achse
+; grTcPrePosX   = Vorposition X-Achse
+; grTcPosY      = Y-Achse
+; grTcPosZMin   = Minimale Freifahrposition Z-Achse,
+;                 bevor X- und Y-Achse zum WzW fahren
+; grTcMaxToolLen = Maximale Wz-Laenge, wenn eine Kollision
+;                  mit der Vorrichtung moeglich ist, Abwahl -> =0
+;
+; (Hand)werkzeug Beladen
+;-----------------------
+; grToLoadPosX  = X-Achse
+; grToLoadPosY  = Y-Achse
+;
+; Spannkonen ..Kopf Reinigen:
+; ---------------------------
+; Die X-Achse wird im Reinigungsbereich mit
+; verminderter Geschwindigkeit gefahren.
+; Die Funktion wird erst ausgefuehrt, wenn die
+; WzWTuer auf ist.
+; grCleanTlStart = Startposition (X-Achse)
+;                  Es muss beruecksichtigt werden,
+;                  das die Achse noch abgebremst
+;                  werden muss.
+; grCleanTlWidth = Bereich
+; grCleanTlFeed  = Geschwindigkeit im
+;                  Reinigungsbereich
+;
+;-[NBH5,NBH5S]-
+grTcPosX=grInchMetr*520.0
+grTcPrePosX=grInchMetr*350.0
+;
+grToLenPalChgColl=9999.0
+;-[NBH5S+CH_WM307]-
+grTcPosY=grInchMetr*95.0
+;
+grToLenPalChgColl=9999.0
+;-[NBH5S+D]-
+grTcPosY=grInchMetr*350.0
+;
+grToLenPalChgColl=9999.0
+;-[NBH5]-
+grTcPosY=grInchMetr*235.0
+grToLenPalChgColl=9999.0
+;-[NBH5,NBH5S]-
+grTcPosZMin=grInchMetr*200.0
+grTcMaxToolLen=grInchMetr*0
+;
+grToLoadPosX=grInchMetr*(-350.0)
+grToLoadPosY=grInchMetr*200.0
+grToLenPalChgColl=9999.0
+;
+grPalLoadPosZ=grInchMetr*800.0
+grPalLoadPosB=0.0
+;
+grCleanTlStart=grInchMetr*350.0
+grCleanTlWidth=grInchMetr*200.0
+grCleanTlFeed=grInchMetr*0
+;-[NBH6]-
+grTcPosX=grInchMetr*650.0
+grTcPrePosX=grInchMetr*400.0
+grTcPosY=grInchMetr*175.0
+grTcPosZMin=grInchMetr*120.0
+grTcMaxToolLen=grInchMetr*0
+;
+grToLoadPosX=grInchMetr*(-400.0)
+grToLoadPosY=grInchMetr*200.0
+grToLenPalChgColl=9999.0
+;
+grPalLoadPosZ=grInchMetr *930.100
+grPalLoadPosB=0.0
+;
+grCleanTlStart=grInchMetr*300.0
+grCleanTlWidth=grInchMetr*200.0
+grCleanTlFeed=grInchMetr*0
+;-[NBH500]-
+grTcPosX=grInchMetr*690.0
+grTcPrePosX=grInchMetr*450.0
+grTcPosY=grInchMetr*235.0
+grTcPosZMin=grInchMetr*100.0
+grTcMaxToolLen=grInchMetr*0
+;
+grToLoadPosX=grInchMetr*(-450.0)
+grToLoadPosY=grInchMetr*200.0
+grToLenPalChgColl=9999.0
+;
+grPalLoadPosZ=grInchMetr*1000.0
+grPalLoadPosB=0.0
+;
+grCleanTlStart=grInchMetr*400.0
+grCleanTlWidth=grInchMetr*200.0
+grCleanTlFeed=grInchMetr*0
+;-[NBH630]-
+[SWIVELHEAD] grTcPosX=grInchMetr*895.0
+[SWIVELHEAD] grTcPrePosX=grInchMetr*450.0
+[SWIVELHEAD] grTcPosY=grInchMetr*197.0
+[NG] grTcPosX=grInchMetr*895.0
+[NG] grTcPrePosX=grInchMetr*499.0
+[NG] grTcPosY=grInchMetr*235.0
+[MC4X] grTcPosX=grInchMetr*775.0
+[MC4X] grTcPrePosX=grInchMetr*499.0
+[MC4X] grTcPosY=grInchMetr*235.0
+;
+grTcPosZMin=grInchMetr*120.0
+grTcMaxToolLen=grInchMetr*0
+;
+[SWIVELHEAD] grToLoadPosX=grInchMetr*(-450.0)
+[NG]         grToLoadPosX=grInchMetr*(-500.0)
+[MC4X]       grToLoadPosX=grInchMetr*(-500.0)
+grToLoadPosY=grInchMetr*200.0
+;
+grPalLoadPosZ=grInchMetr*930.100
+grPalLoadPosB=0.0
+;
+grToLenPalChgColl=grInchMetr*660.0
+;
+grCleanTlStart=grInchMetr*450.0
+grCleanTlWidth=grInchMetr*200.0
+grCleanTlFeed=grInchMetr*0
+;-[NBH800]-
+grTcPosX=grInchMetr*1015.4
+grTcPrePosX=grInchMetr*600.0
+[SWIVELHEAD] grTcPosY=grInchMetr*448.0
+[BA]         grTcPosY=grInchMetr*49.0
+[MC4X]       grTcPosY=grInchMetr*398.0
+;
+grToLoadPosX=grInchMetr*(-700.0)
+[SWIVELHEAD] grToLoadPosY=grInchMetr*150.0
+[SWIVELHEAD] grPalLoadPosZ=grInchMetr*1512.0
+[SWIVELHEAD] grToLenPalChgColl=grInchMetr*660.0
+[BA]         grToLoadPosY=grInchMetr*(-250.0)
+[BA]         grPalLoadPosZ=grInchMetr*1512.0
+[BA]         grToLenPalChgColl=grInchMetr*660.0
+[MC4X]       grToLoadPosY=grInchMetr*150.0
+[MC4X]       grPalLoadPosZ=grInchMetr*1512.0
+[MC4X]       grToLenPalChgColl=grInchMetr*660.0
+;
+grTcPosZMin=grInchMetr*120.0
+grTcMaxToolLen=grInchMetr*0
+;
+grPalLoadPosB=0.0
+[BA] grPalLoadPosA=0.0
+[APCNC] ;
+[APCNC] ;Palettenwechsler mit NC Hubachse
+[APCNC] ;--------------------------------
+[APCNC] ;Freifahrpositionen
+[APCNC] grPCPosFreeX=grInchMetr*650.0
+[APCNC] grPCPosFreeY=grInchMetr*835.0
+[APCNC] grPCPosFreeZ=grInchMetr*363.0
+[APCNC] ;Hub
+[APCNC] grPCYPosLow=grInchMetr*1138.0
+[APCNC] grPCYPosLoadPos=grInchMetr*1184.0
+[APCNC] grPCYPosRotTab=grInchMetr*1555.0
+[APCNC] grPCYPosUpper=grInchMetr*1620.0
+[APCNC] grWpHeight=grInchMetr*1400.0
+[APCNC] grWpRadius=grInchMetr*600.0
+[APCNC] grSlowVeloPalY=(1/grInchMetr)*1000
+;
+grCleanTlStart=grInchMetr*550.0
+grCleanTlWidth=grInchMetr*200.0
+grCleanTlFeed=grInchMetr*0
+;-[NBH1000]-
+grTcPosX=grInchMetr*1215.0
+[TILTHEAD] grTcPrePosX=grInchMetr*890.0
+[TILTHEAD] grTcPosY=grInchMetr*150.0
+[TILTHEAD] grTcPosZMin=grInchMetr*120.0
+[BA] grTcPrePosX=grInchMetr*700.0
+[BA] grTcPosY=grInchMetr*48.0
+[BA] grTcPosZMin=grInchMetr*120.0
+[MC4X] grTcPrePosX=grInchMetr*700.0
+[MC4X] grTcPosY=grInchMetr*448.0
+[MC4X] grTcPosZMin=grInchMetr*120.0
+grTcMaxToolLen=grInchMetr*0
+;
+grToLoadPosX=grInchMetr*(-700.0)
+[TILTHEAD] grToLoadPosY=grInchMetr*200.0
+[TILTHEAD] grPalLoadPosZ=grInchMetr*1497.0
+[TILTHEAD] grToLenPalChgColl=grInchMetr*660.0
+[BA] grToLoadPosY=grInchMetr*150.0
+[BA] grPalLoadPosZ=grInchMetr*2037.0
+[BA] grToLenPalChgColl=grInchMetr*660.0
+[MC4X] grToLoadPosY=grInchMetr*150.0
+[MC4X] grPalLoadPosZ=grInchMetr*2037.0
+[MC4X] grToLenPalChgColl=grInchMetr*660.0
+grPalLoadPosB=0.0
+[BA] grPalLoadPosA=0.0
+;
+grCleanTlStart=grInchMetr*840.0
+grCleanTlWidth=grInchMetr*200.0
+grCleanTlFeed=grInchMetr*0
+;-[NBH1200]-
+;Palettenuebergabe X Links/Rechts
+grPalLoadPosXL=grInchMetr*(-1300.0)
+grPalLoadPosXR=grInchMetr*1300.0
+grToLenPalChgColl=grInchMetr*9999.0
+grPalLoadPosB=0.0
+;
+grTcPosX=grInchMetr*1015.0
+grTcPrePosX=grTcPosX-grInchMetr*0.2
+grTcPosY=grInchMetr*554.0
+grTcPosZ=grInchMetr*2059.0
+grTcPrePosZ=grTcPosZ-grInchMetr*0.2
+grTcMaxToolLen=grInchMetr*1200.0
+;
+grToLoadPosX=grTcPosX
+grToLoadPosY=grTcPosY-grInchMetr*50.0
+grToLoadPosZ=grTcPosZ-grInchMetr*300.0
+;
+;Palettenwechsler Kettenpositionen
+;---------------------------------
+;LD = Beladeplatz
+;MC = Maschine
+;CH = Trennung (Kette/Kette)
+;WAIT = Warteposition
+;PRE = Eilgangabschaltung
+grChPosLD=3550
+grChWaitPosLD=3800
+grChPrePosToLD=3100
+grChPosMC=830
+grChWaitPosMC=500
+grChPrePosToMC=1150
+grChPosCH=2200
+grChPrePosLDToCH=2750
+grChPrePosMCToCH=1750
+;
+;Maximaler Pallettenradius
+grMaxPalRad=grInchMetr*1200.0
+;Abstand Sp zu HG
+grSpToHGDist=grInchMetr*670.0
+;-[]-
+;
+;Minimale Wz-Laenge L1, Abwahl -> =0
+grTCMinL1=grInchMetr*10.0
+[SWIVELHEAD] ;
+[SWIVELHEAD] ; C-Achse (Option Schwenkkopf)
+[SWIVELHEAD] grTcPosC=0.0
+[BA]         ;
+[BA]         ; A-Achse (Option Schwenktisch)
+[BA]         grTcPosA=0.0
+[TILTHEAD]   ;
+[TILTHEAD]   ; A-Achse (Option HVKopf)
+[TILTHEAD]   grTcPosA=0.0
+[SP_CLMP_ANA]
+[SP_CLMP_ANA] ;Analogwertgeber (Option)
+[SP_CLMP_ANA] ;------------------------
+[SP_CLMP_ANA] ;grSpEncUnClamped     = Geloest [Abfrage auf >]
+[SP_CLMP_ANA] ;grSpEncClamped       = Geklemmt [Abfrage auf <]
+[SP_CLMP_ANA] ;grSpEncClampedWoTool = Geklemmt ohne Werkzeug
+[SP_CLMP_ANA] ;                       [Abfrage auf <]
+[SP_CLMP_ANA] grSpEncUnClamped    =25500
+[SP_CLMP_ANA] grSpEncclamped      =7500
+[SP_CLMP_ANA] grSpEncClampedWoTool=6500
+
+;Arbeitsraumueberwachung (Option)
+;--------------------------------
+;grWorkarea_MaxPos_Z = Beginn der Einschraenkung
+;                      des Arbeitsraums
+;                      beim Fahren in positive
+;                      Richtung (Palettewechsel)
+;grWorkarea_MinPos_Z = Beginn der Einschraenkung
+;                      des Arbeitsraums beim Fahren
+;                      in negative Richtung
+;                      (X-Y-Schutz)
+;grWorkarea_MinPos_B = Erlaubte B-Achs-Position
+;grWorkarea_MaxPos_B   bei denen keine Einschraenkung
+;                      des Arbeitsraums erfolgt
+grWorkarea_MaxPos_Z=grInchMetr*9999.0
+grWorkarea_MinPos_Z=grInchMetr*(-9999.0)
+grWorkarea_MaxPos_B=5.0
+grWorkarea_MinPos_B=355.0
+;
+;Zusaetzliche gueltige B-Achspositionen
+;bei denen keine Einschraenkung in
+;negative Richtung (X-Y-Schutz) erfolgt, Abwahl mit 0
+grWorkarea_VldPos1_B=0.0
+grWorkarea_VldPos2_B=0.0
+grWorkarea_VldPos3_B=0.0
+;
+;Bereich in neg. / pos. B-Achsrichtung, um die
+;oben eingetragenen zusaetzlichen Positionen
+grBAxAllRan=5.0
+[SYSTEM]
+[SYSTEM] ;Systemmaschine(Option):
+[SYSTEM] ;-----------------------
+[SYSTEM] ;grLineNo = Linien-Nummer
+[SYSTEM] ;grOpNo   = Operations-Nummer
+[SYSTEM] ;grMachNo = Maschinen-Nummer
+[SYSTEM] grLineNo=0
+[SYSTEM] grOpNo=0
+[SYSTEM] grMachNo=0
+
+;To_Avail
+;--------
+; .0 - mit Meldungsausgabe
+; .1 - mit Handwerkzeugen
+giToAvailMode=0
+[EES]
+[EES] ;Zuordnung der logischen Laufwerke
+[EES] ;---------------------------------
+[EES] gsDeviceName[0]=""
+[EES] gsDeviceName[1]="//EXT1:/"
+[EES] gsDeviceName[2]="//EXT2:/"
+[EES] gsDeviceName[3]="//EXT3:/"
+;-[END]-
+RET

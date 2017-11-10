@@ -1,0 +1,56 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MGUD_APC.DEF
+;# Task:      NC Palettenwechsler
+;# Version:   V06.00.08
+;# Date:      21.10.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 800
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;Beschreibung:
+;
+; Globale Anwenderdaten Loadcase   
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 21.10.2017 / Simons
+; - Prototyp
+;
+;-------------------------------------
+
+APR 11 APW 11
+
+;Palettenwechselpositionen für Palettenwechsler
+
+;A/B/Z-Achse aus Standard
+;grPalLoadPosA <- DEF NCK REAL grPCPosA          ;Palettenwechselposition A-Achse
+;grPalLoadPosB <- DEF NCK REAL grPCPosB          ;Palettenwechselposition B-Achse
+;grPalLoadPosZ <- DEF NCK REAL grPCPosZ          ;Palettenwechselposition Z-Achse
+
+DEF NCK REAL grPCPosFreeX      ;Freifahrposition Palettenwechsel X-Achse
+DEF NCK REAL grPCPosFreeY      ;Freifahrposition Palettenwechsel Y-Achse
+DEF NCK REAL grPCPosFreeZ      ;Freifahrposition Palettenwechsel Z-Achse
+DEF NCK REAL grPCYPosLow       ;Palettenwechsler Hub - Untere Position
+DEF NCK REAL grPCYPosLoadPos   ;Palettenwechsler Hub - Position Beladeplatz
+DEF NCK REAL grPCYPosRotTab    ;Palettenwechsler Hub - Position Drehtisch
+DEF NCK REAL grPCYPosUpper     ;Palettenwechsler Hub - Obere Position
+DEF NCK REAL grSlowVeloPalY    ;Langsame Geschwindigkeit Hubachse
+
+;Palettenwechselzyklus
+DEF NCK INT giPcDebugStep      ;Aktueller Schritt Palettenwechsel
+DEF NCK INT giPcBreakStep      ;Abbruchzustand Palettenwechsel
+DEF NCK INT giPcMaxStep        ;Anzahl Schritte Werkzeugwechsel
+DEF NCK BOOL gbBreakPalChg     ;Abbruch im Palettenwechsel
+DEF NCK INT giSelChgPos        ;Zielposition Palettenwechsel
+;Werkstueck
+DEF NCK REAL grWpHeight ;Hoehe
+DEF NCK REAL grWpRadius ;Radius
+
+M30
+

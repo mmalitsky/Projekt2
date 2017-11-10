@@ -1,0 +1,138 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     ChkStart.SPF
+;# Task:      Pruefungen bei NC-Start
+;# Version:   V06.00.07
+;# Date:      20.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 20.08.2017 / Simons
+; - Neuversionierung
+; - MakeAlarmparam, bCheckSpTl... verlagert
+;
+; V06.00.06 - 11.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 05.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.03 - 06.05.2015 / Simons
+; - Neuversionierung
+;
+; V06.00.02 - 09.04.2015 / Simons
+; - Korrektur in Besetzung giMMC_...
+; - gbMag9998Exist
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Plausibilitaetspruefungen bei NC-START:
+;
+; - Synchronisation der WzV gefordert
+; - Platzsperre fuer HG/DG/SP aktiv
+;
+; Wird aufgerufen im Rahmen des Prog-Event
+; "NC-START" aus CYCPE_MA.SPF
+;
+;------------------------------------
+
+PROC ChkStart
+
+DEF STRING[32] sCycName="ChkStart V06.00.07", sAlarmParam=""
+;
+DEF BOOL bClearMMC=TRUE, bCheckSpTl, bSync
+;
+DEF INT iAlarmNo=0, iCount, iMaxCount
+
+IF (gbMag9998Exist)
+  ;
+  bCheckSpTl=(mcbDBB_TlCheckOn) bSync=((OUT_ForceTMSync)OR(giForceTMSync<>0)) iMaxCount=($TC_MAP7[9998]*$TC_MAP6[9998])
+  ;
+  IF (bSync)
+    ;Synchronisieren erforderlich -> kein Start
+    iAlarmNo=AL_PleaseSyncFirst
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  FOR iCount=1 TO iMaxCount
+    ;
+    IF (($TC_MPP4[9998,iCount] B_AND 'B1')<>0)
+      ;Platz gesperrt
+      iAlarmNo=AL_PlLockedInMag9998
+      GOTOF HandleAlarm
+    ENDIF
+  ENDFOR
+  ;
+  FOR iCount=1 TO iMaxCount
+    ;
+    IF (iCount==mcLocSp)
+      giTNoSp=$TC_MPP6[9998,iCount]
+    ENDIF
+    ;
+    IF (iCount==mcLocHG)
+      giTNoHg=$TC_MPP6[9998,iCount]
+    ENDIF
+  ENDFOR
+  ;
+  ;Aktualisierung Spindeldaten
+  ;
+  SpTlData(1,giTNoSp)
+  ;
+  IF (giTNoSp>0)
+    ;
+    ;Wz in Sp
+    ;
+    TlData(giTNoSp)
+    ;
+    IF (TL_Locked)
+      MakeAlarmParam(sAlarmParam,$TC_TP2[giTNoSp],<<$TC_TP1[giTNoSp])
+      SETAL(AL_SpTlBlockedNotFree67,sAlarmParam)
+    ENDIF
+    ;
+    IF (bCheckSpTl)
+      ;
+      ;SpWz wird geprueft
+      ;
+      bClearMMC=FALSE giMMC_TNo=giTNoSp gsMMC_TName=$TC_TP2[giTNoSp] giMMC_DuploNo=$TC_TP1[giTNoSp] giToDuplo=$TC_TP1[giTNoSp]
+    ENDIF
+  ENDIF
+  ;
+  IF (NOT bCheckSpTl)AND(giTNoHG>0)
+    ;
+    ;Wz im HG und SpWz wird nicht geprueft
+    ;
+    bClearMMC=FALSE giMMC_TNo=giTNoHg gsMMC_TName=$TC_TP2[giTNoHg] giMMC_DuploNo=$TC_TP1[giTNoHg] giToDuplo=$TC_TP1[giTNoHg]
+  ENDIF
+ENDIF
+;
+IF (bClearMMC)
+  ;
+  giMMC_TNo=0 gsMMC_TName="" giMMC_DuploNo=0 giToDuplo=0
+ENDIF
+;
+RET
+
+;===========
+HandleAlarm:
+;===========
+;
+SETAL(iAlarmNo,sAlarmParam)
+;
+RET
+
+
+

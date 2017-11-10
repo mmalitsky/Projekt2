@@ -1,0 +1,87 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MakeAlarmParam.SPF
+;# Task:      Auswertung BBK
+;# Version:   V06.00.07
+;# Date:      04.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 04.06.2017 / Simons
+; - ProtoTyp
+;
+;----------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Begrenzung der Stringlaenge des verketteten Strings auf 32 Zeichen
+;
+; Trennzeichen ("/") einfuegen:
+; iMode.0 = 0/1 -> Ja/Nein
+;
+; Bei Ueberschreitung der erlaubten Laenge:
+; iMode.1 = 1 -> sResult = ".." gefolgt von den letzten 30 Zeichen des Summenstrings
+; iMode.2 = 1 -> sResult = die ersten 30 Zeichen des Summenstrings gefolgt von ".."
+; sonst       -> sResult=sArg1 (mehr als 32 Zeichen -> Ausgabe der ersten 30 Zeichen gefolgt von "..")
+;
+;----------------------------------
+
+PROC MakeAlarmParam(VAR STRING[32] sResult, STRING[64] sArg1, STRING[64] sArg2, INT iMode)
+
+DEF STRING[32] sCycName="MakeAlarmParam V06.00.07"
+;
+DEF STRING[128] sTmp
+;
+DEF INT icLen=32
+
+IF (iMode>'B101')
+  SETAL(AL_NoSupport,"iMode="<<iMode)
+ENDIF
+
+IF ((iMode B_AND 'B1')==0)
+  sTmp=sArg1<<"/"<<sArg2
+ELSE
+  sTmp=sArg1<<sArg2
+ENDIF
+;
+IF ((iMode B_AND 'B110')==0)
+  ;
+  IF (STRLEN(sTmp)>icLen)
+    sTmp=sArg1
+    GOTOF _RIGHTCUT
+  ELSE
+    GOTOF _RESULT
+  ENDIF
+ENDIF
+;
+IF ((iMode B_AND 'B110')=='B10')
+  ;
+  IF (STRLEN(sTmp)>icLen)
+    sTmp=".."<<SUBSTR(sTmp,MAXVAL(STRLEN(sTmp)-icLen+2,0))
+  ENDIF
+  GOTOF _RESULT
+ENDIF
+;
+;=========
+_RIGHTCUT:
+;=========
+;
+IF (STRLEN(sTmp)>icLen)
+  sTmp=SUBSTR(sTmp,0,icLen-2)<<".."
+ENDIF
+;
+;=======
+_RESULT:
+;=======
+;
+sResult=sTmp
+;
+RET

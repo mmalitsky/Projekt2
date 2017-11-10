@@ -1,0 +1,419 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     NC_INIT1.SPF
+;# Task:      Hochlaufprogramm Kanal 1
+;# Version:   V06.00.08
+;# Date:      10.10.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 16.08.2017 / Simons
+; - Neuversionierung
+; - WHENEVER (TRUE) DO -> DO
+; - giNagKonfState hinzu
+;
+; V06.00.07 - 18.07.2017 / Simons
+; - $A_DBB[48] hinzu
+;
+; V06.00.07 - 20.06.2017 / Simons
+; - Neuversionierung
+; - IDS=1 korrigiert
+; - POS_PROG -> CREA_POS("INIT")
+; - formale Aenderungen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - IDS=5/6 OUT_ToolInSp=... entfernt
+;
+; V06.00.05 - 23.02.2017 / Simons
+; - $A_DBB[485] entfernt (SYG_IM[...+3] in NC_INIT2)
+; - Einfuehrung Beladestelle 3 (ComfortPanel)
+;
+; V06.00.05 - 28.11.2016 / Simons
+; - mcbDBB_DrivesOK hinzu
+;
+; V06.00.05 - 12.10.2016 / Simons
+; - Neuversionierung
+; - Aufruf MagKonf hinzu
+; - grTcPosZ=99999999, grToLenPalChgColl
+;
+; V06.00.04 - 30.08.2016 / Simons
+; - mcDBR_Time hinzu
+; - $A_DBB[485] hinzu
+;
+; V06.00.04 - 24.07.2016 / Simons
+; - Neuversionierung
+; - Scheibe zurueck verzoegert
+; - SET_TEMP hinzu
+; - IDS fuer Umsetzen nicht bei Scheibe
+;   und WM207/Kette
+;
+; V06.00.03 - 29.05.2016 / Simons
+; - HHD TM hinzu
+; - WaMon geaendert
+; - NC Hubachse hinzu (gbDGIsNc2Axis)
+; - TimeOut Inkrment SYG_IM[iSx+3]
+; - OUT_DGRot... auch fuer nicht NCDG
+;
+; V06.00.02 - 13.04.2016 / Simons
+; Hinzu
+; - OUT_PrepareActive
+; - grPosWinDgRot
+; - $AC_TRAFO==0 in IDS=13
+; - SET_PARA verlagert
+; - $A_DBR[144] entfernt
+; - SYG_BM[7] hinzu
+; - IDS3 ($AC_TC_MFN<=9998)
+;
+; V06.00.01 - 30.07.2015 / Simons
+; - Kollisionsueberwachung A-Achse
+;   entfernt (630NG alt)
+; - mcAxX,Y,Z eingefuehrt
+; - $AA anstatt $VA fuer Rundachsen
+;   CT1 Achse $VA_ mit Modulobildung
+; - SYG_BM[0/1] hinzu
+;
+; V06.00.00 - 18.07.2015 / Simons
+; - Prototyp
+;
+; V04.00.00 - 27.03.2014 / Huettner
+; - Vorlage
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Synchronaktionen Kanal 1:
+;
+; IDS :
+; - Allgemein belegt   1..19
+; -           frei    20..39
+; - Safety            40..99
+;   Nicht mit CANCEL() loeschbar
+;
+; - WaMon         130 .. 149
+; - Achsistwerte setzen  200
+; - Spannungsausfall     210
+; - Masterspindel
+;   und ALMbetrieb       211
+;
+; ID :
+; Fuer bestimmte Zyklen reserviert
+; - TC_BS/TCWP 100 .. 120
+; - ToLoad/
+;   ToUnload.. 120 .. 129
+;
+; Reservierung Systemvariablen:
+;
+; - TC_BS/TCWP = SYG_RM[0..19]
+;              = SYG_IM[0..9]
+;              = SYG_BM[0..8]
+; - NC_INIT1   = SYG_IM[10..19]
+;              = SYG_BM[0,1,7,8]
+; - WAMON      = SYG_RM[20..29]
+; - SET_XYZ    = SYG_RM[30..34]
+; - LC_...     = SYG_RM[35..39]
+;
+;-------------------------------------
+
+PROC NC_INIT1
+
+DEF STRING[32] sCycName="NC_INIT1 V06.00.08", sAlarmParam="", scCMADir="/_N_CMA_DIR/_N_", scSPFDir="/_N_SPF_DIR/_N_", scSPF="_SPF", sResult, sMCType, sMNType
+;
+DEF STRING[128] sCFGProgName, sFName
+DEF STRING[255] sAux
+;
+DEF BOOL bIsNBH1200
+;
+DEF INT  iAlarmNo=0, iTmp=0, iCount, iTNoSp, iLC_Error, iPx, iMx, iSx
+;
+DEF REAL rc0x1mm, rcRotToDeg=360.0
+
+;GndSt SYNACT
+FOR iCount=1 TO 39
+  CANCEL(iCount)
+ENDFOR
+;
+;Erzeugen der globalen Konfigurationen
+CFG_MAN("SET",sResult)
+;
+;Ermittlung des Maschinentyps
+CFG_MAN("MC",sMCType)
+;
+;Ermittlung des Magazintyps
+CFG_MAN("MN",sMNType)
+;
+IF ($P_MAGN<=0)OR(NOT gbMag9998Exist)
+  ;
+  ;Falsche Magazinkonfiguration/Fehlende Spindel
+  iAlarmNo=AL_NoValidMagKonf67
+ENDIF
+
+;Pruefung Maschinendaten
+;
+IF ($MA_FRAME_OR_CORRPOS_NOTALLOWED[X] B_AND 'H200')==0
+  iAlarmNo=AL_MDInvalid sAlarmParam="MD32074[X].Bit9"
+ENDIF
+IF ($MA_FRAME_OR_CORRPOS_NOTALLOWED[Y] B_AND 'H200')==0
+  iAlarmNo=AL_MDInvalid sAlarmParam="MD32074[Y].Bit9"
+ENDIF
+IF ($MA_FRAME_OR_CORRPOS_NOTALLOWED[Z] B_AND 'H200')==0
+  iAlarmNo=AL_MDInvalid sAlarmParam="MD32074[Z].Bit9"
+ENDIF
+IF ($MA_FRAME_OR_CORRPOS_NOTALLOWED[B] B_AND 'H200')==0
+  iAlarmNo=AL_MDInvalid sAlarmParam="MD32074[B].Bit9"
+ENDIF
+;Bei Fehlererkennung weitermachen und am Ende Alarm 67xxx absetzen
+
+;Bereitstellung - Globale Achsdaten
+grMaxVeloX=$MA_MAX_AX_VELO[mcAxX] grMaxVeloY=$MA_MAX_AX_VELO[mcAxY] grMaxVeloZ=$MA_MAX_AX_VELO[mcAxZ] grMaxVeloB=($MA_MAX_AX_VELO[mcAxB]*rcRotToDeg) grSpiStopLimitFine=$MA_STOP_LIMIT_FINE[mcAxSP1] grBAxStopLimitFine=$MA_STOP_LIMIT_FINE[mcAxB]
+IF (gbSwivHeadExist)
+  grMaxVeloC=$MA_MAX_AX_VELO[mcAxC]*rcRotToDeg
+ENDIF
+IF (gbTiltHeadExist)
+  grMaxVeloA=$MA_MAX_AX_VELO[mcAxA]*rcRotToDeg
+ENDIF
+IF (gbDGIsNCAxis)
+  grMaxVeloCT=$MA_MAX_AX_VELO[mcAxDGRot]*rcRotToDeg
+ENDIF
+
+;Inch/Metrisch
+IF (NOT gbTMIsHHD)
+  ;Umrechnung der betroffenen WzDaten
+  ReScale(giOldScalSys,$MN_SCALING_SYSTEM_IS_METRIC)
+ENDIF
+giOldScalSys=$MN_SCALING_SYSTEM_IS_METRIC gbMetricScale=($MN_SCALING_SYSTEM_IS_METRIC==1)
+;Umrechnungsfaktor
+IF (gbMetricScale)
+  grInchMetr=1
+ELSE
+  grInchMetr=1/25.4
+ENDIF
+
+IF (gbTMIsHHD)
+  ;
+  ;Zusatzparameter fuer Zyklus MovBlock zuruecksetzen
+  giParaMovBlock[0]=0  giParaMovBlock[1]=0 giStateToMMC[0]=0
+  ;Quittierungsregister dem Anforderungsregister nachziehen
+  giAcknFromMMC=giReqToMMC
+ENDIF
+;
+;Konstanten
+SET_PARA
+
+;Achspositionen nach Power Off wiederherstellen
+SET_XYZB
+;
+;giTCMask - Die Maske kann im Posprogramm modifiziert werden, um Funktionen maschinenspezifisch abzuwaehlen, Endgueltige Bewertung in SET_TC
+giTCMask='HFFFFFFFF' rc0x1mm=grInchMetr*0.1 grTcPosZ=99999999 grToLenPalChgColl=(grInchMetr*9999.00) giMaxDefaultSpindleVelo=mcMaxSpVeloDefault
+
+;PosProgramm mit Einrichtwerten fuer Maschine und Magazin lesen(erzeugen)
+CREA_POS("INIT")
+
+IF (NOT gbTMIsHHD)
+  ;Plausibilitaetspruefung der die Konfiguration abbildenden Zyklen, Magazinplaetze sperren etc.
+  MagKonf(TRUE)
+ENDIF
+
+;Vorgaben Maschine
+SET_MC
+
+;Vorgaben Magazin
+SET_MN
+
+;Vorgaben Spindel
+SET_SP
+
+;Temperaturkompensationswerte
+SET_TEMP
+
+;Vorgaben Werkzeugwechsel
+SET_TC
+
+;grAxisPos[..] Aktualisieren
+SET_APOS
+
+;SW Nocken
+SET_CAMS
+
+;Spindelbelegung
+IF (gbMag9998Exist)AND((giMagKonfState B_AND 'B10')==0)
+  ;
+  ;Sp vorhanden und MagKonf laeuft nicht
+  ;
+  iTNoSp=$TC_MPP6[9998,mcLocSp]
+ELSE
+  iTNoSp=0
+ENDIF
+;
+;Aktualisierung der SpWz Daten
+SpTlData(1,iTNoSp)
+
+;IPOTURN - GndSt
+IPOTURN(0)
+
+;Starten der statischen Synchronaktionen im Kanal 1
+;--------------------------------------------------
+;
+;Wz-Vorbereitung
+;---------------
+;Wegen Einhaltung der max. Satzlaenge -> Einfuehrung iSx,iPx,iMx
+iPx=iJobPtrPrep iMx=iJobPtrMove iSx=mcSYG_TC
+SYG_BM[iSx]=FALSE SYG_BM[iSx+1]=FALSE SYG_IM[iSx+10]=-1 SYG_RM[iSx+15]=0 OUT_PrepareActive=FALSE SYG_BM[iSx+7]=TRUE SYG_BM[iSx+8]=TRUE
+;
+;Erkennen einer T-Aenderung und Sichern der Daten.
+;Damit HG/DG leergefahren werden, wird bei leerer Sp auch ein T0 weitergegeben.
+IDS=1 EVERY ($AC_TC_CMDT==1)AND($AC_TC_FCT==2) DO SYG_IM[iSx+10]=$AC_TC_TNO SYG_IM[iSx+11]=$AC_TC_MFN SYG_IM[iSx+12]=$AC_TC_LFN SYG_IM[iSx+13]=$AC_TC_MTN SYG_IM[iSx+14]=$AC_TC_LTN SYG_IM[iSx+15]=$AC_TC_MFO SYG_IM[iSx+16]=$AC_TC_LFO SYG_IM[iSx+17]=$AC_TC_MTO SYG_IM[iSx+18]=$AC_TC_LTO SYG_BM[iSx]=TRUE SYG_BM[iSx+1]=($A_DBB[6]<127) OUT_PrepareActive=TRUE
+;
+;Quittieren eventuell erst nach Quittierung der Uebernahme des vorherigen Auftrags
+IDS=2 EVERY (SYG_BM[iSx+1])AND($A_DBW[iPx+2]==0) DO SYG_BM[iSx+1]=FALSE $A_DBW[iPx]=mcTaskPrep2 $A_DBW[iPx+4]=2 $A_DBW[iPx+6]=SYG_IM[iSx+10] $A_DBW[iPx+8]=SYG_IM[iSx+11] $A_DBW[iPx+10]=SYG_IM[iSx+12] $A_DBW[iPx+12]=SYG_IM[iSx+13] $A_DBW[iPx+14]=SYG_IM[iSx+14] $A_DBW[iPx+16]=SYG_IM[iSx+15] $A_DBW[iPx+18]=SYG_IM[iSx+16] $A_DBW[iPx+20]=SYG_IM[iSx+17] $A_DBW[iPx+22]=SYG_IM[iSx+18] $A_DBW[iPx+24]=1 $A_DBW[iPx+2]=1
+
+;Wz Umsetzen:
+;------------
+IF (sMNType<>"D")AND(sMNType<>"CH_WM307")
+  ;Wz-Umsetzen ueber Beladestelle 1 (Beladestelle_Hand)
+  IF (gbTMIsHHD)
+    IDS=3 EVERY (($AC_TC_TNO>0)AND($AC_TC_FCT==1)AND($AC_TC_MFN<=9998)AND($AC_TC_MTN<9998)) DO $A_DBW[iMx]=mcTask_Displace $A_DBW[iMx+4]=$AC_TC_FCT $A_DBW[iMx+6]=$AC_TC_TNO $A_DBW[iMx+8]=$AC_TC_MFN $A_DBW[iMx+10]=$AC_TC_LFN $A_DBW[iMx+12]=$AC_TC_MTN $A_DBW[iMx+14]=$AC_TC_LTN $A_DBW[iMx+16]=$AC_TC_MFO $A_DBW[iMx+18]=$AC_TC_LFO $A_DBW[iMx+20]=$AC_TC_MTO $A_DBW[iMx+22]=$AC_TC_LTO $A_DBW[iMx+24]=1 $A_DBW[iMx+2]=1
+  ELSE
+    IDS=3 EVERY (($AC_TC_TNO>0)AND($AC_TC_FCT==1)AND($AC_TC_MFN< 9998)AND($AC_TC_MTN<9998)) DO $A_DBW[iMx]=mcTask_Displace $A_DBW[iMx+4]=$AC_TC_FCT $A_DBW[iMx+6]=$AC_TC_TNO $A_DBW[iMx+8]=$AC_TC_MFN $A_DBW[iMx+10]=$AC_TC_LFN $A_DBW[iMx+12]=$AC_TC_MTN $A_DBW[iMx+14]=$AC_TC_LTN $A_DBW[iMx+16]=$AC_TC_MFO $A_DBW[iMx+18]=$AC_TC_LFO $A_DBW[iMx+20]=$AC_TC_MTO $A_DBW[iMx+22]=$AC_TC_LTO $A_DBW[iMx+24]=1 $A_DBW[iMx+2]=1
+  ENDIF
+ENDIF
+;
+;Wz Beladen:
+;-----------
+CFG_MAN("COMFORTPANEL",sResult)
+IF (sResult<>"")
+  ;
+  ;Beladen ueber Komfortbedienfeld am Magazin
+  ;
+  ;Beladen ins Magazin
+  IDS=6 EVERY ($AC_TC_TNO>0)AND($AC_TC_FCT==1)AND($AC_TC_MFN==9999)AND($AC_TC_LFN==3)AND($AC_TC_MTN<9998) DO $A_DBW[iMx]=mcTaskLoadMag $A_DBW[iMx+4]=$AC_TC_FCT $A_DBW[iMx+6]=$AC_TC_TNO $A_DBW[iMx+8]=$AC_TC_MFN $A_DBW[iMx+10]=$AC_TC_LFN $A_DBW[iMx+12]=$AC_TC_MTN $A_DBW[iMx+14]=$AC_TC_LTN $A_DBW[iMx+16]=$AC_TC_MFO $A_DBW[iMx+18]=$AC_TC_LFO $A_DBW[iMx+20]=$AC_TC_MTO $A_DBW[iMx+22]=$AC_TC_LTO $A_DBW[iMx+24]=1 $A_DBW[iMx+2]=1
+  ;
+  ;Entladen aus Magazin
+  IDS=7 EVERY ($AC_TC_TNO>0)AND($AC_TC_FCT==1)AND($AC_TC_MTN==9999)AND($AC_TC_LTN==3)AND($AC_TC_MFN<9998) DO $A_DBW[iMx]=mcTaskUnLoadMag $A_DBW[iMx+4]=$AC_TC_FCT $A_DBW[iMx+6]=$AC_TC_TNO $A_DBW[iMx+8]=$AC_TC_MFN $A_DBW[iMx+10]=$AC_TC_LFN $A_DBW[iMx+12]=$AC_TC_MTN $A_DBW[iMx+14]=$AC_TC_LTN $A_DBW[iMx+16]=$AC_TC_MFO $A_DBW[iMx+18]=$AC_TC_LFO $A_DBW[iMx+20]=$AC_TC_MTO $A_DBW[iMx+22]=$AC_TC_LTO $A_DBW[iMx+24]=1 $A_DBW[iMx+2]=1
+  ;
+ENDIF
+
+;Sonstiges:
+;----------
+;Anwenderzustimmung abfragen und dig. Ausgang / TimeOut Inkrement
+IDS=10 DO OUT_UsrAcknAxisXYZ=(($$MA_SAFE_ACKN[mcAxX]==172)AND($$MA_SAFE_ACKN[mcAxY]==172)AND($$MA_SAFE_ACKN[mcAxZ]==172)) SYG_IM[iSx+3]=((($A_DBB[5] B_AND 1)<>0)AND(($A_DBB[6] B_AND 2)<>0)AND($A_DBB[76]==0)) $A_DBB[48]=($AC_STAT)
+
+sAux=""  mcActPosDGRot=0.0 OUT_DGRotInBasePos=FALSE OUT_DGRotInTcPos=FALSE OUT_DGRotInHomeArea=FALSE
+IF (gbDGIsNcAxis)
+  ;
+  ;Modulowert aus Istwert der Rundachsen $VA..kann mehrere Umdrehungen und negative Werte anzeigen
+  sAux=" mcActPosDGRot=((($VA_IM[mcAxDGRot] MOD 360)+360) MOD 360)"
+  ;
+  IF (gbDGIsNc2Axis)
+    ;
+    ;Istpositionen CT1-/WT1-Achse an PLC melden
+    sAux=sAux<<" $A_DBR[132]=$VA_IM[mcAxDGLin]"
+  ENDIF
+  ;
+  IDS=12 DO OUT_DGRotInBasePos=((mcActPosDGRot>360.0-grPosWinDGRot)OR(mcActPosDGRot<grPosWinDGRot)OR((ABS(mcActPosDGRot-grHomePos2DGRot)<grPosWinDGRot)AND(gbDGLinIsCurve))) OUT_DGRotInTcPos=((ABS(mcActPosDGRot-grHor1DGRot)<=grPosWinDGRot)OR(ABS(mcActPosDGRot-grHor2DGRot)<=grPosWinDGRot)) OUT_DGRotInHomeArea=((mcActPosDGRot<=(0.0+grHomePosWindow))OR(mcActPosDGRot>=(360.0-grHomePosWindow)))
+ELSE
+  ;
+  IF (gbWithDG)
+    ;
+    IDS=12 DO OUT_DGRotInBasePos=(($A_DBB[4] B_AND 'B11')=='B1') OUT_DGRotInTcPos=(OUT_DGRotInBasePos) OUT_DGRotInHomeArea=(OUT_DGRotInBasePos)
+  ENDIF
+ENDIF
+;
+IF (gbWithFacingHead)
+  ;
+  ;Planzugachse in TCPosFH (fuer TC_BS)
+  sAux=sAux<<" SYG_BM[iSx+7]=(ABS($VA_IM[mcAxFH]-grTCPosFH)<rc0x1mm)"
+ENDIF
+;
+IF (sAux<>"")
+  EXECSTRING("IDS=11 WHENEVER mcbDBB_DrivesOK DO"<<sAux)
+ENDIF
+;
+IF (sMCType=="NBH1200")
+  ;
+  ;Istposition QP1/QP2-Achse an PLC melden
+  IDS=13 DO $A_DBR[136]=$AA_IM[QP1] $A_DBR[140]=$AA_IM[QP2]
+ENDIF
+
+;Arbeitsraumueberwachung
+;-----------------------
+WaMon
+
+;Netzausfall
+;-----------
+CANCEL(210,211)
+;
+;Umgehung fuer Zugriffsfehler beim Hochlauf
+$A_DBB[82]=$A_OUT[18]
+;
+;Antrieb p864 BICO 1:2091.1 (Digitaler Ausgang $A_OUT[18]
+;$A_IN[24]= Signaleingang Phasenfehler detektiert extern
+;$A_IN[24]= ALM 863.2
+;
+;Wenn Netzausfall erkannt -> Setze Merker und Achssperre mit OVR
+IDS=210 WHENEVER ($A_IN[24]==1)OR($A_DBB[82]==1) DO $A_DBB[82]=1 $AC_OVR=0 $AA_OVR[mcAxX]=0 $AA_OVR[mcAxY]=0 $AA_OVR[mcAxZ]=0
+;
+;ALM nicht im Normalbetrieb / No Masterspindel fuer PLC / ...
+IF (sMNType=="D")AND(gbWithMagPanel)
+  ;...Wartezeit Scheibe Zurueck
+  sAux=" SYG_IM[iSx+19]=(mcDBW_WaitDiskRetract>0) mcDBW_WaitDiskRetract=MAXVAL(1,mcDBW_WaitDiskRetract-1)*(SYG_IM[iSx+19])"
+ELSE
+  sAux=""
+ENDIF
+EXECSTRING("IDS=211 DO $A_OUT[18]=(NOT $A_IN[24])OR($A_DBB[82]==1) $A_DBB[46]=$AC_MSNUM mcDBR_Time=$AC_CYCLE_TIME"<<sAux)
+
+;LoadCase
+;--------
+CFG_MAN("LOADCASE",sResult)
+IF (sResult<>"")
+  ;
+  iLC_Error=0 sFName="LC_INIT" sCFGProgName=scCMADir<<sFName<<scSPF
+  IF ISFILE(sCFGProgName)
+    ;
+    LC_INIT(iLC_Error)
+    ;
+    IF (iLC_Error<>0)
+      iAlarmNo=iLC_Error sAlarmParam=""
+      GOTOF HandleAlarm
+    ENDIF
+  ELSE
+    iAlarmNo=AL_ProgNotFound67 sAlarmParam=sFName
+    GOTOF HandleAlarm
+  ENDIF
+ENDIF
+;
+;====
+ENDE:
+;====
+;
+;NC-Initialisierung erfolgreich
+OUT_StartUpFinished1=TRUE
+;
+GOTOF ENDE_1
+
+;===========
+HandleAlarm:
+;===========
+;
+OUT_StartUpFinished1=FALSE
+;
+;======
+ENDE_1:
+;======
+;
+MSG("")
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+M30
+

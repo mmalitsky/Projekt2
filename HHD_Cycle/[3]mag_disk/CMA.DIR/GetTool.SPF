@@ -1,0 +1,192 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetTool.SPF
+;# Task:      Wz aus Kassette Holen
+;# Version:   V06.00.06
+;# Date:      26.04.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1000
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.06 - 26.04.2017 / Simons
+; - bFast, rDiskInPos hinzu
+; - WHILE (NOT ...) -> WHENEVER (NOT...) DO RDISABLE
+; - HandleAlarm->ENDE
+; - formale Aenderungen
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neue Versionierung
+;
+; V06.00.03 - 17.05.2016 / Simons
+; - Neue Versionierung
+;
+; V04.00.00 - 06.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Leeren Mag.-Platz auf WzW-Pos. fahren
+; Leeren Mag.-Platz auf Beladepos. fahren
+;
+; Eingangsparameter:
+; bNoAlarm:   true=Im Fehlerfalle kein Alarm, aber Programmaussprung
+; iTNo:       Werkzeugnummer des zu greifenden Werkzeugs
+; iMagNo:     Magazin-Nummer Ziel
+;             <9998: Leeres HG an Platz im Magazin fahren: HG gehoben, vertikal und geloest
+;             =9998: Leeres HG in HG-WzW-Position fahren: HG gehoben, horizontal und geloest
+;             =9999: Leeres HG in Wkz-Beladeposition fahren: HG gehoben, horizontal und geloest (nicht bei CassMag)
+; iPotNo:     Platz-Nummer Ziel
+;
+;------------------------------------
+
+PROC GetTool(BOOL bNoAlarm, INT iTNo, INT iMagNo, INT iPotNo, BOOL bFast)
+
+DEF STRING[32] sCycName="GetTool V06.00.06", sAlarmParam=""
+;
+DEF BOOL bToMag, bToTC, bToLoad, bHgHomeReq, bAxInPos, bDiskAdvanced, bDiskRetracted
+;
+DEF INT iAlarmNo=0
+;
+DEF REAL rNewPosV1, rActPosV1, rTCPosV1, rLoadPosV1, rVeloV1, rDiskInPos
+
+rVeloV1=360*($MA_POS_AX_VELO[mcAxV1]) rTCPosV1=grPlDatPosV1[0] rLoadPosV1=grPlDatPosV1[1] rDiskInPos=$MA_STOP_LIMIT_FINE[mcAxV1]
+
+IF (iMagNo<=0)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998)AND(iMagNo<>9999))
+  ;NewCaNr=9998 und 9999 zulassen (s. Beschreibung Eingangspar.)
+  iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iMagNo
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo==giMagNoLoadList)AND(giMagNoLoadList>0)
+  iAlarmNo=AL_LoadListNotTarget sAlarmParam=<<iMagNo
+  GOTOF ENDE
+ENDIF
+;
+IF (iMagNo>=1)AND(iMagNo<=giNumRealMag)
+  ;
+  IF (iPotNo<1)OR(iPotNo>giNumPlacesInMag[iMagNo])
+    iAlarmNo=AL_InvalidPlNr sAlarmParam=<<iPotNo
+    GOTOF ENDE
+  ENDIF
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+;Status Scheibe
+;--------------
+rActPosV1=$AA_IM[mcAxV1] bHgHomeReq=(IN_HgHome) bAxInPos=($AA_STAT[mcAxV1]==4) bDiskAdvanced=(mcbDBB_DiskAdvanced) bDiskRetracted=(mcbDBB_DiskRetracted)
+
+;Aufgabe erkennen
+;----------------
+bToMag=((iMagNo>=1)AND(iMagNo<=giNumRealMag))
+bToTC=((iMagNo==9998)AND(iPotNo==1))
+bToLoad=((iMagNo==9999)AND(iPotNo>1))
+
+IF (bToTC)
+  ;
+  IF (ABS(rActPosV1-rTCPosV1)>rDiskInPos)
+    ;
+    IF (NOT bDiskAdvanced)
+      ;
+      M_TcDiskAdv1
+      ;
+      bDiskRetracted=FALSE
+    ENDIF
+    ;
+    GETD(mcAxV1)
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    ;Scheibe Leerplatz in WzWPosition
+    COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rTCPosV1
+  ENDIF
+  ;
+  IF (NOT bDiskRetracted)
+    M_TcDiskRet1
+  ENDIF
+  ;
+  STOPRE
+  ;Leerer Magazinplatz in Wechselposition
+  giMagState=10
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToLoad)
+  ;
+  IF (giMagState>0)
+    ;
+    IF (ABS(rActPosV1-rLoadPosV1)>rDiskInPos)
+      ;
+      IF (NOT bDiskAdvanced)
+        ;
+        M_TcDiskAdv1
+        ;
+        bDiskRetracted=FALSE
+      ENDIF
+      ;
+      GETD(mcAxV1)
+      ;
+      IF (NOT bAxInPos)
+        ;
+        WHENEVER ($AA_STAT[mcAxV1]<>4) DO RDISABLE
+        STOPRE
+      ENDIF
+      ;
+      ;Scheibe Leerplatz in Beladeposition
+      COARSEA[mcAxV1] FA[mcAxV1]=rVeloV1 POS[mcAxV1]=rLoadPosV1
+    ENDIF
+  ENDIF
+  ;
+  IF (NOT bDiskRetracted)
+    M_TcDiskRet1
+  ENDIF
+  ;
+  STOPRE
+  ;Leerer Magazinplatz in WzBeladeposition
+  giMagState=50
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToMag)
+  ;
+  GOTOF ENDE
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RELEASE(mcAxV1)
+;
+IF (bHgHomeReq)
+  ;PLC auffordern, $A_IN[..] zurueckzunehmen
+  M_HgHomeFinished0
+ENDIF
+;
+IF (NOT bNoAlarm)AND(iAlarmNo>0)
+  ;
+  MSG("")
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+ENDIF
+;
+RET
+

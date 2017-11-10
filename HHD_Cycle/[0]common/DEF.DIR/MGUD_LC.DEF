@@ -1,0 +1,81 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MGUD_LC.DEF
+;# Task:      LoadCase
+;# Version:   V06.00.05
+;# Date:      05.01.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 630
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;Beschreibung:
+;
+; Globale Anwenderdaten Loadcase   
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.05 - 05.01.2017 / Simons
+; - Neuversionierung
+; - giLCSpecialDrvData hinzu
+;
+; V01.01    - 10.10.2013 / Fengler
+; - Vorlage
+;
+;-------------------------------------
+
+APR 11 APW 11
+
+;Variablen für POS-Programm
+DEF NCK REAL grLCLoadLimit
+DEF NCK REAL grLCLoadTimeLim
+DEF NCK REAL grLCStdValKV
+DEF NCK REAL grLCStdValAxAcc
+DEF NCK INT giLCAxisIdent
+DEF NCK AXIS gaxLCAxName
+
+;Variablen für die Tangenten / Berechnung des Lastfalls
+DEF NCK REAL grLCTorqueMin
+DEF NCK REAL grLCTorqueMax 
+DEF NCK REAL grLCTorqueLim
+DEF NCK REAL grLCAccMin 
+DEF NCK REAL grLCAccMax
+DEF NCK REAL grLCAccZero1
+DEF NCK REAL grLCAccZero2
+DEF NCK REAL grLCAccDenom1
+DEF NCK REAL grLCAccDenom2
+DEF NCK REAL grLCKv1
+DEF NCK REAL grLCKv2
+DEF NCK REAL grLCKv3
+DEF NCK REAL grLCKvCal
+DEF NCK REAL grLCTLimKv21
+DEF NCK REAL grLCTLimKv32
+DEF NCK REAL grLCFeedNom
+DEF NCK BOOL gbLCCheckAxis
+ 
+;Allgemeine Variablen
+DEF NCK BOOL gbLCUserRun
+
+DEF NCK STRING[99] gsLCActProgName  ;aktive Dynamik für Programm
+DEF NCK INT giLCActPal  ;aktive Dynamik für Palettenplatz
+DEF NCK BOOL gbLCAutoDelete
+;neu 
+DEF NCK REAL grLCJerkMin
+DEF NCK REAL grLCJerkMax
+DEF NCK REAL grLCStdValJerk
+;neuer	
+DEF NCK INT giLCStdDrvData     ;Standard Antriebsdatensatz (IBN)
+DEF NCK INT giLCNoPalDrvData   ;Antriebsdatensatz für keine Palette			
+DEF NCK INT giLCDrvDataHFctNo  ;H-Funktion für Antriebsdatensatzanwahl	
+DEF NCK INT giLCSpecialDrvData ;Antriebsdatensatz Sonderpallette
+
+DEF NCK AXIS gaxLCSideAxis             ;Neben-Achse (Z-Achse)
+DEF NCK REAL grLCTorqLimSideAxInflu    ;Drehmomentengrenze für Ruckbeeinflussung der Neben-Achse (Z-Achse) (0->keine Beienflussung)
+DEF NCK REAL grLCSideAxStdValJerk      ;Standardwert für Ruck der Neben-Achse (Z-Achse) (IBN)
+DEF NCK REAL grLCSideAxJerk            ;Ruckanpassung bei max. Auslastung(B-Achse) der Neben-Achse (Z-Achse)
+
+M30

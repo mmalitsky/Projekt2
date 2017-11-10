@@ -1,0 +1,229 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TstStop2.SPF
+;# Task:      TestStopp Kanal 2
+;# Version:   V06.00.08
+;# Date:      23.10.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: Flat,Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 23.10.2017 / Simons
+; - MovASync
+;
+; V06.00.08 - 20.07.2017 / Simons
+; - Neuversionierung
+; - Stellungsueberpruefung HG mit differenzierten Alarmen
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - FreeHG -> MoveAsync
+; - formale Aenderungen
+;
+; V06.00.05 - 21.09.2016 / Simons
+; - Neuversionierung
+; - HHD TM (04.02.00 / April 2016, Balles)
+;
+; V04.00.00 - 26.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Teststop mit Bremsentest im Kanal 2
+;
+;------------------------------------
+
+PROC TstStop2(INT iMode)
+
+DEF STRING[32] sCycName="TstStop2 V06.00.07", sAlarmParam=""
+;
+DEF INT iAlarmNo=0
+;
+DEF REAL rVeloX, rVeloZ
+
+rVeloX=$MA_POS_AX_VELO[mcAxX1] rVeloZ=$MA_POS_AX_VELO[mcAxZ1]
+
+;bewusster Vorlauf-Stop
+STOPRE
+
+IF (NOT $P_SUBPAR[1])
+  iMode=0
+ENDIF
+
+IF ($P_SEARCH)OR($P_SIM) GOTOF ENDE
+
+IF ($P_CHANNO<>2) GOTOF ENDE
+
+;- Schritt 1-
+;------------
+;
+;Magazinstatus herstellen
+GetMagSt
+;
+STOPRE
+IF ($TC_MPP6[9998,mcLocHG]>0)
+  ;
+  ;Wz im HG
+  ;
+  ;HG erst leerfahren nur Auftrag an Kanal 2 (asynchron) absetzen und Zyklus verlassen
+  ;
+  MovAsync("0")
+  ;
+  ;MoveAsync im Kanal 2 (!!) wartet nicht auf Vollzug, da ja der Kanal 2 zugleich der Ausfuehrende ist.
+  ;Erst wenn der NC-Zyklus <TestStop> verlassen wird, kommt Sys_Cha2.spf wieder zum
+  ;Zuge und kann den zuvor abgesetzten fuer Kanal 2 bestimmten Auftrag aufgreifen. Nach
+  ;dessen Ausfuehrung verzweigt die Stelle (in Sys_Cha2.spf), an der abgefragt wird, ob Teststop
+  ;angefordert ist, wieder in den NC-Zyklus <Teststop> und fuehrt dann die geforderten Achsbewegungen aus.
+  ;solange im HG (noch) ein Wz ist aussteigen, um dieses wegbringen zu koennen
+  GOTOF ENDE
+ENDIF
+;
+;HG ist leer
+;
+MSG(MSG_TestStopRunning)
+;
+IF (OUT_ComeInTC)
+  ;
+  ;HG im Einlaufbereich fuer WzW
+  ;
+  IF ($TC_MPP6[9998,mcLocDG1]>0)OR($TC_MPP6[9998,mcLocDG2]>0)
+    iAlarmNo=AL_DGNotEmpty
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  IF (gbMagWithFixedGuide)
+    IF ((NOT mcbDBB_HGVertical)OR(NOT mcbDBB_HGLowered))
+      iAlarmNo=AL_HgNotLoweredVert
+      GOTOF HandleAlarm
+    ENDIF
+  ELSE
+    IF (NOT mcbDBB_HGHorizontal)OR(NOT mcbDBB_HGLifted)
+      iAlarmNo=AL_HGNotLiftedHoriz
+      GOTOF HandleAlarm
+    ENDIF      
+  ENDIF
+  ;
+  IF (NOT mcbDBB_DGHorizontal)
+    iAlarmNo=AL_DgNotInBasePos
+    GOTOF HandleAlarm
+  ENDIF
+  ;
+  ;Status: HG leer/gehoben sowie DG leer/horizontal
+  ;
+  IF (NOT mcbDBB_HGClamped)
+    M_HgClamp1
+  ENDIF
+  ;
+  ;Leeres HG herausfahren
+  FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+  ;
+  M_HgVertical1
+  ;
+  IF (gbMagWithFixedGuide)
+    ;
+    STOPRE
+    ;Leeres HG vertikal gesenkt
+    giMagState=40
+    ;
+  ELSE
+    M_HgLift1
+    ;
+    STOPRE
+    ;Leeres HG vertikal gehoben
+    giMagState=30
+    ;
+  ENDIF
+ELSE
+  ;
+  IF (NOT mcbDBB_HGLifted)OR(NOT mcbDBB_HGHorizontal)
+    ;
+    IF (NOT mcbDBB_HGUnClamped)
+      M_HgUnclamp1
+    ENDIF
+    ;
+    IF (NOT mcbDBB_HGLifted)
+      M_HgLift1
+    ENDIF
+    ;
+    STOPRE
+    ;Leeres HG vertikal gehoben
+    giMagState=30
+    ;
+  ENDIF
+ENDIF
+;
+;an Kanal 1: Kanal2-Achsen haben Teststop-Position erreicht
+giStepTeststop=4
+
+;-Schritt 2-
+;-----------
+;
+;warten, bis Kanal 1 Teststop mit Bremsentest beendet hat
+REPEAT
+  G4 F0.1
+  STOPRE
+UNTIL (giStepTeststop==5)
+
+;-Schritt 3-
+;-----------
+STOPRE
+;Start Teststop (mit Bremsentest)
+M299
+;
+STOPRE
+;Warten auf Teststop-Ende
+M296
+STOPRE
+;
+;der von Kanal 1 geforderte Teststop wurde von Kanal 2 ausgefuehrt
+giStepTestStop=6
+
+;-Schritt 4-
+;-----------
+WHILE (giStepTestStop>0)
+  ;
+  ;warten, bis Kanal 2 Teststop beendet hat
+  G4 F0.1
+  STOPRE
+ENDWHILE
+
+;Falls kein Werkzeug im HG, HG wieder loesen
+IF (giTNoHg==0)AND(giMagState==30)
+  ;
+  IF (NOT mcbDBB_HGUnClamped)
+    M_HgUnclamp1
+  ENDIF
+ENDIF
+;
+MSG("")
+;
+;====
+ENDE:
+;====
+;
+M17
+
+;===========
+HandleAlarm:
+;===========
+;
+MSG("")
+;
+giStepTestStop=0
+;
+IF (iAlarmNo>0)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+M17
+
+

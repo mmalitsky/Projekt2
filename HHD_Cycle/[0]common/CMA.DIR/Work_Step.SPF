@@ -1,0 +1,75 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     TCWP.SPF
+;# Task:      Move to Work Piece
+;# Version:   V06.00.07
+;# Date:      13.06.2017 / Simons
+;# Control:   840DSL Operate/Advanced
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 13.06.2017 / Simons
+; - Neuversionierung
+; - bProgCall hinzu
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.04 - 26.08.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.01 - 17.06.2014 / Trappmann
+; - Vorlage
+;
+;------------------------------------
+
+PROC Work_Step(INT iWorkStep)
+
+DEF STRING[32] sCycName="Work_Step V06.00.07", sResult
+;
+DEF BOOL bMultiProg, bAPCInPos, bProgCall
+;
+DEF INT iBuf, iActPosAPC
+
+IF (NOT $P_SIM)
+  ;
+  CFG_MAN("MPS_HOST",sResult)
+  ;
+  bMultiProg=(sResult<>"") bProgCall=OUT_SysPrgActive bAPCInPos=(IN_APCInPos)
+  ;
+  IF (BufNo>0)AND(BufNo<18)AND(bProgCall)
+    ;
+    iBuf=BufNo
+  ELSE
+    ;
+    IF (NOT bAPCInPos)
+      M91
+    ENDIF
+    bAPCInPos=(IN_APCInPos) iActPosAPC=(INA_APCPos)
+    ;
+    IF (NOT bAPCInPos)OR(iActPosAPC==0)
+      SETAL(AL_APCNotInBasePos)
+    ELSE
+      iBuf=giPal_BufNo[iActPosAPC]
+    ENDIF
+  ENDIF
+  ;
+  IF (bMultiProg)
+    ;
+    ;mit Leitrechner
+    giMPSWorkStep[giMPSActivProg]=iWorkStep
+  ELSE  
+    giMMC_Pal[2,iBuf]=iWorkStep
+  ENDIF
+ENDIF
+;
+Working_Step=iWorkStep
+;
+RET

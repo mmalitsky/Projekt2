@@ -1,0 +1,71 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     Work_Break.SPF
+;# Task:      <Abgebrochen> Setzen
+;# Version:   V06.00.04
+;# Date:      26.08.2016 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.04 - 26.08.2016 / Simons
+; - Neuversionierung
+;
+; V04.00.01 - 17.06.2014 / Trappmann
+; - Vorlage
+;
+;--------------------------------------
+
+PROC Work_Break(INT iStatus)
+
+DEF STRING[32] sResult
+;
+DEF INT iBuf, iActPosAPC
+;
+DEF BOOL bMultiProg, bAPCinBasePos
+
+IF ($P_SEARCH)
+  M17
+ENDIF
+
+IF (NOT $P_SIM)
+  ;
+  CFG_MAN("MPS_HOST",sResult)
+  ;
+  bMultiProg=(sResult<>"")
+  ;
+  IF (BufNo>0)AND(BufNo<18)AND(OUT_SysPrgActive)
+    iBuf=BufNo
+  ELSE
+    ;
+    M91
+    ;
+    bAPCinBasePos=(IN_APCInPos) iActPosAPC=(INA_APCPos)
+    ;
+    IF (NOT bAPCinBasePos)OR(iActPosAPC==0)
+      ;Palettenwechsel laeuft noch
+      SETAL(AL_APCNotInBasePos)
+    ELSE
+      iBuf=giPal_BufNo[iActPosAPC]
+    ENDIF
+  ENDIF
+  ;
+  IF (bMultiProg)
+    giMPSWorkState[giMPSActivProg]=3
+  ENDIF
+  ;
+  IF (NOT bMultiProg)OR(iStatus==1)
+    giMMC_Pal[1,iBuf]=3
+  ENDIF
+ENDIF
+;
+Pal_Status=3
+;
+M17
+

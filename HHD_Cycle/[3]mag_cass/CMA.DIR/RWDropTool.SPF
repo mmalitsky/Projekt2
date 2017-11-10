@@ -1,0 +1,227 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     RWDropTool.SPF
+;# Task:      Wz ablegen 
+;# Version:   V06.00.08
+;# Date:      28.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: Cassette
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 28.08.2017 / Simons
+; - Neuversionierung
+; - grSyncPickupDrop verlagert
+; - formale Aenderung
+;
+; V06.00.07 - 05.06.2017 / Simons
+; - Neuversionierung
+; - Einfuehrung MakeAlarmParam
+;
+; V06.00.06 - 28.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickupDrop-> grSyncPickupDrop
+; - formale Aenderungen
+;
+; V06.00.05 - 02.10.2016 / Simons
+; - Neuversionierung
+; - OEM_...
+;
+; V04.02.00 - Juni 2016, Balles
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Sonderzyklus insbesondere fuer den Einsatz in Verbindung mit Wz-Codetraegersystem
+; HG anweisen, das kurz zuvor koerperlich gegriffene, aber moeglicherweise in der WzV
+; noch unbekannte Werkzeug auf dem mittels <iDestMagNo/iDestPotNo> spezifizierten Platz abzulegen
+;
+; Achtung: Koerperliches, aber nicht datentechnisches Ablegen des Wz's
+;
+; Eingangsparameter:
+; iToDo:      Kennung
+; iTNo:       interne T-Nummer des Werkzeuges (im HG)
+;             =0: Sonderfall "Wz koerperlich im HG", datentechnisch aber unbekannt (z.B. in Verbindung mit Balluff)
+;             >0: "Wz koerperlich im HG", datentechnisch an Hand der T-Nr bekannt
+; iDestMagNo,
+; iDestPotNo: Magazin-/Platz-Nr, ueber dem das HG momentan steht
+; bShowAlarm: Alarm auch anzeigen
+
+; Ausgangsparameter:
+; iAlarmNo:    die zum obigen Fehlercode projektierte NC-Alarmnummer
+; sAlarmParam: Zusatzinfo
+;
+; ACHTUNG:
+; - das betroffene Werkzeug muss sich (bereits) koerperlich im HG befinden
+; - im Sonderfall iTNo==0 muss das HG muss noch ueber dem Platz stehen, aus dem das Werkzeug stammt
+;
+;------------------------------------
+
+PROC RWDropTool(INT iToDo, INT iTNo, INT iDestMagNo, INT iDestPotNo, BOOL bShowAlarm, VAR INT iAlarmNo, VAR STRING[32] sAlarmParam)
+
+DEF STRING[32] sCycName="RWDropTool V06.00.08", sTmp
+;
+DEF BOOL bRestore=FALSE, bTMSyncOld
+;
+DEF INT iTmpMagNo, iTmpLocNo, iOldMagNo, iOldPotNo, iChkRes, iTMSyncOld
+
+iAlarmNo=0 sAlarmParam=""
+;
+STOPRE
+;
+IF (iTNo>0)
+  ;
+  IF (iTNo==$TC_MPP6[9998,mcLocHG])
+    ;
+    ;Platzpruefung, 1= keine Leerplatzsuche, falls Platz ungeeignet
+    chkTlLoc(1,iTNo,iDestMagNo,iDestPotNo,iTmpMagNo,iTmpLocNo,iAlarmNo,sAlarmParam)
+    ;
+    IF (iAlarmNo<>0)OR(iTmpMagNo<=0)OR(iTmpLocNo<=0)OR(iTmpMagNo>giNumRealMag)OR(iTmpMagNo<>iDestMagNo)OR(iTmpLocNo<>iDestPotNo)
+      ;
+      ;iAlarmNo>0 oder Platz lt. Kollisionsueberpruefung nicht geeignet
+      ;
+      ;Wz koerperlich und datentechnisch noch im HG
+      iTmpMagNo=0 iTmpLocNo=0
+      ;
+      IF (gbTMIsHHD)
+        giStateToMMC[1]=(iDestMagNo*1000+iDestPotNo)*1000+mcState2ErrTLocNotQualified
+      ENDIF
+      ;
+      ;bewusst Bedienerhinweis vor der Ausgabe des chkTlLoc-Alarms
+      MakeAlarmParam(sTmp,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+      SETAL(AL_RemoveTlFromHG67,sTmp)
+      IF (iAlarmNo<=0)
+        ;chkTlLoc zwar fehlerfrei, aber ungueltige Werte fuer zurueckgegebene iTmpMagNo/iTmpLocNo
+        iAlarmNo=AL_TargetLocNotQualified67 iAlarmNoShown=0 sAlarmParam=sTmp
+      ENDIF
+      ;
+      ;Abbruch, da Wz auf Platz nicht abgelegt werden kann
+      GOTOF ENDE
+    ENDIF
+    ;
+    iDestMagNo=iTmpMagNo iDestPotNo=iTmpLocNo
+    ;
+    ;Platzdaten fuer abzulegendes Werkzeug ermitteln
+    GetTlLoc(1,iTNo,iOldMagNo,iOldPotNo)
+    IF (iDestMagNo==iOldMagNo)AND(iDestPotNo==iOldPotNo)
+      ;
+      ;Zielplatz = Altplatz
+      ;
+      GetPlDat(0,0,iDestMagNo,iDestPotNo)
+    ELSE
+      ;
+      ;Auf neuen Platz setzen
+      ;
+      GetPlDat(iOldMagNo,iOldPotNo,iDestMagNo,iDestPotNo)
+    ENDIF
+    ;
+    ;Warten, bis Teilmagazin vorhanden/eingefahren/nicht gesperrt:
+    ;1: Warten auf Cassette vorhanden/nicht gesperrt;  Puffer 1
+    ChkSwitch(1, iDestMagNo, iDestPotNo, 1, iChkRes)
+    IF (iChkRes<0)
+      sAlarmParam=<<iDestMagNo
+      IF (iChkRes==-1)
+        iAlarmNo=AL_CassIsMissing
+      ELSE
+        IF (iChkRes==-2)
+          iAlarmNo=AL_CassIsLocked
+        ENDIF
+      ENDIF
+      GOTOF ENDE
+    ENDIF
+    ;
+    OEM_TlData(iTNo)
+    gbHGBigTl=OEM_bBigTlHG gbHGHeavyTl=OEM_bHeavyTlHG gbHGNoTapeCl=OEM_bSelHGNoTapeCl
+    ;
+    IF (giMagState>=80)
+      ;
+      ;HG im Bereich eines Magazinplatzes
+      ;
+      ;Status neu ermitteln/herstellen
+      GetMagSt
+    ENDIF
+    ;
+    ;Wz auf Magazinplatz ablegen
+    MovTool(mcTaskAS_Displace,iTNo,iDestMagNo,iDestPotNo,iAlarmNo,sAlarmParam)
+    ;
+  ELSE
+    MakeAlarmparam(sAlarmParam,$TC_TP2[iTNo],<<$TC_TP1[iTNo])
+    iAlarmNo=AL_WrongTlInHG67
+  ENDIF
+ELSE
+  ;
+  ;HG entladen
+  ;
+  IF (giMagState>=80)
+    ;
+    ;HG im Bereich eines Magazinplatzes
+    ;
+    ;Status neu ermitteln/herstellen
+    GetMagSt
+  ENDIF
+  ;
+  IF (giMagState==82)OR(giMagState==92)
+    ;
+    ;HG geklemmt vertikal gesenkt an Quell/Zielmagazinplatz
+    ;
+    ;wird zum Zielplatz
+    giMagState=92
+    ;
+    ;Wz ablegen auf den Platz, wo das HG gerade steht
+    MovTool(mcTaskAS_Drop,0,iDestMagNo,iDestPotNo,iAlarmNo,sAlarmParam)
+    ;
+  ELSE
+    iAlarmNo=AL_RemoveTlFromHG67
+  ENDIF
+ENDIF
+
+STOPRE
+giTNoHg=$TC_MPP6[9998,mcLocHG]
+
+IF (iAlarmNo>0) GOTOF ENDE
+
+IF (giTNoHg>0)
+  ;
+  ;Werkzeug datentechnisch (noch) im HG, koerperlich allerdings auf dem Platz
+  ;
+  ;Fuer den Fall, dass ToAckn scheitern sollte
+  bRestore=TRUE bTMSyncOld=OUT_ForceTMSync iTMSyncOld=giForceTMSync OUT_ForceTMSync=TRUE giForceTMSync=0
+  ;
+  ;asychron umspeichern: HG->Ca
+  ToAckn(TRUE,5,2,giTNoHg,giTNoHg,iDestMagNo,iDestPotNo,9998,mcLocHG,1)
+  ;
+  giTNoHg=$TC_MPP6[9998,mcLocHG]
+ENDIF
+;
+IF (giTNoHg<=0)
+  ;
+  ;Leeres HG vertikal gehoben (nach erfolgreichem ToAckn muesste dies der Fall sein)
+  giMagState=30 grSyncPickupDrop=0 gbHGBigTl=FALSE gbHGHeavyTl=FALSE gbHGNoTapeCl=FALSE
+  ;
+  IF (bRestore)
+    OUT_ForceTMSync=bTMSyncOld giForceTMSync=iTMSyncOld
+  ENDIF
+ENDIF
+;
+IF (OUT_ForceTMSync)OR(giForceTMSync<>0)
+  iAlarmNo=AL_PleaseSyncFirst sAlarmParam=""
+  GOTOF ENDE
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (iAlarmNo>0)AND(bShowAlarm)
+  SETAL(iAlarmNo, sAlarmParam)
+ENDIF
+;
+RET

@@ -1,0 +1,212 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_VAL.SPF
+;# Task:      LoadCase Ueberwachung
+;# Version:   V06.00.07
+;# Date:      04.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-630
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 04.06.2017 / Simons
+; - Neuversionierung
+; - 13479031 hinzu
+;
+; V06.00.05 - 05.01.2017 / Simons
+; - Neuversionierung
+; - giLCSpecialDrvData hinzu, giLCDrvDataHFctNo=0
+;
+; V06.00.04 - 12.08.2016 / Simons
+; - Neuversionierung
+; - LC_VAL.SPF -> CMA.DIR
+;
+; V01.06.01  - 28.01.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Wertevorbesetzung für die jeweiligen Achsen
+; Unterstuetzt folgende Achsen mit Torque-Antrieben:
+; Die Achse wird in der Variable giLCAxisIdent[x] im POS-Programm definiert.
+; (giLCAxisIdent=12605106 entspricht dabei A.1260.5106)
+;
+; Wird aufgerufen durch ...
+;   ... Nc_Init1.spf beim NC-/PLC-Neustart
+;
+;-------------------------------------
+
+PROC LC_VAL
+
+;Alle Werte vor dem Zuweisen zurücksetzen
+;----------------------------------------
+gaxLCAxName   = mcAxB ; Achsname
+gbLCCheckAxis = FALSE ;TRUE -> Index enthält Werte
+;
+grLCTorqueMin = 0 ;[Nm] Minimaldrehmomentgrenze bei Minimallastfall
+grLCTorqueMax = 0 ;[Nm] Maximaldrehmomentgrenze bei Maximallastfall
+grLCTorqueLim = 0 ;[Nm] Drehmomentgrenze 1./2.Tangente
+grLCAccMin    = 0 ;[U/s²] Minimalbeschleunigung bei Maximallastfall (Default)
+grLCAccMax    = 0 ;[U/s²] Maximalbeschleunigung bei Minimallastfall
+;
+grLCAccZero1  = 0 ;[Nm] Nulldurchgang 1.Tangente (Torque<=TORQUE_LIM)
+grLCAccZero2  = 0 ;[Nm] Nulldurchgang 2.Tangente (Torque>TORQUE_LIM)
+grLCAccDenom1 = 0 ;Nenner Steigung 1.Tangente (Torque<=TORQUE_LIM)
+grLCAccDenom2 = 0 ;Nenner Steigung 2.Tangente (Torque>TORQUE_LIM)
+;
+grLCKv1       = 0 ;KV-Faktor 1 (Default)
+grLCKv2       = 0 ;KV-Faktor 2
+grLCKv3       = 0 ;KV-Faktor 3
+grLCTLimKv21  = 0 ;Drehmomentgrenze KV2/KV1
+grLCTLimKv32  = 0 ;Drehmomentgrenze KV3/KV2
+grLCFeedNom   = 360*$MA_MAX_AX_VELO[gaxLCAxName] ;Sollgeschwindigkeit (Eilgang) [Grad/min]
+;
+grLCLoadLimit   = 0 ;Überwachungsgrenze Auslastung [%]	
+grLCLoadTimeLim = 0 ;Zeitstufe Auslastungslimit [s]
+grLCStdValKV    = 0 ;Standardwert für KV-Faktor (IBN)
+grLCStdValAxAcc = 0 ;Standardwert für Ruck (IBN)
+;
+grLCJerkMin    = 0  ;[U/s³] Minimal-Ruck bei Maximallastfall (Default)
+grLCJerkMax    = 0  ;[U/s³] Maximal-Ruck bei Minimallastfall
+grLCStdValJerk = 0  ;Standardwert für Ruck (IBN)	
+;
+giLCStdDrvData    = 0 ;Standard Antriebsdatensatz (IBN)
+giLCNoPalDrvData  = 0 ;Antriebsdatensatz für keine Palette			
+giLCDrvDataHFctNo = 0 ;H-Funktion für Antriebsdatensatzanwahl: 0-keine Anwahl
+giLCSpecialDrvData = 0 ;Antriebsdatensatz SonderPalette
+;
+gaxLCSideAxis = mcAxZ    ;Name der Drehtisch-Achse (Z-Achse)
+grLCTorqLimSideAxInflu=0 ;Ruckbeeinflussung bei Drehtisch-Achse (Z-Achse) (0->keine Beienflussung)
+grLCSideAxStdValJerk=0   ;Standardwert für Ruck der Drehtisch-Achse (Z-Achse) (IBN)
+grLCSideAxJerk=0         ;Ruckanpassung bei max. Auslastung(B-Achse) der Drehtisch-Achse (Z-Achse)
+
+;*************************************
+; A.1333.6944    Drehtisch NBH6/6+/630
+;*************************************
+IF (giLCAxisIdent==13336944)
+  ;
+  gbLCCheckAxis = TRUE
+  ;
+  grLCTorqueMin = 350
+  grLCTorqueMax = 1200
+  grLCTorqueLim = 550
+  grLCAccMin    = 1.22
+  grLCAccMax    = 7
+  ;
+  grLCAccZero1  = 15.83
+  grLCAccZero2  = 2.74 
+  grLCAccDenom1 = -39.77
+  grLCAccDenom2 = -790
+  ;	
+  grLCKv1       = 1
+  grLCKv2       = 1
+  grLCKv3       = 2
+  grLCTLimKv21  = 700
+  grLCTLimKv32  = 600
+  ;	
+  grLCLoadLimit   = 99 
+  grLCLoadTimeLim = 0.8
+  grLCStdValKV    = 1	
+  grLCStdValAxAcc = 1.22
+  ;	
+  grLCJerkMin    = 100
+  grLCJerkMax    = 100
+  grLCStdValJerk = 100	
+  ;	
+  giLCStdDrvData   = 1
+  giLCNoPalDrvData = 2 
+  ;
+  grLCTorqLimSideAxInflu = 0
+  grLCSideAxStdValJerk = 80
+  grLCSideAxJerk = 100
+ENDIF
+
+;**************************************************
+; A.1260.5106     Drehtisch NBH5 / NBH500 (B-Achse)
+;**************************************************
+IF (giLCAxisIdent==12605106)
+  ;
+  gbLCCheckAxis = TRUE
+  ;
+  grLCTorqueMin = 250
+  grLCTorqueMax = 600
+  grLCTorqueLim = 275
+  grLCAccMin    = 2
+  grLCAccMax    = 24
+  grLCAccZero1  = 150
+  grLCAccZero2  = 14
+  grLCAccDenom1 = -2
+  grLCAccDenom2 = -54
+  ;	
+  grLCKv1       = 1
+  grLCKv2       = 2
+  grLCKv3       = 3
+  grLCTLimKv21  = 500
+  grLCTLimKv32  = 400
+  ;	
+  grLCLoadLimit   = 95 
+  grLCLoadTimeLim = 0.8	
+  grLCStdValKV    = 1		
+  grLCStdValAxAcc = 2
+  ;
+  grLCJerkMin    = 100
+  grLCJerkMax    = 100
+  grLCStdValJerk = 100	
+  ;
+  giLCStdDrvData    = 1
+  giLCNoPalDrvData  = 2
+  ;
+  grLCTorqLimSideAxInflu = 0
+  grLCSideAxStdValJerk = 80
+  grLCSideAxJerk = 80
+ENDIF
+
+;**************************************************
+; A.1347.9031    Drehtisch NBH5 DL (B-Achse)
+;**************************************************
+IF (giLCAxisIdent==13479031)
+  ;
+  gbLCCheckAxis = TRUE
+  ;
+  grLCTorqueMin = 250
+  grLCTorqueMax = 600
+  grLCTorqueLim = 275
+  grLCAccMin    = 2
+  grLCAccMax    = 24
+  grLCAccZero1  = 150
+  grLCAccZero2  = 14
+  grLCAccDenom1 = -2
+  grLCAccDenom2 = -54
+  ;	
+  grLCKv1       = 1
+  grLCKv2       = 2
+  grLCKv3       = 3
+  grLCTLimKv21  = 500
+  grLCTLimKv32  = 400
+  ;	
+  grLCLoadLimit   = 95 
+  grLCLoadTimeLim = 0.8	
+  grLCStdValKV    = 1		
+  grLCStdValAxAcc = 2
+  ;
+  grLCJerkMin    = 100
+  grLCJerkMax    = 100
+  grLCStdValJerk = 100	
+  ;
+  giLCStdDrvData    = 1
+  giLCNoPalDrvData  = 2
+  ;
+  grLCTorqLimSideAxInflu = 0
+  grLCSideAxStdValJerk = 80
+  grLCSideAxJerk = 80
+ENDIF
+
+RET

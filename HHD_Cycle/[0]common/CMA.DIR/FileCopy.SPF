@@ -1,0 +1,397 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     FileCopy.SPF
+;# Task:      Kopiert NC Programme
+;# Version:   V06.00.07
+;# Date:      29.10.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 29.10.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.07 - 23.08.2017 / Simons
+; - Neuversionierung
+; - Auswertung von Filter- und Optionsabwahl hinzu
+;
+; V06.00.06 - 05.05.2017 / Simons
+; - Neuversionierung
+; - Leerzeichen entfernen (bTrim) hinzu
+; - formale Aenderungen
+;
+; V06.00.05 - 25.11.2016 / Simons
+; - Mit optionalen Leerzeilen, mit Abfrage auf nicht gesetzt
+;
+; V06.00.05 - 03.10.2016 / Simons
+; - Neuversionierung
+; - AddOptions hinzu
+;
+; V06.00.03 - 09.06.2016 / Simons
+; - Neuversionierung
+;
+; V01.00.00 - 16.06.2015 / Simons
+; - ProtoTyp / Neu
+;
+;-------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Kopiert das NCProgramm "sSourceName"
+; mit dem neuen Namen "sDestName".
+;
+; - "s...Name" enthalten die kompletten
+;   Pfadangaben.
+; - max.255 kopierte Zeichen pro Zeile
+; - ausreichende Zugriffsrechte
+;   fuer Quell- und Zieldatei
+; - Die gelesenen Saetze werden
+;   angehaengt
+; - Existiert die Datei noch nicht, wird
+;   sie angelegt
+;
+; Der Anfang des zu kopierende Bereichs wird
+; im Ursprungstext mit ";-[VW+XY]-" angegeben.
+; VW - Bereich
+; XY - kann optional zur Bereichseinschraenkung
+;      verwendet werden
+;
+; Sollen Zeilen innerhalb des spezifizierten Bereichs
+; nicht kopiert werden, so muessen diese gekennzeichnet werden.
+; Die Kennung muss sich am Anfang der Zeile befinden.
+; 1. "sFilterOFF" verhindert grundsaetzlich das Kopieren
+;    des folgenden Textes.
+; 2. "sAddOptions" ermoeglicht das optionale Kopieren
+;    bestimmter Zeilen. Diese werden durch "[sAddOptions]" gekennzeichnet.
+;    Der Optionsbezeichner wird nicht kopiert.
+;    Zeilen mit Optionen, die nicht in sAddOptions aufgelistet sind,
+;    werden ebenfalls nicht kopiert.
+;    Sollen alternative Zeilen eingeblendet werden, so sind die
+;    entsprechende Optionen anzugeben.
+;    Abfrage auf Option XYZ nicht gesetzt mit "NO_"XYZ
+;    Maximal 10 Optionen sind moeglich.
+;    Das Komma dient als Trennzeichen.
+;    ;
+;    Beispiel:
+;    ---------
+;    FileCopy(...,...,...,";#","VW","XY","OPTION1,NO_OPTION3")
+;
+;    Ursprungsstext:
+;    ---------------
+;    ...
+;    ;-[VW+XY]-
+;    ;# Interne Kommentarzeile
+;    ;# Interne Kommentarzeile
+;    ;Kommentar zu iTest1
+;    iTest1=0
+;    ;Kommentar zu iTest2
+;    [OPTION1] iTest2=1
+;    [OPTION2] iTest2=2
+;    ;
+;    ;Kommentar zu iTest3
+;    [OPTION3]    iTest3=1
+;    [NO_OPTION3] iTest3=0
+;    ;-[naechster Bereich]-
+;    ...
+;
+;    Kopie:
+;    ------
+;    ...
+;    ;Kommentar zu iTest1
+;    iTest1=0
+;    ;Kommentar zu iTest2
+;    iTest2=1
+;    ;
+;    ;Kommentar zu iTest3
+;    iTest3=0
+;
+; iError:
+;--------
+; Fehlermeldungen:
+; 0   = Kein
+; 1   = Pfad nicht erlaubt
+; 2/3 = Pfad/Datei nicht gefunden
+; 4   = Falscher DateiTyp
+; 11  = Datei wird benutzt
+; 12  = Nicht ausreichend Speicher
+; 13  = Fehlende Zugriffsrechte
+;
+; Schreibfehler haben einen Offset von 1000.
+;
+;-------------------------------------
+
+PROC FileCopy(VAR INT iError, STRING[128] sSourceName, STRING[128] sDestName, STRING[32] sFilterOFF, STRING[32] sOpt1, STRING[32] sOpt2, STRING[200] sAddOptions, BOOL bTrim) DISPLOF SBLOF
+
+DEF STRING[32] sCycName="FileCopy V06.00.08"
+;
+DEF STRING[10] sSepSign=",", sTAGON=";-[", sTAGOFF="]-", sTAGEND=";-[END]-", sTAGOptStart="[", sTAGOptEnd="]", sTmp
+DEF STRING[128] sAux1, sAux2, sOptionTmp
+DEF STRING[32] sAddOptionList[10]=REP("")
+DEF STRING[255] sAuxArr[255], sAux
+;
+DEF BOOL bEnde=FALSE, bFilterOFF=FALSE, bOpt1=FALSE, bOpt2=FALSE, bEnabled=TRUE, bBlockEnable=TRUE, bFilter=FALSE, bOption, bIsNo, bAddOptFnd, bOpt2Fnd
+;
+DEF INT icMaxBlocks=255, icMaxAddOptions=9, iBlock=1, iReadError=0, iWriteError=0, iAddOptionMax=0, iCount, iOptBegin, iOptEnd, iLenTAGON, iTAGENDFnd, iTmp, iAddOptionCount, iLenAddOption, iTextLen, iPosStart, iPosEnd
+
+IF (TOUPPER(sSourceName)==TOUPPER(sDestName))
+  RET
+ENDIF
+;
+iLenTAGON=STRLEN(sTAGON)
+;
+IF ($P_SUBPAR[4])
+  bFilterOFF=(sFilterOFF<>"") bFilter=TRUE
+ENDIF
+;
+IF ($P_SUBPAR[5])
+  bOpt1=(sOpt1<>"") bFilter=TRUE sOpt1=sSepSign<<TOUPPER(sOpt1)<<sSepSign
+ENDIF
+;
+IF ($P_SUBPAR[6])AND(bOpt1)
+  bOpt2=(sOpt2<>"") bFilter=TRUE sOpt2=sSepSign<<TOUPPER(sOpt2)<<sSepSign
+ENDIF
+
+IF ($P_SUBPAR[7])
+  ;
+  ;zusaetzliche Auswahlen
+  ;
+  IF (sAddOptions<>"")
+    ;
+    iCount=0 sAddOptions=sAddOptions<<sSepSign
+    WHILE (iAddOptionMax<=icMaxAddOptions)AND(iCount<STRLEN(sAddOptions))
+      ;
+      IF (sAddOptions[iCount]==sSepSign)
+        ;
+        sAddOptionList[iAddOptionMax]=TOUPPER(sAddOptionList[iAddOptionMax]) iAddOptionMax=(iAddOptionMax+1) bOption=TRUE
+      ELSE
+        ;
+        ;in Optionsliste eintragen
+        sAddOptionList[iAddOptionMax]=sAddOptionList[iAddOptionMax]<<sAddOptions[iCount] bOption=TRUE
+      ENDIF
+      iCount=iCount+1
+    ENDWHILE
+  ENDIF
+ENDIF
+
+WHILE (iBlock<(icMaxBlocks*255))AND(NOT bEnde)
+  ;
+  ;Vorbesetzen des Textfeldes, um die letzte NutzZeile zu erkennen
+  sAuxArr[0]=REP("*") bEnde=FALSE
+  ;
+  ;Liest max. 255 Zeilen mit max. Laenge von 255 Zeichen aus der Quelle in das Textfeld
+  READ(iReadError, sSourceName, iBlock, 255, sAuxArr)
+  ;
+  IF (iReadError==0)OR(iReadError>=21)
+    ;
+    iCount=0
+    WHILE (iCount<icMaxBlocks)AND(NOT bEnde)
+      ;
+      IF (bTrim)
+        ;
+        iTextLen=STRLEN(sAuxArr[iCount])
+        ;
+        IF (iTextLen>0)
+          ;
+          iTmp=0
+          REPEAT
+            IF (SUBSTR(sAuxArr[iCount],iTmp,1)<>" ") GOTOF _TRIM1
+            iTmp=iTmp+1
+          UNTIL (iTmp>=iTextLen)
+          ;
+          GOTOF _TRIM2
+          ;
+          ;======
+          _TRIM1:
+          ;======
+          ;
+          sAuxArr[iCount]=SUBSTR(sAuxArr[iCount],iTmp) iTextLen=STRLEN(sAuxArr[iCount])
+          ;
+          IF (iTextLen==0) GOTOF _TRIM_END
+          ;
+          ;======
+          _TRIM2:
+          ;======
+          ;
+          iTmp=iTextLen-1
+          REPEAT
+            IF (SUBSTR(sAuxArr[iCount],iTmp,1)<>" ") GOTOF _TRIM3
+            iTmp=iTmp-1
+          UNTIL (iTmp<0)
+          ;
+          GOTOF _TRIM_END
+          ;
+          ;======
+          _TRIM3:
+          ;======
+          ;
+          sAuxArr[iCount]=SUBSTR(sAuxArr[iCount],0,iTmp+1)
+          ;
+          ;=========
+          _TRIM_END:
+          ;=========
+          ;
+        ENDIF
+      ENDIF
+      ;
+      IF (bBlockEnable)AND(bFilter)
+        iTAGENDFnd=MATCH(sAuxArr[iCount],sTAGEND)
+      ELSE
+        iTAGENDFnd=-1
+      ENDIF
+      ;
+      bEnde=((sAuxArr[iCount]=="*")OR(iTAGENDFnd==0))
+      ;
+      IF (NOT bEnde)
+        ;
+        IF (iTAGENDFnd>0)
+          sAuxArr[iCount]=SUBSTR(sAux,0,iTAGENDFnd) bEnde=TRUE
+        ENDIF
+        ;
+        bEnabled=TRUE iTextLen=STRLEN(sAuxArr[iCount]) bIsNo=FALSE
+        ;
+        IF (bOpt1)
+          ;
+          iOptBegin=MATCH(sAuxArr[iCount],sTAGON) iOptEnd=MATCH(sAuxArr[iCount],sTAGOFF)
+          ;
+          IF (iOptBegin<iOptEnd)AND(iOptBegin>-1)
+            ;
+            ; ;-[VW+XY]- gueltiger Optionsstring
+            IF (iOptEnd>(iOptBegin+iLenTAGON))
+              ;
+              ; VW+XY - OptionsAnwahl
+              sAux=TOUPPER(SUBSTR(sAuxArr[iCount],iOptBegin+iLenTAGON,iOptEnd-iOptBegin-iLenTAGON))
+              ;
+              sAux1="" sAux2="" bOpt2Fnd=FALSE
+              ;
+              FOR iTmp=0 TO (STRLEN(sAux)-1)
+                ;
+                sTmp=SUBSTR(sAux,iTmp,1)
+                ;
+                IF (sTmp=="+")
+                  bOpt2Fnd=TRUE
+                ELSE
+                  ;
+                  IF (sTmp==" ")
+                    sTmp=sSepSign
+                  ENDIF
+                  ;
+                  IF (bOpt2Fnd)
+                    sAux2=sAux2<<sTmp
+                  ELSE
+                    sAux1=sAux1<<sTmp
+                  ENDIF
+                ENDIF
+              ENDFOR
+              ;
+              IF (sAux1<>"")
+                bBlockEnable=(MATCH(sSepSign<<sAux1<<sSepSign,sOpt1)>-1)
+              ENDIF
+              ;
+              IF (sAux2<>"")AND(bOpt2)
+                bBlockEnable=((bBlockEnable)OR(sAux1==""))AND(MATCH(sSepSign<<sAux2<<sSepSign,sOpt2)>-1)
+              ENDIF
+            ELSE
+              ;
+              IF (iOptEnd==iOptBegin+iLenTAGON)
+                ; -[]- Abwahl Optionsfilter
+                bBlockEnable=TRUE
+              ENDIF
+            ENDIF
+            bEnabled=FALSE
+          ENDIF
+          ;keine TAGs
+        ENDIF
+        ;
+        IF (bFilterOFF)AND(bEnabled)
+          ;Kennung nicht ab erstem Zeichen der Zeile gefunden
+          bEnabled=(MATCH(sAuxArr[iCount],sFilterOFF)<>0)
+        ENDIF
+        ;
+        IF (iTextLen>0)AND(bEnabled)AND(bOption)
+          ;
+          iPosStart=(INDEX(sAuxArr[iCount],sTAGOptStart)+1) iPosEnd=(INDEX(sAuxArr[iCount],sTAGOptEnd)-1)
+          ;
+          IF (iPosStart==1)AND(iPosEnd>=iPosStart)
+            ;
+            ;Zeile mit ZusatzOption
+            ;
+            sOptionTmp=TOUPPER(SUBSTR(sAuxArr[iCount],iPosStart,iPosEnd-iPosStart+1)) bIsNo=FALSE
+            IF (SUBSTR(sOptionTmp,0,3)=="NO_")AND(STRLEN(sOptionTmp)>3)
+              ;
+              ;Abfrage auf nicht gesetzt
+              ;
+              sOptionTmp=(SUBSTR(sOptionTmp,3)) bIsNo=TRUE
+            ENDIF
+            ;
+            iAddOptionCount=0 bAddOptFnd=FALSE
+            WHILE (iAddOptionCount<iAddOptionMax)AND(NOT bAddOptFnd)
+              ;
+              ;Option gefunden -> Zeile Freigeben/Sperren
+              bAddOptFnd=(sOptionTmp==sAddOptionList[iAddOptionCount])
+              ;
+              iAddOptionCount=iAddOptionCount+1
+            ENDWHILE
+            ;
+            IF (bIsNo)
+              ;
+              ;Abfrage auf nicht gesetzt
+              ;
+              bAddOptFnd=(NOT bAddOptFnd)
+            ENDIF
+            ;
+            IF (bAddOptFnd)
+              ;
+              ;Zeile freigegeben -> OptionsTag und darauf folgende LeerZeichen entfernen
+              ;
+              iTmp=iPosEnd+2
+              IF (iTmp<iTextLen)
+                ;
+                WHILE (SUBSTR(sAuxArr[iCount],iTmp,1)==" ")AND(iTmp<iTextLen-1)
+                  iTmp=iTmp+1
+                ENDWHILE
+              ENDIF
+              ;
+              IF (iTmp>0)AND(iTmp<iTextLen)
+                sAuxArr[iCount]=SUBSTR(sAuxArr[iCount],iTmp)
+              ELSE
+              	sAuxArr[iCount]=""
+              ENDIF
+            ELSE
+              bEnabled=FALSE
+            ENDIF
+          ENDIF
+        ENDIF
+        ;
+        IF (bEnabled)AND(bBlockEnable)
+          ;
+          ;modale Freigabe und kein Filter -> In Datei Schreiben
+          ;
+          WRITE(iWriteError, sDestName, sAuxArr[iCount])
+          IF (iWriteError<>0)
+            iError=iWriteError + 1000
+            RET
+          ENDIF
+        ENDIF
+        ;
+      ENDIF
+      iCount=iCount+1
+    ENDWHILE
+  ELSE
+    ;
+    iError=iReadError
+    RET
+  ENDIF
+  ;
+  iBlock=iBlock+icMaxBlocks
+ENDWHILE
+;
+STOPRE
+;
+RET

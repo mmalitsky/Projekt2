@@ -1,0 +1,443 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     MagKonf.SPF
+;# Task:      Magazinkonfiguration
+;# Version:   V06.00.08
+;# Date:      16.08.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens/HHD
+;# NBHSeries: 5-1200
+;# Magazines: PickUpDisk
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 16.08.2017 / Simons
+; - Neue Versionierung
+; - giMagKonfState hinzu
+;
+; V06.00.05 - 07.04.2017 / Simons
+; - Zusaetzliche Beladestelle 3
+; - Aufruf von CFG_MAN
+; - $TC_MAMP2='HD001'
+;
+; V06.00.05 - 11.10.2016 / Simons
+; - Neue Magazintypen
+; - bTypeCheck hinzu
+;
+; V06.00.05 - 23.09.2016 / Simons
+; - Neue Versionierung
+; - Korrekturen
+;
+; V06.00.03 - 15.06.2016 / Simons
+; - Neue Versionierung
+; - iNumPlacesMag
+;
+; V06.00.02 - 13.04.2016 / Simons
+; - Neue Versionierung
+; - giNumPlacesInMag,giNumRealMag,giMagNoLoadList
+;
+; V04.00.00 - 13.03.2015 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Datei zur Konfiguration des Scheibenmagazines
+; ohne/mit  Beladeklappe ("Ruestplatz am Magazin")
+;
+; Unterstuetzte Magazine
+; ----------------------
+;
+;NBH 5   / Direktbeladung   / Scheibe 40  / Lmax=450 / Dmax=150 : AD.xxxx.xxxx
+;NBH 5   / Palettenwechsler / Scheibe 40  / Lmax=350 / Dmax=150 : AD.0150.3985
+;NBH 500 / ---------------- / Scheibe 40  / Lmax=550 / Dmax=210 : AD.0080.1784
+;
+; Ob mit oder ohne Beladeklappe wird aus den Konfigurationsbits
+; $MN_USER_DATA_HEX[8].0/.4 sowie
+; $MN_USER_DATA_HEX[24].3 (OP77) ermittelt.
+
+; Zur Beachtung:
+; 1) Falls Magazin mit <Beladestelle Magazin> muessen insbesondere fuer die WzV
+;    vorher einige Maschinendaten angepasst werden, z.B. Anzahl Magazine, Plaetze etc.
+;    Erst nach erfolgreicher Anpassung ("speicher-reorganisierende Maschinendaten")
+;    darf MagKonf ausgefuehrt werden !!
+;    Dies gilt insbesondere dann, wenn eine bereits konfigurierte Maschine nachtraeglich
+;    um die <Beladestelle Magazin> erweitert wird
+; 2) Vor dem Starten von MagKonf muss ueber den Konfigurator eingestellt werden,
+;    ob die Maschine mit Beladeklappe ("Ruestplatz am Magazin") ausgestattet ist oder nicht
+;
+;------------------------------------
+
+PROC MagKonf(BOOL bTypeCheck) DISPLOF
+
+; Definiert durch Siemens WzV
+;----------------------------
+;
+; $TC_MAP1
+DEFINE icMagIsChain AS 1
+DEFINE icMagIsDisk AS 1
+DEFINE icMagIsFlat AS 5
+DEFINE icMagIs9998 AS 7
+DEFINE icMagIs9999 AS 9
+
+; $TC_MPP1
+DEFINE icIsMagPlace AS 1
+DEFINE icIsSpindle AS 2
+DEFINE icIsGripper AS 3
+DEFINE icIsLoadPlace AS 7
+
+; $TC_MPP3
+DEFINE icNoNPlaces AS 0
+DEFINE icWithNPlaces AS 1
+
+; $TC_MPP4
+DEFINE icIsEmpty AS 0
+DEFINE icIsLocked AS 1
+
+DEF STRING[32] sResult
+DEF BOOL bWithLoadList, bWithLoadPlace3
+DEF INT iMagNr, iPlNr, iTmp, iCount, iNumMag
+DEF INT iNumPlacesMag[17]
+
+;MagazinTyp Pruefen
+;------------------
+;
+IF (gbTMIsHHD)
+  SETAL(AL_CombNotAllowed,"TM HHD + giMagIdent="<<giMagIdent)
+  GOTOF ENDE
+ENDIF
+;
+IF (giMagIdent<>1503985)AND(giMagIdent<>801784)
+  ;
+  ;-------------------------------
+  ;--Keine oder falsche giMagIdent
+  ;
+  SETAL(AL_MagazineSpecifiedInvalid,"giMagIdent="<<giMagIdent)
+  GOTOF ENDE
+ENDIF
+;
+IF (bTypeCheck)
+  ;
+  ;Konsistenz UP pruefen
+  ;
+  ChkDim(,,iTmp)
+  ;
+  GetPlDat
+  ;
+  RET
+ENDIF
+
+gbQuitSysCha2=TRUE giMagKonfState='B10' ;MagKonf laeuft+Sys_Cha2 beenden
+
+CFG_MAN("MAGPANEL",sResult)
+bWithLoadList=(sResult<>"")
+;
+CFG_MAN("COMFORTPANEL",sResult)
+bWithLoadPlace3=(sResult<>"")
+
+;Anzahl reale Teilmagazine einschl. Beladeliste aber ohne Mag. 9998/9999
+IF (bWithLoadList)
+  iNumMag=2
+ELSE
+  iNumMag=1
+ENDIF
+
+;Anzahl Plaetze der (realen) Teilmagazine
+FOR iMagNr=1 TO 16
+  iNumPlacesMag[iMagNr]=0
+ENDFOR
+;
+IF (giMagIdent==801784)OR(giMagIdent==1503985)
+  ;
+  ;Corcom Scheibe 40 Plaetze
+  ;
+  iNumPlacesMag[1]=40
+ENDIF
+;
+IF (bWithLoadList)
+  ;Plaetze Beladeliste
+  iNumPlacesMag[2]=iNumPlacesMag[1]
+ENDIF
+;
+iNumPlacesMag[iNumMag+1]=1    ;Anzahl Zwischenspeicher (Zwischenspeichermagazin 9998)
+;Anzahl Beladestellen (Zwischenspeichermagazin 9999)
+IF (bWithLoadPlace3)
+  iNumPlacesMag[iNumMag+2]=3
+ELSE
+  IF (bWithLoadList)
+    iNumPlacesMag[iNumMag+2]=2
+  ELSE
+    iNumPlacesMag[iNumMag+2]=1
+  ENDIF
+ENDIF
+
+iCount=0
+FOR iMagNr=1 TO 16
+  iCount=iCount+iNumPlacesMag[iMagNr]
+ENDFOR
+;
+IF (iCount>$MN_MM_NUM_MAGAZINE_LOCATION)
+  SETAL(AL_ConfigTooMuchLocs,""<<iCount)
+  GOTOF ENDE
+ENDIF
+
+;Wz in Sp -> Umkonfigurieren nicht moeglich
+FOR iCount=1 TO $P_MAGN
+  ;
+  IF ($P_MAG[iCount]==9998)
+    ;
+    IF ($TC_MPP6[9998,mcLocSp]>0)
+      ;
+      SETAL(AL_PleaseUnloadSpTl67)
+      M0
+      STOPRE
+      ;
+      GOTOF ENDE
+    ENDIF
+    ;
+    GOTOF DoReconfig
+  ENDIF
+ENDFOR
+
+;==========
+DoReconfig:
+;==========
+;
+;--------------------
+; Start Konfiguration
+;--------------------
+;
+MSG(MSG_WarningReConfig)
+M0
+STOPRE
+; Sys_Cha2 beenden
+gbQuitSysCha2=TRUE
+;
+MSG(MSG_ReConfigRunning)
+
+; Loesche alte Daten
+$TC_MAP1[0]=0
+$TC_DP1[0,0]=0
+
+STOPRE
+
+; Magazineigenschaften:
+;----------------------
+;
+;Anzahl Plaetze Loeschen
+FOR iMagNr=0 TO 16
+  giNumPlacesInMag[iMagNr]=0
+ENDFOR
+;
+IF (bWithLoadList)
+  ;
+  ;Beladeliste als letztes reales Magazin
+  giMagNoLoadList=iNumMag
+  ;
+  ;Anzahl realer Magazine
+  giNumRealMag=(iNumMag-1)
+ELSE
+  giMagNoLoadList=0
+  giNumRealMag=iNumMag
+ENDIF
+
+$TC_MAMP1="DISK " << iNumPlacesMag[1] ;Name des Magazins (max. 32 Zeichen)
+;
+;Bit0:  WzSuche: aktives Wz waehlen, sonst ErsatzWz mit kleinster DuploNr
+;Leerplatzsuche:
+;Bit12: symmetrisch, bei aktueller Mag.-Position beginnend
+;Bit13: altes SpWz auf den Platz ablegen, von dem das NeuWz geholt wurde
+;       (setzt Doppelgreifer als Zwischenspeicher voraus)
+;Bit14: Suche startet im gewaehlten Magazin mit der Suche nach einem Platz mit dem passenden PlatzTyp
+;       nicht gefunden -> Gleiche Suche in den anderen Magazinen
+;       nicht gefunden -> Wiederholung der Suche in allen Magazinen ab dem gewaehlten Magazin unter Beruecksichtigung der Platzhierarchie
+;Bit15: Hierarchien: Neue Art
+$TC_MAMP2='HD001'
+
+;Definition reale Teil-Magazine und 2 Zwischenspeichermagazine
+FOR iMagNr=1 TO iNumMag+2
+  ;
+  STOPRE
+  IF (iMagNr<=iNumMag)
+    ;
+    giNumPlacesInMag[iMagNr]=iNumPlacesMag[iMagNr]
+    iTmp=iMagNr
+    ;
+    $TC_MAP1[iTmp]=icMagIsDisk
+    ;
+    IF (iTmp<>giMagNoLoadList)
+      $TC_MAP2[iTmp]="TM_OEM_DISK" << iTmp
+    ELSE
+      $TC_MAP2[iTmp]="TM_OEM_LOADLIST"
+    ENDIF
+  ELSE
+    ;
+    IF (iMagNr==iNumMag+1)
+      iTmp=9998
+      $TC_MAP1[iTmp]=icMagIs9998
+      $TC_MAP2[iTmp]="TM_OEM_BUFFER"
+    ELSE
+      iTmp=9999
+      $TC_MAP1[iTmp]=icMagIs9999
+      $TC_MAP2[iTmp]="TM_OEM_LOADMAG"
+    ENDIF
+  ENDIF
+
+  ;Bit0: aktives Magazin
+  ;Bit1: gesperrt   Bit2: in Beladepos.
+  ;Bit3: Wz-Bewegen aktiv
+  ;Bit4: zum Beladen freigegeben
+  ;Bit6: Wz in diesem Magazin als festplatz-codiert behandeln
+  $TC_MAP3[iTmp]='B10001'
+
+  $TC_MAP6[iTmp]=1  ;Anzahl Zeilen
+  $TC_MAP7[iTmp]=iNumPlacesMag[iMagNr]  ;Anzahl Plaetze pro Zeile
+  ;$TC_MAP8[iTmp]=  ;aktuelle Mag-Position
+  ;$TC_MAP9[iTmp]=  ;aktuelle Verschleissverbund-Nr
+  ;$TC_MAP10[iTmp]= ;Bit0..7: aktuelle Wz-Suchstrategie  Bit8..15: aktuelle Leerplatz-Suchstrategie
+ENDFOR
+
+;Plaetze
+FOR iMagNr=1 TO iNumMag+2
+  ;
+  FOR iPlNr=1 TO iNumPlacesMag[iMagNr]
+    ;
+    IF (iMagNr<=iNumMag)
+      ;
+      IF (iMagNr<>giMagNoLoadList)
+        $TC_MPP1[iMagNr,iPlNr]=icIsMagPlace
+        $TC_MPP2[iMagNr,iPlNr]=0  ;Platztyp=0: kann jedes Wz aufnehmen
+        $TC_MPP3[iMagNr,iPlNr]=icWithNPlaces
+        $TC_MPP4[iMagNr,iPlNr]=icIsEmpty
+        $TC_MPP5[iMagNr,iPlNr]=iPlNr
+      ELSE
+        ;Beladeliste (virtuelles Teilmagazin)
+        $TC_MPP1[iMagNr,iPlNr]=icIsMagPlace
+        $TC_MPP2[iMagNr,iPlNr]=0  ;Platztyp=0: kann jedes Wz aufnehmen
+        $TC_MPP3[iMagNr,iPlNr]=icNoNPlaces
+        $TC_MPP4[iMagNr,iPlNr]=icIsEmpty
+        $TC_MPP5[iMagNr,iPlNr]=iPlNr
+      ENDIF
+    ELSE
+      ;
+      IF (iMagNr==iNumMag+1)
+        ;
+        ;Zwischenspeichermagazin
+        IF (iPlNr==1)
+          $TC_MPP1[9997+iMagNr-iNumMag,iPlNr]=icIsSpindle
+        ELSE
+          $TC_MPP1[9997+iMagNr-iNumMag,iPlNr]=icIsGripper
+        ENDIF
+      ELSE
+        ;Belademagazin
+        $TC_MPP1[9997+iMagNr-iNumMag, iPlNr]=icIsLoadPlace
+      ENDIF
+      $TC_MPP2[9997+iMagNr-iNumMag,iPlNr]=0  ;Platztyp 0
+      $TC_MPP3[9997+iMagNr-iNumMag,iPlNr]=icNoNPlaces
+      $TC_MPP4[9997+iMagNr-iNumMag,iPlNr]=icIsEmpty
+      $TC_MPP5[9997+iMagNr-iNumMag,iPlNr]=iPlNr
+    ENDIF
+    STOPRE
+  ENDFOR
+  STOPRE
+ENDFOR
+
+; Zuordnung Zwischenspeicher zu Spindel
+;--------------------------------------
+;
+; $TC_MLSR[PlatzNr Zwischenspeicher, PlatzNr Spindel]
+; -> Wz-Suche auch in Zwischenspeicher
+;$TC_MLSR[2,1]=0
+;$TC_MLSR[3,1]=0
+; ...
+FOR iPlNr=2 TO iNumPlacesMag[iNumMag+1]
+  $TC_MLSR[iPlNr,1]=0  ;Zuordnung Zwischenspeicherplatz zu Spindel
+ENDFOR
+
+; Abstand Beladestelle_Hand (=1 = WzW-Stelle)
+; zum Magazin $TC_MDP1[CassNr,BeladestelleNr]
+;--------------------------------------------
+;
+;Legt fest
+; - welches Magazin von Beladestelle_Hand beladen werden kann
+; - in welcher Reihenfolge Leerplatzsuche erfolgt
+FOR iMagNr=1 TO giNumRealMag
+  ;da Magazin-Nullpunkt und Beladestelle (WzW-Stelle) im gleichen Punkt liegen
+  $TC_MDP1[iMagNr,1]=0
+  ;
+  IF (bWithLoadPlace3)
+    $TC_MDP1[iMagNr,3]=0
+  ENDIF
+ENDFOR
+
+;Abstand Beladestelle_Magazin (=2)
+;zum Magazin $TC_MDP1[CassNr,BeladestelleNr]
+;--------------------------------------------
+;
+;Legt fest
+; - nur Beladeliste kann von Beladestelle_Magazin aus beladen/entladen werden
+IF (bWithLoadList)
+  ;ermoeglicht Beladen/Entladen in/von Beladeliste ueber Beladestelle 2
+  $TC_MDP1[giMagNoLoadList,2]=0
+ENDIF
+
+; Abstand Zwischenspeicher zum Magazin
+; $TC_MDP2[CassNr,ZwischenspeicherNr]
+;-------------------------------------
+;
+;d.h. Spindel (1) zu Magazin (1 .. iNumMag)
+;z.B. $TC_MDP2[2,1]=0
+;     $TC_MDP2[3,1]=0
+;     ..
+;     $TC_MDP2[1,1]=0
+
+FOR iMagNr=1 TO giNumRealMag
+  ;
+  $TC_MDP2[iMagNr,1]=0
+ENDFOR
+
+;Fuer Platz 2 bis  ...
+;z.B. $TC_MDP2[1,2]=0
+;     $TC_MDP2[2,2]=0
+;     $TC_MDP2[1,3]=0
+;     $TC_MDP2[2,3]=0
+;     $TC_MDP2[1,4]=0
+;     $TC_MDP2[2,4]=0
+
+FOR iPlNr=2 TO iNumPlacesMag[iNumMag+1]
+  ;
+  FOR iMagNr=1 TO giNumRealMag
+    ;
+    $TC_MDP2[iMagNr,iPlNr]=0
+  ENDFOR
+ENDFOR
+
+;zulaessige Platztypen fuer Werkzeug mit Platztyp 1 (Kleines Werkzeug D<=(80/85mm, L<=500/550mm)
+$TC_MPTH[0,0]=2
+$TC_MPTH[0,1]=5
+
+;zulaessige Platztypen fuer Werkzeug mit Platztyp 2 (Grosses Werkzeug D<=165/175mm, L<=500/550mm)
+$TC_MPTH[1,0]=5
+
+;MagKonf erfolgreich durchlaufen
+CFG_MAN("SET",sResult)
+;
+giMagKonfState='B1'
+;
+; Wichtiger Hinweis: NCKReset ausloesen
+SETAL(AL_RaiseNCKReset67)
+
+;====
+ENDE:
+;====
+;
+gbQuitSysCha2=FALSE
+;
+MSG("")
+;
+M17

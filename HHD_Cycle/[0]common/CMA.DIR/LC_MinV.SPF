@@ -1,0 +1,66 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_MinV.SPF
+;# Task:      LoadCase - Minimalwerte
+;# Version:   V06.00.07
+;# Date:      03.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 03.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.04 - 12.08.2016 / Simons
+; - Neuversionierung
+;
+; V01.01    - 10.10.2013 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+;Minimalwerte des Tisches fuer Beschleunigung, Ruck, Kv und eventuell auch fuer die Geschwindigkeit setzen
+;
+;------------------------------------
+
+PROC LC_Minv SAVE
+
+DEF STRING[32] sCycName="LC_MinV V06.00.07"
+
+IF (giLCAxisIdent>0)AND(gbLCCheckAxis)
+  ;
+  IF (grLCJerkMin<>grLCJerkMax)
+    $MA_MAX_AX_ACCEL[gaxLCAxName]=grLCAccMin $MA_POSCTRL_GAIN[0,gaxLCAxName]=grLCKv1 $MA_JOG_AND_POS_MAX_JERK[gaxLCAxName]=grLCJerkMin $MA_MAX_AX_JERK[0,gaxLCAxName]=grLCJerkMin
+  ENDIF
+  ;
+  IF (grLCTorqLimSideAxInflu>0)
+    $MA_MAX_AX_ACCEL[gaxLCAxName]=grLCAccMin $MA_POSCTRL_GAIN[0,gaxLCAxName]=grLCKv1 $MA_JOG_AND_POS_MAX_JERK[gaxLCSideAxis]=grLCSideAxStdValJerk $MA_MAX_AX_JERK[0,gaxLCSideAxis]=grLCSideAxStdValJerk
+  ENDIF
+  ;
+  IF (ISVAR("grLCVeloStd"))AND(ISVAR("gsLCPalSpecialTypeName"))
+    ;
+    ;Sondermodus Ueberladung vorgesehen
+    ;
+    IF ((STRLEN(gsLCPalSpecialTypeName[0])>2)OR(STRLEN(gsLCPalSpecialTypeName[1])>2))
+      $MA_MAX_AX_VELO[gaxLCAxName]=grLCVeloStd
+    ENDIF
+  ENDIF
+  ;
+  giLCActPal=0
+  ;
+  NEWCONF
+  STOPRE
+  ;
+ENDIF
+;
+RET

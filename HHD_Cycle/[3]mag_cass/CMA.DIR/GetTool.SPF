@@ -1,0 +1,541 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     GetTool.SPF
+;# Task:      Wz aus Kassette Holen
+;# Version:   V06.00.07
+;# Date:      14.07.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: Cas
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 14.07.2017 / Simons
+; - Neuversionierung
+; - STOPRE vor rActPosX=rNewG1X
+;
+; V06.00.06 - 28.04.2017 / Simons
+; - Neuversionierung
+; - giSyncPickUpDrop->grSyncPickUpDrop
+; - WHILE (NOT ...) -> WHENEVER (NOT...) DO RDISABLE
+; - HandleAlarm->ENDE
+; - formale Aenderungen
+;
+; V06.00.05 - 01.03.2017 / Simons
+; - bFast hinzu
+;
+; V06.00.03 - 08.05.2016 / Simons
+; - Neue Versionierung
+; - giNumRealMag
+;
+; V04.00.00 - 06.03.2014 / Huettner
+; - Vorlage
+;
+;------------------------------------
+;
+; Beschreibung:
+; -------------
+;
+; Leeres HG an Mag.-Platz/auf WzW-Pos. fahren
+; Werkzeug greifen an Mag.-Platz
+;
+; Eingangsparameter:
+; bNoAlarm:   true=Im Fehlerfalle kein Alarm, aber Programmaussprung
+; iTNo:       Werkzeugnummer des zu greifenden Werkzeugs
+; iMagNo:     Magazin-Nummer Ziel
+;             <9998: Leeres HG an Platz im Magazin fahren: HG gehoben, vertikal und geloest
+;             =9998: Leeres HG in HG-WzW-Position fahren: HG gehoben, horizontal und geloest
+;             =9999: Leeres HG in Wkz-Beladeposition fahren: HG gehoben, horizontal und geloest (nicht bei CassMag)
+; iPotNo:     Platz-Nummer Ziel
+;
+; Voraussetzungen:
+; ----------------
+;
+; - HG muss leer sein
+; - giMagState 10, 20, 30
+;   10 = HG leer in Werkzeugwechselposition
+;   20 = HG leer horizontal im Bereich Doppelgreifer
+;   30 = Leeres HG vertikal gehoben
+;
+; Achtung: Der Zyklus loest keine
+;          Quittierung an PLC-FC8 aus
+;          Die muss durch aufrufenden
+;          Zyklus erfolgen.
+;
+;------------------------------------
+
+PROC GetTool(BOOL bNoAlarm, INT iTNo, INT iMagNo, INT iPotNo, BOOL bFast)
+
+DEF STRING[32] sCycName="GetTool V06.00.07", sAlarmParam=""
+;
+DEF BOOL bTmp, bToMag, bToTC, bHgHomeReq, bEnabled, bHGClamped, bHGUnClamped, bHGVertical, bHGHorizontal, bHGLifted, bHGLowered, bAxInPos, bOnMiddleX
+;
+DEF INT iAlarmNo=0, iCount, iChkRes, iTimeOut
+;
+DEF REAL rNewPosX, rNewPosZ, rNewG1X, rGetFreeDistX, rActPosX, rActPosZ, rVeloX, rVeloZ, rWaitShort, rc1x0mm
+
+rWaitShort=3*$MN_IPO_CYCLE_TIME iTimeOut=RTOI(4/rWaitShort) rVeloX=$MA_POS_AX_VELO[mcAxX1] rVeloZ=$MA_POS_AX_VELO[mcAxZ1] rGetFreeDistX=(0.1*grInchMetr) rc1x0mm=1.0 * grInchMetr
+
+IF (iMagNo<1)OR((iMagNo>giNumRealMag)AND(iMagNo<>9998))
+  ;NewCaNr=9998 zulassen (s. Beschreibung Eingangspar.)
+  iAlarmNo=AL_InvalidCaNr sAlarmParam=<<iMagNo
+  GOTOF ENDE
+ENDIF
+
+IF (giMagState==0)
+  ;Magazinstatus herstellen
+  GetMagSt
+ENDIF
+
+;Magazinstatus
+;-------------
+rActPosX=$AA_IM[mcAxX1] rActPosZ=$AA_IM[mcAxZ1] bHgHomeReq=(IN_HgHome) bAxInPos=(($AA_STAT[mcAxX1]==4)AND($AA_STAT[mcAxZ1]==4)) bHGClamped=(mcbDBB_HGClamped) bHGUnClamped=(mcbDBB_HGUnClamped) bHGHorizontal=(mcbDBB_HGHorizontal) bHGVertical=(mcbDBB_HGVertical) bHGLifted=(mcbDBB_HGLifted) bHGLowered=(mcbDBB_HGLowered)
+
+;Plausibilitaetspruefungen
+;-------------------------
+IF ((giMagState MOD 10)>0)
+  iAlarmNo=AL_HgNotEmpty
+  GOTOF ENDE
+ENDIF
+;
+IF NOT ((giMagState==10)OR(giMagState==20)OR(giMagState==30)OR(giMagState==40))
+  ;HG steht in ungueltiger Position
+  iAlarmNo=AL_HGNotInValidPos
+  GOTOF ENDE
+ENDIF
+;
+IF (giMagState<>10)AND(giMagState<>20)AND(NOT bHGUnClamped)
+  M_HgUnClamp1
+ENDIF
+
+;HG leer -> Vorwahl schnelle Schwenkgeschwindigkeit
+M_HgSwivelFast
+
+;Aufgabe erkennen
+bToMag=(iMagNo>=1)AND(iMagNo<=giNumRealMag)
+bToTC=(iMagNo==9998)AND(iPotNo==1)
+
+IF (giMagState==30)AND((NOT bHGVertical)OR(NOT bHGLifted))
+  ;
+  ;Im vorherigem Ablauf angestartet -> Auf HG vertikal und gehoben warten
+  ;
+  WHENEVER (NOT mcbDBB_HGVertical)OR(NOT mcbDBB_HGLifted) DO RDISABLE
+  STOPRE
+  ;
+  bHGVertical=(mcbDBB_HGVertical) bHGLifted=(mcbDBB_HGLifted)
+  ;
+ENDIF
+
+IF (bToTC)
+  ;
+  IF (giMagState==30)
+    ;
+    ;Leeres HG vertikal gehoben
+    ;
+    IF (NOT bAxInPos)
+      ;
+      WHENEVER ($AA_STAT[mcAxX1]<>4)OR($AA_STAT[mcAxZ1]<>4) DO RDISABLE
+      STOPRE
+    ENDIF
+    ;
+    IF (gbMagWithFixedGuide)
+      ;
+      IF (rActPosX>(grLaneX[1]+rc1x0mm))AND(rActPosZ<(grLaneZ[1]-rc1x0mm))
+        ;im Bereich Schublade -> erst aus dem Teilbereich herausfahren
+        COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloX POS[mcAxZ1]=grLaneZ[1]
+      ENDIF
+      ;
+      COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grHGFreeGuideX POS[mcAxZ1]=grLaneZ[1]
+      ;
+      STOPRE
+      giMagState=0
+      ;
+      M_HgLower1 M_HgClamp1
+      ;
+      STOPRE
+      ;Leeres HG vertikal gesenkt
+      giMagState=40
+      ;
+    ELSE
+      ;
+      IF (rActPosX<(grLaneX[1]-rc1x0mm))
+        ;
+        ;erst aus dem Teilbereich herausfahren
+        COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grLaneX[1]
+      ENDIF
+      ;
+      IF (rActPosZ<(grLaneZ[1]-rc1x0mm))
+        ;
+        ;HG im Bereich der Schublade -> aus dem Teilbereich herausfahren
+        IPOBRKA(mcAxZ1,100)
+        ADISPOSA(mcAxZ1,0)
+        FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1]
+      ENDIF
+      ;
+      ;In WzW Position Fahren
+      COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grHgTcPosZ
+      ;
+      STOPRE
+      giMagState=0
+      M_HgLower1 M_HgClamp1
+      M_HgHorizontal1
+      ;
+      STOPRE
+      ;HG leer horizontal im Bereich Doppelgreifer
+      giMagState=20
+      ;
+    ENDIF
+  ENDIF
+  ;
+  IF (giMagState==40)
+    ;
+    ;Leeres HG vertikal gesenkt
+    ;
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHGTcPosX
+    ;
+    STOPRE
+    giMagState=0
+    ;
+    M_HgHorizontal1 M_HgClamp1
+    ;
+    STOPRE
+    ;HG leer horizontal im Bereich Doppelgreifer
+    giMagState=20
+    ;
+  ENDIF
+  ;
+  IF (gbMagWithFixedGuide)
+    FINEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grHgTcPosZ
+  ELSE
+    FINEA[mcAxX1] FINEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grHgTcPosX POS[mcAxZ1]=grHgTcPosZ
+  ENDIF
+  ;
+  M_HgUnClamp1
+  ;
+  STOPRE
+  ;HG leer in Werkzeugwechselposition
+  giMagState=10
+  ;
+  GOTOF ENDE
+ENDIF
+
+IF (bToMag)
+  ;
+  rNewPosX=grPlDatPosX[0] rNewPosZ=grPlDatPosZ[0]
+  ;
+  IF (giPlDatLane1X[0]<9999)
+    rNewG1X=grLaneX[giPlDatLane1X[0]]
+  ELSE
+    rNewG1X=grLaneX[1]
+  ENDIF
+  ;
+  ;Ist die Kassette vorhanden und der Platz belegt?
+  ChkSwitch(1,iMagNo,iPotNo,0,iChkRes)
+  IF (iChkRes<>0)AND(iChkRes<>2)
+    ;
+    IF (iChkRes<0)
+      ;
+      IF (iChkRes==-1)
+        ;Kassette nicht vorhanden
+        iAlarmNo=AL_CassIsMissing sAlarmParam=<<iMagNo
+        GOTOF ENDE
+      ELSE
+        ;Kassette ist gesperrt
+        iAlarmNo=AL_CassIsLocked sAlarmParam=<<iMagNo
+        GOTOF ENDE
+      ENDIF
+    ELSE
+      ;Kein Werkzeug auf Platz vorhanden
+      iAlarmNo=AL_TlPlaceEmpty sAlarmParam=<<iMagNo<<"/"<<iPotNo
+      GOTOF ENDE
+    ENDIF
+  ENDIF
+  ;
+  IF (giMagState==10)OR(giMagState==20)
+    ;
+    ;HG leer in WzW-Position / HG leer horizontal im Bereich Doppelgreifer
+    ;
+    IF (gbMagWithFixedGuide)
+      ;
+      COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1] M_HgClamp1
+      ;
+      M_HgVertical1
+      ;
+      STOPRE
+      ;Leeres HG vertikal gesenkt
+      giMagState=40
+      ;
+    ELSE
+      ;
+      COARSEA[mcAxX1] COARSEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=grLaneX[1] POS[mcAxZ1]=grHgTcPosZ M_HgClamp1
+      ;
+      M_HgVertical1
+      M_HgUnclamp1
+      M_HgLift1
+      ;
+      STOPRE
+      ;HG vertikal und gehoben
+      giMagState=30 rActPosX=grLaneX[1]
+      ;
+    ENDIF
+  ENDIF
+  ;
+  IF (giMagState==40)
+    ;
+    ;Leeres HG vertikal gesenkt
+    ;
+    COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1]
+    COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=grHGFreeGuideX
+    ;
+    M_HgUnclamp1 M_HgLift1
+    ;
+    STOPRE
+    ;HG vertikal und gehoben
+    giMagState=30
+    ;
+  ENDIF
+  ;
+  CANCEL(SyncID_GetTool,SyncID_GetTool+1)
+  ;
+  ID=SyncID_GetTool WHENEVER ((NOT mcbDBB_HGLifted)OR(NOT mcbDBB_HGVertical)) DO $AA_OVR[mcAxX1]=0
+  ;
+  IF (gbMagWithFixedGuide)
+    ;
+    ;Altes Magazin
+    ;
+    IF (rActPosZ<(grLaneZ[1]-grPARA[2]))
+      ;
+      ;HG im Bereich Bruchkontrolle/Schublade, um das Gehaeuse der Bruchkontrolle herumfahren
+      ;
+      IF (rNewPosZ>grLaneZ[1])
+        ;
+        ;erst in Z-Gasse fahren ohne X-Bewegung
+        IPOBRKA(mcAxZ1,100)
+        ADISPOSA(mcAxZ1,0)
+        FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1]
+      ELSE
+        COARSEA[mcAxZ1] FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1]
+      ENDIF
+    ENDIF
+    ;
+    IF (rNewPosZ<grLaneZ[1])
+      COARSEA[mcAxZ1] COARSEA[mcAxX1] FA[mcAxZ1]=rVeloZ FA[mcAxX1]=rVeloX POS[mcAxZ1]=grLaneZ[1] POS[mcAxX1]=rNewPosX
+    ENDIF
+  ELSE
+    ;
+    ;Neues Magazin
+    ;
+    ;Status
+    bHGClamped=(mcbDBB_HGClamped) bHGUnClamped=(mcbDBB_HGUnClamped) bHGHorizontal=(mcbDBB_HGHorizontal) bHGVertical=(mcbDBB_HGVertical) bHGLifted=(mcbDBB_HGLifted) bHGLowered=(mcbDBB_HGLowered) bOnMiddleX=(OUT_OnMiddleX)
+    ;
+    IF (NOT bHGLifted)OR(NOT bHGVertical)
+      ;
+      IF (NOT bHGLifted)
+        M_HgLift1
+      ENDIF
+      ;
+      IF (NOT bHGVertical)
+        ;
+        IF (NOT bOnMiddleX)
+          COARSEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=rNewG1X M_HgClamp1
+          STOPRE
+          rActPosX=rNewG1X
+        ENDIF
+        ;
+        M_HgVertical1
+        M_HgUnclamp1
+        M_HgLift1
+        ;
+        bHGVertical=(mcbDBB_HGVertical)
+        ;Leeres HG vertikal gehoben, auf Gasse
+        giMagState=30
+        ;
+      ENDIF
+    ENDIF
+    ;
+    IF (rActPosX<=grLaneX[1])AND(rActPosZ>=grDGProtectZ)AND(rNewPosX>grLaneX[1])AND(rNewPosZ<grDGProtectZ)
+      ;
+      ;"Quadrantenwechsel": erst herausfahren vor dem Querfahren (DG schuetzen)
+      ID=SyncID_GetTool+1 WHENEVER ($AA_IM[mcAxX1]<grLaneX[1]) DO $AA_OVR[mcAxZ1]=0
+    ELSE
+      ;
+      IF (rActPosZ<grDGProtectZ)AND(rNewPosX<grLaneX[1])
+        ;DG beim Quer-Verfahren schuetzen
+        ID=SyncID_GetTool+1 WHENEVER ($AA_IM[mcAxZ1]<grDGProtectZ) DO $AA_OVR[mcAxX1]=0
+      ENDIF
+    ENDIF
+    ;
+    IF (rNewPosZ>grHgMaxSwingPosZ)AND(NOT bHGVertical)
+      ;
+      giMagState=0
+      ;
+      ;Satz bei Erreichen der Bremsrampe weiterschalten
+      IPOBRKA(mcAxZ1,100)
+      ADISPOSA(mcAxZ1,0)
+      WHENEVER (NOT mcbDBB_HGVertical) DO RDISABLE
+      FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grHgMaxSwingPosZ M_HgVertical0
+    ENDIF
+    ;
+    IF (rActPosZ<(grLaneZ[1]-rc1x0mm))AND(rNewPosZ>grLaneZ[1])
+      ;
+      ;erst aus der Schublade herausfahren
+      IPOBRKA(mcAxZ1,100)
+      ADISPOSA(mcAxZ1,0)
+      FA[mcAxZ1]=rVeloZ POS[mcAxZ1]=grLaneZ[1]
+    ENDIF
+    ;
+    IF (rActPosZ>(grLaneZ[1]+rc1x0mm))AND(rNewPosZ<grLaneZ[1])
+      ;
+      IPOBRKA(mcAxZ1,100)
+      ADISPOSA(mcAxZ1,0)
+      ;ElSp solange X-Achse nicht in Position
+      WHENEVER (ABS($AA_IM[mcAxX1]-rNewPosX)>grRange) DO RDISABLE
+      COARSEA[mcAxX1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=rNewPosX POS[mcAxZ1]=grLaneZ[1]
+    ENDIF
+  ENDIF
+  ;
+  FINEA[mcAxX1] FINEA[mcAxZ1] FA[mcAxX1]=rVeloX FA[mcAxZ1]=rVeloZ POS[mcAxX1]=rNewPosX POS[mcAxZ1]=rNewPosZ
+  ;
+  STOPRE
+  giMagState=0
+  ;
+  CANCEL(SyncID_GetTool,SyncID_GetTool+1)
+  ;
+  IF (NOT bHgHomeReq)
+    ;
+    ;Werkzeug greifen -> zunaechst herunterfahren
+    ;
+    IF (gbHGNoTapeCl)
+      M_HgLower0
+    ELSE
+      M_HgLower0  M_TlTapeCleanOn0
+    ENDIF
+    ;
+    iCount=0
+    REPEAT
+      ;
+      ;Warten bis HG gesenkt/Timeout
+      ;
+      bHGLowered=(mcbDBB_HGLowered)
+      IF (NOT bHGLowered)
+        iCount=iCount+1
+        G4 F=rWaitShort
+      ENDIF
+    UNTIL (bHGLowered)OR(iCount>iTimeOut)
+    ;
+    IF (NOT bHGLowered)
+      ;
+      ;Das Wz liegt falsch -> TimeOut
+      ;
+      IF (iMagNo==1)
+        ;
+        ;HG in Schublade -> Fehlerausgabe und wegfahren
+        ;
+        iAlarmNo=AL_VerifyTlPosition67 sAlarmParam=<<iMagNo<<"/"<<iPotNo
+        ;
+        ;um Verklemmung zu loesen - Versetzen in X
+        FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=(rActPosX+rGetFreeDistX)
+        ;HG wieder anheben
+        M_HgLift1 M_TlTapeCleanOff1
+        ;wieder zurueck
+        FINEA[mcAxX1] FA[mcAxX1]=rVeloX POS[mcAxX1]=rActPosX
+        ;
+        STOPRE
+        ;HG vertikal und gehoben
+        giMagState=30
+        ;
+        GOTOF ENDE
+      ELSE
+        ;
+        ;nicht in Schublade -> Wiederholversuch und Fehlermeldung
+        ;
+        ;Warten bis HG abgesenkt ist
+        M_HgLower1
+        STOPRE
+        ;
+      ENDIF
+    ENDIF
+    ;
+    ;Status: HG gesenkt
+    ;
+    grSyncPickUpDrop=ITOR(iTNo*100000)+iMagNo*1000+iPotNo
+    ;
+    ;HG spannen
+    M_HGClamp0
+    ;
+    IF (iMagNo==1)
+      ;
+      ;HG in Schublade
+      ;
+      iCount=0
+      REPEAT
+        ;
+        ;Warten bis HG geklemmt/Timeout
+        ;
+        bHGClamped=(mcbDBB_HGClamped)
+        IF (NOT bHGClamped)
+          iCount=iCount+1
+          G4 F=rWaitShort
+        ENDIF
+      UNTIL (bHGClamped)OR(iCount>iTimeOut)
+      ;
+      IF (NOT bHGClamped)
+        ;
+        ;Das Wz liegt falsch -> das HG kann nicht geklemmt werden -> TimeOut
+        ;
+        grSyncPickUpDrop=0 iAlarmNo=AL_VerifyTlPosition67 sAlarmParam=<<iMagNo<<"/"<<iPotNo
+        ;
+        M_HgUnclamp1
+        M_HgLift1 M_TlTapeCleanOff0
+        ;
+        STOPRE
+        ;HG vertikal und gehoben
+        giMagState=30
+        ;
+        GOTOF ENDE
+      ENDIF
+    ELSE
+      ;
+      IF (bFast) GOTOF ENDE
+      ;
+      M_HGClamp1
+      ;
+    ENDIF
+    ;
+    STOPRE
+    ;HG geklemmt vertikal gesenkt an Quellmagazinplatz
+    giMagState=82
+    ;
+  ELSE
+    ;
+    STOPRE
+    ;HG vertikal und gehoben
+    giMagState=30
+    ;
+  ENDIF
+ENDIF
+
+;====
+ENDE:
+;====
+;
+IF (bHgHomeReq)
+  ;
+  ;PLC auffordern, $A_IN[..] zurueckzunehmen
+  M_HgHomeFinished0
+ENDIF
+;
+IF (NOT bNoAlarm)AND(iAlarmNo>0)
+  ;
+  MSG("")
+  ;
+  SETAL(iAlarmNo,sAlarmParam)
+  ;
+ENDIF
+;
+RET
+

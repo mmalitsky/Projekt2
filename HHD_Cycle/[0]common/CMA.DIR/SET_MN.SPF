@@ -1,0 +1,481 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_MN.SPF
+;# Task:      Einstellungen Magazin
+;# Version:   V06.00.08
+;# Date:      14.08.2017  /  Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;-------------------------------------
+; Beschreibung:
+;
+; Laden magazinspezifischer
+; Einstellungen fuer alle
+; Magazintypen
+;
+; AuswahlOption: Magazintypen+Maschinentypen
+;
+; Aufgerufen im NC_INIT1.SPF
+;
+;-------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.08 - 14.08.2017 / Simons
+; - iCount hinzu, giOptCodeCarrier='B..'
+;
+; V06.00.06 - 21.04.2017 / Simons
+; - formale Aenderungen
+;
+; V06.00.06 - 02.04.2017 / Simons
+; - Neuversionierung
+; - Kassette mit HHDTM angepasst
+;
+; V06.00.05 - 21.02.2017 / Simons
+; - neue BBK bei NBH5. und Scheibe
+;
+; V06.00.05 - 20.10.2016 / Simons
+; - Neuversionierung
+; - CH : XT1 Achse TCPos geaendert
+; - grOffsetMaxMSC=90
+;
+; V06.00.04 - 24.08.2016 / Simons
+; - Neuversionierung
+; - D60NC / D120 / Miksch Kette
+; - FL entfernt
+;
+; V06.00.03 - 18.06.2016 / Simons
+; - Neuversionierung
+; - gr(Asym)DiskLoadMax
+;
+; V06.00.02 - 13.04.2016 / Simons
+; - Neuversionierung
+;
+; V06.00.01 - 13.08.2015 / Simons
+; - Preclmp entfernt
+; - grOFFSETMIN/MAX_MSC eingefuehrt
+; - Spannzeiten CH_WM307 angepasst
+; - grToMeasTol/grToCheckTol
+;
+; V06.00.00 - 16.07.2015 / Simons
+; - ProtoTyp / Neu
+;-------------------------------------
+
+DEF STRING[32] sCycName="SET_MN V06.00.08", sMCType, sMNType, sResult
+;
+DEF BOOL bTlIsHSK
+;
+DEF INT iCount
+;
+DEF REAL rTmp
+
+;max. Anzahl ununterbrochener
+;WzVorbereitungs-Auftraege
+;----------------------------
+giMaxPrepCount=1
+
+;MaschinenTyp
+;------------
+CFG_MAN("MC",sMCType)
+
+;MagazinTyp
+;----------
+CFG_MAN("MN",sMNType)
+
+;Bohrerbruchkontrolle im Magazin
+;-------------------------------
+;Toleranzgrenze um den Sollwert
+grToBreakTol=grInchMetr*1.0
+
+;Bohrerbruchkontrolle (alle):
+;----------------------------
+;grMinMeasToolLen = Min. WzLaenge
+;
+;Toleranz beim Wz Pruefen:
+;grToMeasTol  = Messen/Identifizieren
+;grToCheckTol = Pruefen
+;grMaxMeasTol = Max
+;grMinMeasTol = Min
+;---------------------------------
+grMinMeasToolLen = grInchMetr*1.0
+grMaxMeasTol=grInchMetr*10
+grMinMeasTol=grInchMetr*0.1
+;
+IF (grToCheckTol==0)
+  ;
+  ;nur einmalig vorbesetzen
+  ;------------------------
+  grToCheckTol=grInchMetr*1.0
+ENDIF
+;
+CFG_MAN("HSK",sResult)
+bTlIsHSK=(sResult<>"")
+;
+;WzBruch - BK9 Mikro
+;-------------------
+CFG_MAN("TL_BK9",sResult)
+IF (sResult<>"")
+  ;
+  ;grTOBREAKPOSX_MSC   = Einbaulage X
+  ;grTOBREAKPOSZ_MSC   = Einbaulage Z
+  ;
+  ;Winkeloffset Bruchkontrolle:
+  ;grTOBREAKOFFSET_MSC = Wert
+  ;grOFFSETMIN_MSC     = Minimalwert
+  ;grOFFSETMAX_MSC     = Maximalwert
+  ;
+  ;grTOBREAKPREPOS_MSC = Winkelvorposition bei Teachen
+  ;
+  IF ISFILE("/_N_SPF_DIR/_N_BreakageMSC_SPF")
+    CALL "/_N_SPF_DIR/_N_BreakageMSC_SPF"
+  ELSE
+    grTOBREAKPOSX_MSC   = grInchMetr*1.0
+    grTOBREAKPOSZ_MSC   = grInchMetr*1.0
+    grTOBREAKOFFSET_MSC = 0
+  ENDIF
+  grTOBREAKPREPOS_MSC = 15
+  ;
+  ;grTOBREAKTOL_MSC = Toleranz in mm
+  ;je nach Nadellaenge etc.
+  ;---------------------------------
+  ;
+  grTOBREAKTOL_MSC=grInchMetr*0.0
+  grOFFSETMIN_MSC=0.0
+  grOFFSETMAX_MSC=0.0
+  ;
+  ;Hohe Ungenauigkeit -> Max. Wert
+  ;-------------------------------
+  rTmp=grMaxMeasTol
+  ;
+  IF (sMNType=="D")
+    ;
+    IF (sMCType=="NBH5")OR(sMCType=="NBH5S")
+      grTOBREAKTOL_MSC=grInchMetr*3.7
+      grOFFSETMIN_MSC=30
+      grOFFSETMAX_MSC=50
+    ELSE
+      ;
+      grTOBREAKTOL_MSC=grInchMetr*2.0
+      grOFFSETMIN_MSC=20
+      grOFFSETMAX_MSC=40
+    ENDIF
+  ENDIF
+  ;
+  IF (sMNType=="D60NC")OR(sMNType=="D120")OR(sMNType=="CH")
+    grTOBREAKTOL_MSC=grInchMetr*3.7
+    grOFFSETMIN_MSC=0
+    grOFFSETMAX_MSC=16
+  ENDIF
+  ;
+  IF (sMNType=="CH_WM307")
+    grTOBREAKTOL_MSC=grInchMetr*3.7
+    grOFFSETMIN_MSC=0
+    grOFFSETMAX_MSC=90
+  ENDIF
+  ;
+ELSE
+  ;
+  ;Nicht MSC -> geringere Abweichungen
+  ;-----------------------------------
+  rTmp=grInchMetr*5.0
+ENDIF
+;
+IF (grToMeasTol==0)
+  ;
+  ; nur einmalig vorbesetzen
+  ;-------------------------
+  grToMeasTol=rTmp
+ENDIF
+
+;Mittelgassen - Streubereich
+;nach rechts und links
+;---------------------------
+grRange=grInchMetr*1.0
+
+;Die Zeiten (ohne C) bestimmen die voreilende Funktion
+;beim WzW - sollten also nur den Zeitraum abbilden
+;in dem sich noch nichts bewegt.
+;(C) Schaltzeit + Bewegungszeit ohne Entprellzeit
+;
+;grHGClmpTime(C)    = Spannen [s]
+;grHGRedClmpTime(C) = Spannen [s] bei System
+;                     mit voreilendem Loesen
+;grHGUnClmpTime(C)  = Loesen  [s]
+;
+;giMagOffsetLoadPot = PlatzNr(Beladestelle_Magazin)
+;=(PlatzNr(Beladestelle_Spindel)+giMagOffsetLoadPot)
+;
+IF (sMNType=="CH")
+  ;
+  ;Geberinkremente XT-Achse
+  grHGPosX[1]=2200
+  grHGPosX[2]=5000
+  ;
+  grHGClmpTimeC=0.0
+  grHGUnClmpTimeC=0.0
+  grHGClmpTime=0.0
+  grHGUnClmpTime=0.0
+  ;
+  CFG_MAN("CH_PL",sResult)
+  IF (sResult=="60")
+    ;Miksch Kette 60 Plaetze
+    giMagOffsetLoadPot=36
+  ENDIF
+  IF (sResult=="90")
+    ;Miksch Kette 90 Plaetze
+    giMagOffsetLoadPot=66
+  ENDIF
+  ;
+  grPosLaneVT1=0
+  ;
+  RET
+ENDIF
+;
+IF (sMNType=="CH_WM307")
+  ;
+  giMagOffsetLoadPot=13
+  ;
+  grHGClmpTimeC=0.4
+  grHGUnClmpTimeC=0.44
+  grHGClmpTime=0.04
+  grHGUnClmpTime=0.04
+  ;
+  grPosLaneVT1=0
+  ;
+  RET
+ENDIF
+;
+IF (sMNType=="D")
+  ;
+  ;Scheibe
+  ;-------
+  ;
+  ;grDiskLoadMax     = max. zul. Beladung [kg]
+  ;grAsymDiskLoadMax = max. zul. einseitige Beladung [kg]
+  ;
+  grAsymDiskLoadMax=0.0
+  grDiskLoadMax=0.0
+  ;
+  grHGClmpTimeC=0.0
+  grHGUnClmpTimeC=0.0
+  grHGUnClmpTime=0.0
+  grHGClmpTime=0.0
+  ;
+  giMagOffsetLoadPot=20
+  ;
+  RET
+ENDIF
+;
+IF (sMNType=="D60NC")OR(sMNType=="D120")
+  ;
+  ;WKZ-Gewichts-Schwelle schnelles <-> langsames Fahren HG
+  grHeavyTlHG=12.0  ;[kg]
+  ;
+  grHGClmpTimeC=0.2
+  grHGUnClmpTimeC=0.2
+  grHGClmpTime=0.1
+  grHGUnClmpTime=0.1
+  ;
+  ;Gassen in X1-Richtung (aufsteigend nummeriert)
+  giNumLaneX=3  ;3 Gassen X
+  ;Gasse X1
+  grLaneX[1]=grHGPosX[1]
+  ;Gasse X2
+  grLaneX[2]=grHGPosX[4]
+  ;Gasse X3
+  grLaneX[3]=grHGPosX[7]
+  ;
+  grPosLaneVT1=grDiskPassage
+  grPosLaneVT2=grDiskPassage
+  ;
+  ;Positionen Handhabegeraet
+  grHgTcPrePosX=grHGPosX[2]+grCassCorrX[1]
+  IF (sMNType=="D120")
+    grHgLoadPosX=grHGPosX[7]
+  ELSE
+    grHgLoadPosX=grHGPosX[4]
+  ENDIF
+  ;
+  giMagLoadPlNo=0
+  ;
+  ;Index Durchfahrposition V-Achse
+  ;-------------------------------
+  giDiskPosPassage=31
+  ;
+  RET
+ENDIF
+;
+IF (sMNType=="CAS")
+  ;
+  ;WZ Spannen im HG
+  ;----------------
+  grHGClmpTimeC=0.2
+  grHGUnClmpTimeC=0.2
+  grHGClmpTime=0.1
+  grHGUnClmpTime=0.1
+  ;
+  ;WKZ-Gewichts-Schwelle schnelles <-> langsames Schwenken HG
+  grHeavyTlHG=12.0  ;[kg]
+  ;
+  ;additiver Ueberlauf fuer grToBreakPosZ
+  grToBreakOverrunZ=grInchMetr*1.0
+  ;Toleranzgrenze um den Sollwert
+  grToBreakTol=grInchMetr*1.0
+  ;
+  ;Lage der Gassen
+  FOR iCount=1 TO 8
+    grLaneX[iCount]=grLaneXFromTM[iCount]+grLaneCorrX[iCount]
+  ENDFOR
+  ;
+  FOR iCount=1 TO 6
+    grLaneZ[iCount]=grLaneZFromTM[iCount]+grLaneCorrZ[iCount]
+  ENDFOR
+  ;
+  ;Vorposition HG Z
+  grHgTcPrePosZ=grHgTcPosZ
+  ;
+  ;BALLUFF-Schreib-/Lesestation Station im HG
+  ;------------------------------------------
+  ;
+  ;giOptCodeCarrier:
+  ;-----------------
+  ;.0 =1: Vor dem Beschreiben des Chips Zielplatzkennung $TC_TPC9 löschen
+  ;.1 =0: ToPrep/ToBreak: Wz-Holen ohne Vergleich Chipdaten <-> Daten aktuelles Wz.
+  ;   =0: ToTrans: Falls Chip-Beschreiben ohne Vergleich Chipdaten <-> Daten aktuelles Wz.
+  ;   =1: ToPrep/ToBreak: Wz-Holen mit(!) Vergleich Chipdaten <-> Daten aktuelles Wz.
+  ;   =1: ToTrans: Falls Chip-Beschreiben vorher Vergleich Chipdaten <-> Daten aktuelles Wz.
+  ;.2 =0: MovTool:         nur Schreiben beim Ablegen ins Entlademagazin/Schublade
+  ;   =1: MovTool/ToBreak: Schreiben beim Ablegen ins Magazin, sofern Ablegen im Rahmen von WzW oder Bohrerbruchkontrolle
+  ;.3 =1: RWChip: Beim Schreiben/Vergleichen warten (Einlesesperre) bis Vorgang beendet
+  ;.4 =0: frei (16)
+  ;.5 =1: keine Vorprüfung beim Entladen oder Prepare (Vergleich der Wz-Daten über die bereitgestellten 30 Bytes von Balluff)
+  ;.6 =1: ??? (MovBlock): Werkz. beladen nur mit Balluff
+  ;.7 =1: ??? (MovBlock): gesperrte Werkz. nicht beladen 
+  ;
+  IF (gbMagWithFixedGuide)
+    ;
+    ;Altes Magazin
+    ;-------------
+    ;
+    giOptCodeCarrier='B111'
+    ;
+    ;WzWPosition HG
+    grHgTcPosX=grLaneX[1]
+    ;Vorposition HG
+    grHgTcPrePosX=grHGFreeGuideX
+    ;
+    ;Kollisionslaengen
+    grMaxColLenZDoor=grInchMetr*250.0
+    grMaxColLenZCover=grInchMetr*650.0
+    ;
+    ;maximale Werkzeuggroesse fuer Schublade
+    grMaxColLenDrawer=grInchMetr*500.0
+    grMaxColRadDrawer=grInchMetr*107.5
+    ;
+    ;kritische Werkzeugbreite/Laenge fuer geschwenktes Fahren ueber Gassen
+    grBigTlSizeHG=grInchMetr*125.0
+    grBigTlLenHG=grInchMetr*0.0
+    ;
+    ; Wz mit ColRX>grLimitTlColRX
+    ; (z.B. aus 32-/40-er Cassette) passen
+    ; an 47-/48-/50-er Cassette nicht vorbei
+    ; -> nur hochgeschwenkt in WzW-Punkt fahren
+    grLimitTlColRX=grInchMetr*162.5
+    ;
+    ;Schwelle Wz-Koll.-Radius Y (Z) fuer schraeges Ueberfahren des Magazines bei horizonal geschwenktem HG
+    grLimitTlColRYZ=grInchMetr*125.0
+    ;
+    ;Schwelle Wz-Koll.-Laenge fuer schraeges Ueberfahren des Magazines bei horizonal geschwenktem HG
+    grLimitTlColLen=grInchMetr*500.0
+    IF (bTlIsHSK)
+      grLimitTlColLen=grLimitTlColLen+grInchMetr*10.0
+    ENDIF
+    ;
+    ; WKZ-Gewichts-Schwelle[kg]
+    ; schnelles <-> langsames Schwenken HG
+    grHeavyTlHG=12.0
+    ;
+    ;max. Schwenk-Radius des HG (86 mm HG + Wz max. Koll.-Laenge + Reserve)
+    grHgMaxSwingRad=grInchMetr*750.0
+    ;
+    ; Falls HG-Pos > grHgMaxSwingPosZ:
+    ; kein Schwenken erlaubt (Kollision mit Magazinverkleidung)
+    ; max. Z1 minus / max. Hg-Schwenkradius
+    grHgMaxSwingPosZ=$MA_POS_LIMIT_PLUS[AX10]-grHgMaxSwingRad
+    ;
+    ; Fuer in X uebergrosse Wz (Dx>325mm):
+    ; Grenze zwischen 28-/32-er und angrenzender
+    ; 48-/50-er Cassette, bei der Schwenken nicht
+    ; mehr erlaubt ist.
+    ; =(Z-Koordinate Cass. 3,Pl.41)-(max.Wz-Radius)-
+    ; (Kollisionslaenge uebergrosses Wz)-(86mm HG-Laenge)
+    grHgMaxSwingPosZBigX=2290.0-126/2-400-86
+    ;
+    GOTOF ENDE
+  ENDIF
+  ;
+  ;Neues Magazin
+  ;-------------
+  ;
+  giOptCodeCarrier='B11000011'
+  ;
+  ;Vorposition HG X
+  grHgTcPrePosX=grLaneX[1]
+  ;
+  ; Kollisionslaengen
+  grMaxColLenZDoor=grInchMetr*300.0
+  grMaxColLenZCover=grInchMetr*600.0
+  ;
+  ;maximale Werkzeuggroesse fuer Schublade
+  grMaxColLenDrawer=grInchMetr*800.0
+  grMaxColRadDrawer=grInchMetr*300.0
+  
+  ;Wz mit ColRX>grLimitTlColRX
+  ;(z.B. aus 32-/40-er Cassette) passen
+  ;an 47-/48-/50-er Cassette nicht vorbei
+  ;-> nur hochgeschwenkt in WzW-Punkt fahren
+  ;-----------------------------------------
+  grLimitTlColRX=grInchMetr*162.5
+  ;Schwelle Wz-Koll.-Radius Y (Z) fuer schraeges
+  ;Ueberfahren des Magazines bei horizonal geschwenktem HG
+  grLimitTlColRYZ=grInchMetr*125.0
+
+  ;Schwelle Wz-Koll.-Laenge fuer schraeges Ueberfahren
+  ;des Magazines bei horizonal geschwenktem HG
+  grLimitTlColLen=grInchMetr*500.0
+  IF (bTlIsHSK)
+    grLimitTlColLen=grLimitTlColLen+grInchMetr*10.0
+  ENDIF
+
+  ; WKZ-Gewichts-Schwelle[kg]
+  ; schnelles <-> langsames Schwenken HG
+  grHeavyTlHG=12.0
+
+  ;max. Schwenk-Radius des HG (86 mm HG + Wz max. Koll.-Laenge + Reserve)
+  grHgMaxSwingRad=grInchMetr*900.0
+  ;
+  ; Falls HG-Pos > grHgMaxSwingPosZ:
+  ; kein Schwenken erlaubt (Kollision mit Magazinverkleidung)
+  ; max. Z1 minus / max. Hg-Schwenkradius (AX10 weil aus Kanal2)
+  grHgMaxSwingPosZ=$MA_POS_LIMIT_PLUS[AX10]-grHgMaxSwingRad
+  ;
+  ; Fuer in X uebergrosse Wz (Dx>325mm):
+  ; Grenze zwischen 28-/32-er und angrenzender
+  ; 48-/50-er Cassette, bei der Schwenken nicht
+  ; mehr erlaubt ist.
+  ; =(Z-Koordinate Cass. 3,Pl.41)-(max.Wz-Radius)-
+  ; (Kollisionslaenge uebergrosses Wz)-(86mm HG-Laenge)
+  grHgMaxSwingPosZBigX=2290.0-126/2-400-86
+  ;
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET
+

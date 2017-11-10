@@ -1,0 +1,77 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     SET_XYZB.SPF
+;# Task:      Preset of axis position
+;# Version:   V06.00.01
+;# Date:      30.08.2015  /  Simons
+;# Control:   840DSL Operate
+;# TM:        All
+;# NBHSeries: 5 - 1000
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;
+;----------------------------------------
+; Beschreibung:
+;
+; Istwerte X/Y/Z/B
+; - staendig Lesen
+; - Setzen der zuletzt gelesenen
+;   Werte im Hochlauf
+;
+; Vorraussetzung:
+; Gebertyp = Rohsignalgeber (nicht abs.)
+;
+; Aufgerufen im NC_INIT1.SPF
+;
+;---------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.01 - 30.08.2015 / Simons
+; - mcSYG_XYZ
+;
+; V06.00.00 - 28.06.2015 / Simons
+; - $A_PARAM[40..43] -> SYG_RM[30..33]
+; - Prototyp
+;
+; V04.00.01 - 09.05.2014 / Fengler
+; - Vorlage
+;---------------------------------------
+
+DEF STRING[32] sCycName="SET_XYZB V06.00.01", sResult
+;
+DEF INT iSYG
+
+iSYG=mcSYG_XYZ
+;
+CFG_MAN("SAVEPOS",sResult)
+IF (sResult=="")
+  SYG_RM[iSYG]=0 SYG_RM[iSYG+1]=0 SYG_RM[iSYG+2]=0 SYG_RM[iSYG+3]=0
+  RET
+ENDIF
+;
+CANCEL(200)
+;
+IF $MA_ENC_TYPE[0,AX1]==1
+  PRESETON(AX1,SYG_RM[iSYG])
+ENDIF
+IF $MA_ENC_TYPE[0,AX2]==1
+  PRESETON(AX2,SYG_RM[iSYG+1])
+ENDIF
+IF $MA_ENC_TYPE[0,AX3]==1
+  PRESETON(AX3,SYG_RM[iSYG+2])
+ENDIF
+IF $MA_ENC_TYPE[0,mcAxB]==1
+  PRESETON(mcAxB,SYG_RM[iSYG+3])
+ENDIF
+
+;Achsistwerte sichern
+;--------------------
+IDS=200 DO SYG_RM[iSYG]=$AA_IM[AX1] SYG_RM[iSYG+1]=$AA_IM[AX2] SYG_RM[iSYG+2]=$AA_IM[AX3] SYG_RM[iSYG+3]=$AA_IM[mcAxB]
+
+IF (SYG_RM[iSYG+1]<>0)AND(SYG_RM[iSYG+3]<>0)
+  M105 ;Istwerte gesetzt
+ENDIF
+
+RET
+

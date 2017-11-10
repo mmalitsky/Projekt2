@@ -1,0 +1,102 @@
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;# Cycle:     LC_Init.SPF
+;# Task:      LoadCase Ueberwachung
+;# Version:   V06.00.07
+;# Date:      04.06.2017 / Simons
+;# Control:   840DSL Operate
+;# TM:        Siemens
+;# NBHSeries: 5-1200
+;# Magazines: All
+;# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+;#
+;------------------------------------
+;
+; Verlauf:
+; --------
+;
+; V06.00.07 - 04.06.2017 / Simons
+; - Neuversionierung
+; - formale Aenderungen
+;
+; V06.00.05 - 23.10.2016 / Simons
+; - Neuversionierung
+; - LC_VAL.SPF -> CMA.DIR
+;
+; V01.06.01  - 28.11.2014 / Fengler
+; - Vorlage
+;
+;------------------------------------
+;
+;Überwachung der B-Achse mit Torque-Motor (LoadCase)
+;
+;Synchronaktionen einrichten (Adressen in MMAC.DEF)
+;
+;Parameterbeschreibung:
+;SYG_RM[iLoadCaseSYGR]=absoluter Drehmomentmaximalwert (LC_CALC)
+;SYG_RM[iLoadCaseSYGR+1]=Timer (LC_INIT)
+;SYG_RM[iLoadCaseSYGB]=Geschwindigkeit im erlaubten Bereich (LC_CALC)
+;
+;------------------------------------
+
+PROC LC_Init(VAR INT iLC_Error)
+
+DEF STRING[32] sCycName="LC_INIT V06.00.07"
+;
+DEF STRING[128] sLCValProgName="/_N_CMA_DIR/_N_LC_VAL_SPF" 
+;
+DEF INT iSynActNo, iSYGR
+;
+DEF REAL rIPO
+
+IF ($P_SIM)
+  RET
+ENDIF
+
+;-------------------------------------------
+;Aktivieren der Synchronaktionen für Kanal 1
+;-------------------------------------------
+
+iSYGR=(iLoadCaseSYGR+1) rIPO=$MN_IPO_CYCLE_TIME iSynActNo=SyncID_LoadCase iLC_Error=0
+
+;Tischspezifische Einstellungsdaten lesen
+IF ISFILE(sLCValProgName)
+  CALL sLCValProgName
+ELSE
+  iLC_Error=AL_LCValProgNotFound
+  GOTOF ENDE
+ENDIF
+
+IF (($ON_TECHNO_FUNCTION_MASK B_AND 'B10')<>0)
+  ;
+  ;Siemens-Option [Lesen von Antriebsgrößen] gesetzt
+  ;
+  ;Neuinitialisierung der Synchronaktionen
+  CANCEL(iSynActNo,iSynActNo+1,iSynActNo+2,iSynActNo+3,iSynActNo+4)
+  ;
+  IDS=iSynActNo WHENEVER (NOT mcbDBB_DrivesOK) DO LOCK(iSynActNo+2,iSynActNo+3,iSynActNo+4)
+  IDS=iSynActNo+1 WHENEVER (mcbDBB_DrivesOK) DO UNLOCK(iSynActNo+2,iSynActNo+3,iSynActNo+4)
+  ;
+  ;Einrichten der Überwachung für die 1. Achse
+  IF (gbLCCheckAxis)
+    ;
+    IF ($MA_DRIVE_SIGNAL_TRACKING[gaxLCAxName]<>1)
+      ;Option [Erfassung der Antriebsistwerte n-Achse] nicht freigeschaltet
+      iLC_Error=AL_LCReadAxisDataMissing
+      GOTOF ENDE
+    ENDIF
+    ;
+    ;Synchronaktionen einrichten
+    IDS=iSynActNo+2 EVERY ($AA_LOAD[gaxLCAxName]>grLCLoadLimit) DO SYG_RM[iSYGR]=(-1)*rIpo
+    IDS=iSynActNo+3 WHENEVER ($AA_LOAD[gaxLCAxName]>grLCLoadLimit) DO SYG_RM[iSYGR]=SYG_RM[iSYGR]+rIpo
+    IDS=iSynActNo+4 WHENEVER ($AC_STAT==2)AND(SYG_RM[iSYGR]>grLCLoadTimeLim) DO SETAL(AL_LCLoadLimit,AXSTRING(gaxLCAxName)) $AA_OVR[gaxLCAxName]=0 $AC_OVR=0 RDISABLE
+  ENDIF
+ELSE
+  ;
+  ;Bei fehlender Option werden Minimalwerte für B-Achse gesetzt. Keine Fehlergenerierung!
+ENDIF
+
+;====
+ENDE:
+;====
+;
+RET
